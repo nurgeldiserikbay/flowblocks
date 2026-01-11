@@ -1,0 +1,113 @@
+@use '@/assets/_common.scss';
+
+@font-face {
+	font-family: Inter;
+	src: url('./assets/fonts/Inter_18pt-Thin.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 200;
+}
+
+@font-face {
+	font-family: Inter;
+	src: url('./assets/fonts/Inter_18pt-Light.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 300;
+}
+
+@font-face {
+	font-family: Inter;
+	src: url('./assets/fonts/Inter_18pt-Regular.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 400;
+}
+
+@font-face {
+	font-family: Inter;
+	src: url('./assets/fonts/Inter_18pt-Medium.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 500;
+}
+
+@font-face {
+	font-family: Inter;
+	src: url('./assets/fonts/Inter_18pt-SemiBold.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 600;
+}
+
+@font-face {
+	font-family: Inter;
+	src: url('./assets/fonts/Inter_18pt-Bold.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 700;
+}
+
+@font-face {
+	font-family: Inter;
+	src: url('./assets/fonts/Inter_18pt-ExtraBold.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 800;
+}
+
+@font-face {
+	font-family: Inter;
+	src: url('./assets/fonts/Inter_18pt-Black.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 900;
+}
+
+body {
+	margin: 0;
+	overflow-y: auto;
+	font-family: Inter, sans-serif;
+	width: 100dvw;
+	height: 100dvh;
+	overflow: hidden;
+}
+
+i,
+span,
+a,
+button {
+	font-family: Inter, sans-serif;
+}
+
+#app {
+	position: relative;
+	width: 100%;
+	height: 100dvh;
+}
+
+.page {
+	width: 100%;
+	height: 100%;
+	box-sizing: border-box;
+	position: relative;
+	min-height: 100dvh;
+	max-height: 100dvh;
+	margin: 0 auto;
+	background: radial-gradient(
+			900px 480px at 50% 25%,
+			color-mix(in oklab, var(--glow) 35%, transparent),
+			rgba(0, 0, 0, 0.55)
+		),
+		radial-gradient(
+			1200px 800px at 50% 30%,
+			rgba(255, 255, 255, 0.06),
+			rgba(0, 0, 0, 0.55)
+		),
+		linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
+}
+
+::-webkit-scrollbar-track {
+	-webkit-box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.3);
+	background-color: transparent;
+}
+
+::-webkit-scrollbar {
+	display: none;
+}
+
+::-webkit-scrollbar-thumb {
+	background-color: #000000;
+}
