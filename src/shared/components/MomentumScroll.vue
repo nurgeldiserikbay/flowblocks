@@ -40,11 +40,11 @@ export interface MomentumScrollProps {
 const props = withDefaults(defineProps<MomentumScrollProps>(), {
 	dragMult: 1.25,
 	wheelMult: 1.4,
-	maxOverscroll: 40,
-	momentumResistance: 0.54,
-	springK: 90,
-	springDamping: 0.88,
-	stopVelocity: 8,
+	maxOverscroll: 60,
+	momentumResistance: 0.94, // ✅
+	springK: 1400, // ✅
+	springDamping: 0.9, // ✅
+	stopVelocity: 10,
 	snapDistance: 0.8,
 
 	clickThreshold: 10,
@@ -121,7 +121,7 @@ function onPointerDown(e: PointerEvent) {
 	if (!container || !scroller) return
 	if (e.button !== 0 && e.pointerType === 'mouse') return
 
-	// Если внутри canvas — не перехватываем (Pixi)
+	// Canvas не должен обрабатывать drag-скролл
 	const target = e.target as HTMLElement
 	if (target.tagName === 'CANVAS' || target.closest('canvas')) return
 

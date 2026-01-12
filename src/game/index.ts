@@ -116,15 +116,9 @@ export class GameControl {
 		x: number
 		y: number
 	} | null {
-		if (!this.container) return null
-
 		const canvasRect = this.canvas.getBoundingClientRect()
-		// Получить скролл из контейнера (теперь скролл управляется MomentumScroll)
-		const scrollY = this.container.scrollTop
-
-		// Учесть скролл контейнера
 		const x = clientX - canvasRect.left
-		const y = clientY - canvasRect.top + scrollY
+		const y = clientY - canvasRect.top
 
 		const gridX = Math.floor(x / this.tileSize)
 		const gridY = Math.floor(y / this.tileSize)
@@ -367,11 +361,9 @@ export class GameControl {
 	}
 
 	private renderDebugOverlay(): void {
-		const scrollY = this.container?.scrollTop ?? 0
-
 		// Полупрозрачный фон для текста
 		this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
-		this.ctx.fillRect(10, 10, 200, 60)
+		this.ctx.fillRect(10, 10, 200, 40)
 
 		// Текст
 		this.ctx.fillStyle = 'white'
@@ -379,8 +371,7 @@ export class GameControl {
 		this.ctx.textAlign = 'left'
 		this.ctx.textBaseline = 'top'
 
-		this.ctx.fillText(`scrollY: ${scrollY.toFixed(1)}px`, 15, 15)
-		this.ctx.fillText(`tileSize: ${this.tileSize.toFixed(1)}px`, 15, 35)
+		this.ctx.fillText(`tileSize: ${this.tileSize.toFixed(1)}px`, 15, 15)
 	}
 
 	start(): void {

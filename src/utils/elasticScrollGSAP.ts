@@ -1,27 +1,23 @@
 // src/utils/elasticScrollGSAP.ts
 
 export interface ElasticScrollOptions {
-	/** Скорость drag */
 	dragMult?: number
-	/** Скорость wheel */
 	wheelMult?: number
-	/** Максимальный визуальный overscroll */
 	maxOverscroll?: number
-	/** Инерция: ближе к 1 = дольше катится (0.90..0.98) */
+
+	/** 0.92..0.97 (per 60fps frame) */
 	momentumResistance?: number
-	/**
-	 * Сила пружины. Больше = быстрее возвращается.
-	 * В этой модели нормальные значения 50..140
-	 */
+
+	/** Сила пружины (чем больше — тем быстрее возврат). Рекомендую 800..2200 */
 	springK?: number
-	/**
-	 * Демпфирование пружины. 0..1
-	 * Больше = меньше колебаний. Нормально 0.80..0.92
-	 */
+
+	/** Демпфирование пружины (обычно 0.85..0.95) */
 	springDamping?: number
-	/** Остановка микродвижений */
+
+	/** Остановка микродвижений (px/sec) */
 	stopVelocity?: number
-	/** Снэп к границе, чтобы не дрожало */
+
+	/** Снэп к границе (px) */
 	snapDistance?: number
 }
 
@@ -31,7 +27,6 @@ export class ElasticScroll {
 	private el: HTMLElement
 
 	private opts: Required<ElasticScrollOptions>
-
 	private bounds: Bounds = { minY: 0, maxY: 0 }
 
 	// physics
@@ -39,13 +34,12 @@ export class ElasticScroll {
 	private v = 0 // px/sec
 
 	// render
-	private y = 0 // то, что показываем (rubber(rawY))
+	private y = 0
 
 	private isDragging = false
 
 	private rafId = 0
 	private lastT = 0
-
 	private lastDragT = 0
 
 	constructor(contentEl: HTMLElement, options: ElasticScrollOptions = {}) {
@@ -54,11 +48,16 @@ export class ElasticScroll {
 		this.opts = {
 			dragMult: options.dragMult ?? 1.25,
 			wheelMult: options.wheelMult ?? 1.4,
-			maxOverscroll: options.maxOverscroll ?? 40, // ✅ меньше по умолчанию
-			momentumResistance: options.momentumResistance ?? 0.54,
-			springK: options.springK ?? 90, // ✅ стабильный возврат
-			springDamping: options.springDamping ?? 0.88, // ✅ без колебаний
-			stopVelocity: options.stopVelocity ?? 8,
+			maxOverscroll: options.maxOverscroll ?? 60,
+
+			// ✅ важно: 0.54 — слишком мало. Должно быть около 0.92..0.97
+			momentumResistance: options.momentumResistance ?? 0.94,
+
+			// ✅ стабильный возврат
+			springK: options.springK ?? 1400,
+			springDamping: options.springDamping ?? 0.9,
+
+			stopVelocity: options.stopVelocity ?? 10,
 			snapDistance: options.snapDistance ?? 0.8,
 		}
 
@@ -75,10 +74,8 @@ export class ElasticScroll {
 		this.bounds.minY = minY
 		this.bounds.maxY = Math.max(minY, maxY)
 
-		// Если контент/вьюпорт изменился — подтягиваем к допустимому диапазону
 		if (!this.isDragging) {
-			const clamped = this.clamp(this.rawY)
-			this.rawY = clamped
+			this.rawY = this.clamp(this.rawY)
 			this.v = 0
 		}
 
@@ -92,8 +89,8 @@ export class ElasticScroll {
 
 	setY(y: number) {
 		this.rawY = y
-		this.y = this.renderY(this.rawY)
 		this.v = 0
+		this.y = this.renderY(this.rawY)
 		this.applyTransform(this.y)
 	}
 
@@ -104,31 +101,26 @@ export class ElasticScroll {
 	}
 
 	onDrag(deltaY: number, now = performance.now()) {
-		// deltaY: positive => scroll down
 		const dy = deltaY * this.opts.dragMult
 
 		const dt = Math.max(0.001, (now - this.lastDragT) / 1000)
 		this.lastDragT = now
 
-		// physics
 		this.rawY += dy
 
 		// velocity estimate (smoothed)
 		const instantV = dy / dt
 		this.v = this.lerp(this.v, instantV, 0.25)
 
-		// render
 		this.y = this.renderY(this.rawY)
 		this.applyTransform(this.y)
 	}
 
 	onDragEnd() {
 		this.isDragging = false
-		// не обнуляем v — нужен momentum
 	}
 
 	onWheel(deltaY: number, deltaMode: number, viewportHeight: number) {
-		// normalize wheel delta to pixels
 		let px = deltaY
 		if (deltaMode === 1) px *= 16
 		if (deltaMode === 2) px *= viewportHeight
@@ -140,7 +132,7 @@ export class ElasticScroll {
 
 		this.rawY += dy
 
-		// wheel тоже даёт импульс инерции (умеренный)
+		// умеренный импульс от wheel
 		const instantV = dy / dt
 		this.v = this.lerp(this.v, instantV, 0.18)
 
@@ -148,9 +140,6 @@ export class ElasticScroll {
 		this.applyTransform(this.y)
 	}
 
-	// ------------------------
-	// Loop / physics
-	// ------------------------
 	private startLoop() {
 		this.lastT = performance.now()
 		const tick = (t: number) => {
@@ -158,7 +147,6 @@ export class ElasticScroll {
 			this.lastT = t
 
 			this.update(dt)
-
 			this.rafId = requestAnimationFrame(tick)
 		}
 		this.rafId = requestAnimationFrame(tick)
@@ -167,40 +155,38 @@ export class ElasticScroll {
 	private update(dt: number) {
 		if (this.isDragging) return
 
-		// friction
-		const f = Math.pow(this.opts.momentumResistance, dt * 30)
-		this.v *= f
-		if (Math.abs(this.v) < this.opts.stopVelocity) this.v = 0
-
-		// integrate
-		if (this.v !== 0) {
-			this.rawY += this.v * dt
-		}
-
-		// spring back if outside bounds
 		const { minY, maxY } = this.bounds
 		const outside = this.rawY < minY || this.rawY > maxY
 
 		if (outside) {
+			// ✅ ВНЕ ГРАНИЦ: spring-damper без friction/stopVelocity
 			const target = this.clamp(this.rawY)
 
-			// spring acceleration toward target
-			const a = (target - this.rawY) * this.opts.springK
+			// критически демпфированная модель:
+			// a = k*(target - rawY) - c*v
+			const k = this.opts.springK
+			const c = 2 * Math.sqrt(k) * this.opts.springDamping
 
-			// integrate velocity
+			const a = k * (target - this.rawY) - c * this.v
+
 			this.v += a * dt
+			this.rawY += this.v * dt
 
-			// damping (prevents oscillation)
-			this.v *= this.opts.springDamping
-
-			// snap to finish (prevents "not returning")
+			// snap чтобы никогда не "залипало"
 			if (
 				Math.abs(target - this.rawY) < this.opts.snapDistance &&
-				Math.abs(this.v) < 12
+				Math.abs(this.v) < 20
 			) {
 				this.rawY = target
 				this.v = 0
 			}
+		} else {
+			// ✅ ВНУТРИ ГРАНИЦ: обычный momentum + friction
+			const f = Math.pow(this.opts.momentumResistance, dt * 60)
+			this.v *= f
+
+			if (Math.abs(this.v) < this.opts.stopVelocity) this.v = 0
+			if (this.v !== 0) this.rawY += this.v * dt
 		}
 
 		const newY = this.renderY(this.rawY)
@@ -210,9 +196,6 @@ export class ElasticScroll {
 		}
 	}
 
-	// ------------------------
-	// Render mapping (rubber band)
-	// ------------------------
 	private renderY(raw: number) {
 		const { minY, maxY } = this.bounds
 
@@ -228,7 +211,6 @@ export class ElasticScroll {
 	}
 
 	private rubber(d: number) {
-		// saturation curve: limited by maxOverscroll, smooth near 0
 		const m = this.opts.maxOverscroll
 		return (m * d) / (m + d)
 	}
@@ -238,7 +220,6 @@ export class ElasticScroll {
 	}
 
 	private applyTransform(y: number) {
-		// y is scrollTop-like, move content up
 		this.el.style.transform = `translate3d(0, ${-y}px, 0)`
 	}
 

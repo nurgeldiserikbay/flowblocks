@@ -13,11 +13,20 @@
 				:wheel-mult="2.2"
 				:max-overscroll="80"
 				:momentum-resistance="0.9"
-				:spring-strength="1.5"
-				:spring-duration="0.6"
+				:spring-k="90"
+				:spring-damping="0.88"
 				class="game-page__scroll-container"
 			>
 				<div class="game-page__canvas-container">
+					<!-- <div
+						style="
+							height: 5000px;
+							background: linear-gradient(to bottom, #000000, #ffffff);
+							border: 5px solid red;
+						"
+					>
+						Hello
+					</div> -->
 					<canvas ref="canvas" class="game-canvas"></canvas>
 				</div>
 			</MomentumScroll>
@@ -307,6 +316,7 @@ function handleExit() {
 		align-items: flex-start;
 		justify-content: center;
 		width: 100%;
+		pointer-events: auto;
 	}
 }
 
