@@ -8,9 +8,19 @@
 		</template>
 
 		<div class="game-page">
-			<div class="game-page__canvas-container">
-				<canvas ref="canvas" class="game-canvas"></canvas>
-			</div>
+			<MomentumScroll
+				:drag-mult="1.55"
+				:wheel-mult="2.2"
+				:max-overscroll="80"
+				:momentum-resistance="0.9"
+				:spring-strength="1.5"
+				:spring-duration="0.6"
+				class="game-page__scroll-container"
+			>
+				<div class="game-page__canvas-container">
+					<canvas ref="canvas" class="game-canvas"></canvas>
+				</div>
+			</MomentumScroll>
 
 			<button class="btn btn--back btn--game" @click="showExitDialog">
 				← Exit
@@ -33,6 +43,7 @@ import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/shared/components/AppLayout.vue'
 import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
+import MomentumScroll from '@/shared/components/MomentumScroll.vue'
 import { GameControl } from '@/game'
 import { useAudio } from '@/composables/useAudio'
 import { createGame } from '@/features/game/core/game'
@@ -128,8 +139,8 @@ onMounted(() => {
 		elapsedSeconds.value++
 	}, 1000)
 
-	// Initialize canvas size
-	const initCanvas = () => {
+	// Initialize canvas size based on game grid
+	const initCanvas = (gameConfig: GameConfig) => {
 		if (!canvas.value) return
 
 		const container = canvas.value.parentElement
@@ -137,21 +148,28 @@ onMounted(() => {
 
 		const containerRect = container.getBoundingClientRect()
 		const maxWidth = Math.min(containerRect.width - 32, 800)
-		const maxHeight = Math.min(containerRect.height - 32, 1200)
+
+		// Вычислить размер плитки на основе ширины
+		const tileSize = maxWidth / gameConfig.width
+
+		// Вычислить высоту canvas на основе высоты игрового поля
+		const canvasHeight = gameConfig.height * tileSize
 
 		canvas.value.width = maxWidth
-		canvas.value.height = maxHeight
+		canvas.value.height = canvasHeight
 	}
 
 	// Wait for next tick to ensure DOM is ready
 	setTimeout(() => {
 		if (canvas.value) {
-			initCanvas()
 			playAudio('start')
 
 			try {
 				// Создать конфигурацию игры
 				const gameConfig = createGameConfig()
+
+				// Инициализировать canvas с правильными размерами
+				initCanvas(gameConfig)
 
 				// Инициализировать игру
 				gameState = createGame(gameConfig)
@@ -161,6 +179,7 @@ onMounted(() => {
 
 				gameControl = new GameControl({
 					canvas: canvas.value,
+					gameState: gameState,
 					controls: {
 						gameStart: () => {
 							playAudio('again')
@@ -179,22 +198,38 @@ onMounted(() => {
 							handleExit()
 						},
 					},
+					onStateUpdate: (newState) => {
+						gameState = newState
+						score.value = newState.score
+					},
 				})
 
 				gameControl.start()
-				gameControl.adaptive()
 
 				// Handle resize
 				resizeHandler = () => {
-					initCanvas()
+					initCanvas(gameConfig)
 					gameControl?.adaptive()
+					// Обновить границы скролла после изменения размера
 				}
 				window.addEventListener('resize', resizeHandler, { passive: true })
 			} catch (error) {
 				console.error('Failed to initialize game:', error)
-				// Fallback: still create GameControl even if game init fails
+				// Fallback: create minimal game state for error case
+				const fallbackConfig: GameConfig = {
+					width: 8,
+					height: 16,
+					mode: 'endless',
+					difficulty: 'normal',
+					numColors: 6,
+				}
+				initCanvas(fallbackConfig)
+				const fallbackState = createGame(fallbackConfig)
+				gameState = fallbackState
+
 				gameControl = new GameControl({
 					canvas: canvas.value,
+					gameState: fallbackState,
 					controls: {
 						gameStart: () => {
 							playAudio('again')
@@ -204,9 +239,12 @@ onMounted(() => {
 							handleExit()
 						},
 					},
+					onStateUpdate: (newState) => {
+						gameState = newState
+						score.value = newState.score
+					},
 				})
 				gameControl.start()
-				gameControl.adaptive()
 			}
 		}
 	}, 100)
@@ -252,29 +290,23 @@ function handleExit() {
 	position: relative;
 	overflow: hidden;
 
-	&__canvas-container {
+	&__scroll-container {
 		flex: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
 		min-height: 400px;
-		max-height: calc(100dvh - 200px);
-		border-radius: 20px;
-		overflow: hidden;
 		backdrop-filter: blur(20px);
 		box-shadow: inset 0 4px 32px rgba(0, 0, 0, 0.5),
 			0 8px 32px rgba(0, 0, 0, 0.3);
 		border: 2px solid rgba(255, 255, 255, 0.3);
-		padding: 1rem;
 		position: relative;
 		z-index: 1;
+		flex-grow: 1;
+	}
 
-		@media (max-width: 640px) {
-			min-height: 300px;
-			max-height: calc(100dvh - 180px);
-			border-radius: 16px;
-			padding: 0.75rem;
-		}
+	&__canvas-container {
+		display: flex;
+		align-items: flex-start;
+		justify-content: center;
+		width: 100%;
 	}
 }
 
@@ -308,20 +340,13 @@ function handleExit() {
 
 .game-canvas {
 	width: 100%;
-	height: 100%;
+	height: auto;
 	max-width: 100%;
-	max-height: 100%;
 	display: block;
 	background: rgba(0, 0, 0, 0.3);
-	border-radius: 16px;
 	image-rendering: pixelated;
 	image-rendering: -moz-crisp-edges;
 	image-rendering: crisp-edges;
-	touch-action: none;
-
-	@media (max-width: 640px) {
-		border-radius: 12px;
-	}
 }
 
 .btn--back {
