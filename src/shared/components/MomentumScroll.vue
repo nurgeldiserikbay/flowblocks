@@ -92,7 +92,6 @@ let isPointerDown = false
 let pointerId: number | null = null
 let pointerStartY = 0
 let pointerLastY = 0
-let pointerStartScroll = 0
 
 let pressTimer: number | null = null
 let dragActivated = false
@@ -164,17 +163,12 @@ function onPointerDown(e: PointerEvent) {
 	if (!container || !scroller) return
 	if (e.button !== 0 && e.pointerType === 'mouse') return
 
-	// Canvas не должен обрабатывать drag-скролл
-	const target = e.target as HTMLElement
-	if (target.tagName === 'CANVAS' || target.closest('canvas')) return
-
 	container.setPointerCapture(e.pointerId)
 
 	isPointerDown = true
 	pointerId = e.pointerId
 	pointerStartY = e.clientY
 	pointerLastY = e.clientY
-	pointerStartScroll = scroller.getY()
 
 	dragActivated = false
 	isPressing.value = true
