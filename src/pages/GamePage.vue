@@ -172,7 +172,7 @@ onMounted(() => {
 	}
 
 	// Wait for next tick to ensure DOM is ready
-	setTimeout(() => {
+	setTimeout(async () => {
 		if (canvas.value) {
 			playAudio('start')
 
@@ -219,6 +219,7 @@ onMounted(() => {
 					},
 				})
 
+				await gameControl.init()
 				gameControl.start()
 
 				// Handle resize
@@ -262,6 +263,7 @@ onMounted(() => {
 						return momentumScrollRef.value?.getScrollTop() ?? 0
 					},
 				})
+				await gameControl.init()
 				gameControl.start()
 			}
 		}

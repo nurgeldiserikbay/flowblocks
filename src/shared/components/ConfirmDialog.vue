@@ -1,15 +1,25 @@
 <template>
 	<Teleport to="body">
 		<Transition name="dialog">
-			<div v-if="isOpen" class="confirm-dialog-overlay" @click.self="handleCancel">
+			<div
+				v-if="isOpen"
+				class="confirm-dialog-overlay"
+				@click.self="handleCancel"
+			>
 				<div class="confirm-dialog">
 					<div class="confirm-dialog__title">{{ title }}</div>
 					<div class="confirm-dialog__message">{{ message }}</div>
 					<div class="confirm-dialog__actions">
-						<button class="confirm-dialog__btn confirm-dialog__btn--cancel" @click="handleCancel">
+						<button
+							class="confirm-dialog__btn confirm-dialog__btn--cancel"
+							@click="handleCancel"
+						>
 							{{ cancelText }}
 						</button>
-						<button class="confirm-dialog__btn confirm-dialog__btn--confirm" @click="handleConfirm">
+						<button
+							class="confirm-dialog__btn confirm-dialog__btn--confirm"
+							@click="handleConfirm"
+						>
 							{{ confirmText }}
 						</button>
 					</div>

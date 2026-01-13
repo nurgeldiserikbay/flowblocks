@@ -18,12 +18,16 @@
 									levelConfig.level
 								),
 							}"
-							:disabled="!progressStore.isLevelUnlocked(difficulty, levelConfig.level)"
+							:disabled="
+								!progressStore.isLevelUnlocked(difficulty, levelConfig.level)
+							"
 							@click="startLevel(levelConfig.level)"
 						>
 							<span class="level-card__tiles">{{ levelConfig.tiles }}</span>
 							<span
-								v-if="!progressStore.isLevelUnlocked(difficulty, levelConfig.level)"
+								v-if="
+									!progressStore.isLevelUnlocked(difficulty, levelConfig.level)
+								"
 								class="level-card__lock"
 							>
 								🔒

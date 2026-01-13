@@ -22,18 +22,22 @@ function preloadAudio(audioType: string) {
 	if (!audioList[audioType] || audioPool[audioType]) return
 
 	audioPool[audioType] = []
-	
+
 	// Создаем несколько копий для возможности одновременного воспроизведения
 	for (let i = 0; i < maxPoolSize; i++) {
 		const audio = new Audio(audioList[audioType])
 		audio.preload = 'auto'
 		audio.volume = 1
-		
+
 		// Обработка ошибок загрузки
-		audio.addEventListener('error', () => {
-			console.warn(`Failed to load audio: ${audioType}`)
-		}, { once: true })
-		
+		audio.addEventListener(
+			'error',
+			() => {
+				console.warn(`Failed to load audio: ${audioType}`)
+			},
+			{ once: true }
+		)
+
 		audioPool[audioType].push(audio)
 	}
 }
@@ -53,12 +57,12 @@ export const useAudio = () => {
 			let audio = audioPool[audioType].find(
 				(a) => a.paused || a.ended || a.currentTime === 0
 			)
-			
+
 			// Если все заняты, используем первый (перезапишем)
 			if (!audio) {
 				audio = audioPool[audioType][0]
 			}
-			
+
 			// Сбрасываем и воспроизводим
 			if (audio) {
 				audio.currentTime = 0
@@ -81,7 +85,7 @@ export const useAudio = () => {
 
 	function toggleAudio() {
 		audioActive.value = !audioActive.value
-		
+
 		// Обновляем громкость всех аудио в пуле
 		Object.values(audioPool).forEach((pool) => {
 			pool.forEach((audio) => {
