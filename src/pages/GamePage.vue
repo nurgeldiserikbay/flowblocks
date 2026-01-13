@@ -9,6 +9,7 @@
 
 		<div class="game-page">
 			<MomentumScroll
+				ref="momentumScrollRef"
 				:drag-mult="1.55"
 				:wheel-mult="2.2"
 				:max-overscroll="80"
@@ -75,6 +76,8 @@ const level = route.query.level
 const difficulty = (route.query.difficulty as Difficulty) || 'normal'
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
+const momentumScrollRef =
+	useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
 let gameControl: InstanceType<typeof GameControl> | null = null
 let resizeHandler: (() => void) | null = null
 let gameState: GameState | null = null
@@ -211,6 +214,9 @@ onMounted(() => {
 						gameState = newState
 						score.value = newState.score
 					},
+					getScrollOffset: () => {
+						return momentumScrollRef.value?.getScrollTop() ?? 0
+					},
 				})
 
 				gameControl.start()
@@ -251,6 +257,9 @@ onMounted(() => {
 					onStateUpdate: (newState) => {
 						gameState = newState
 						score.value = newState.score
+					},
+					getScrollOffset: () => {
+						return momentumScrollRef.value?.getScrollTop() ?? 0
 					},
 				})
 				gameControl.start()
@@ -316,7 +325,6 @@ function handleExit() {
 		align-items: flex-start;
 		justify-content: center;
 		width: 100%;
-		pointer-events: auto;
 	}
 }
 

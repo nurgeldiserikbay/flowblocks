@@ -19,6 +19,7 @@ export interface GameControlOptions {
 		end?: () => void
 	}
 	onStateUpdate?: (state: GameState) => void
+	getScrollOffset?: () => number
 }
 
 // Цвета для плиток (базовая палитра)
@@ -39,12 +40,12 @@ export class GameControl {
 	private gameState: GameState
 	private controls: GameControlOptions['controls']
 	private onStateUpdate?: (state: GameState) => void
+	private getScrollOffset?: () => number
 
 	// Рендеринг
 	private tileSize: number = 0
 	private container: HTMLElement | null = null
 	private animationFrameId: number | null = null
-	private lastUpdateTime: number = 0
 
 	// Взаимодействие
 	private selectedTile: { x: number; y: number } | null = null
@@ -66,6 +67,7 @@ export class GameControl {
 		this.gameState = options.gameState
 		this.controls = options.controls
 		this.onStateUpdate = options.onStateUpdate
+		this.getScrollOffset = options.getScrollOffset
 
 		this.container = this.canvas.parentElement
 		if (!this.container) {
@@ -79,7 +81,6 @@ export class GameControl {
 		this.setupEventListeners()
 		// Запустить анимационный цикл
 		this.startAnimationLoop()
-		this.lastUpdateTime = performance.now()
 	}
 
 	private calculateTileSize(): void {
@@ -89,14 +90,9 @@ export class GameControl {
 	}
 
 	private startAnimationLoop(): void {
-		const animate = (currentTime: number) => {
-			const dt = currentTime - this.lastUpdateTime
-			this.lastUpdateTime = currentTime
-
-			// Обновить render для debug overlay (и другие визуальные обновления)
-			if (this.showDebugOverlay) {
-				this.render()
-			}
+		const animate = () => {
+			// Всегда рендерим для отображения выделения и других визуальных эффектов
+			this.render()
 
 			this.animationFrameId = requestAnimationFrame(animate)
 		}
@@ -107,6 +103,11 @@ export class GameControl {
 		// Mouse events для кликов
 		this.canvas.addEventListener('click', this.handleClick.bind(this))
 		this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this))
+
+		// Touch events для мобильных устройств
+		this.canvas.addEventListener('touchend', this.handleTouchEnd.bind(this), {
+			passive: true,
+		})
 	}
 
 	private getTileAtPosition(
@@ -117,12 +118,19 @@ export class GameControl {
 		y: number
 	} | null {
 		const canvasRect = this.canvas.getBoundingClientRect()
+		// Получить scroll offset, если он доступен
+		const scrollOffset = this.getScrollOffset?.() ?? 0
+
 		const x = clientX - canvasRect.left
-		const y = clientY - canvasRect.top
+		// Учитываем scroll offset: когда контент скроллится через transform,
+		// getBoundingClientRect() уже учитывает transform, поэтому canvasRect.top
+		// показывает видимую позицию canvas. Чтобы получить координату относительно
+		// начала canvas (его логической позиции), нужно добавить scrollOffset
+		const y = clientY - canvasRect.top + scrollOffset
 
 		const gridX = Math.floor(x / this.tileSize)
 		const gridY = Math.floor(y / this.tileSize)
-
+		console.log('gridX', x, gridX, this.tileSize)
 		if (
 			gridX >= 0 &&
 			gridX < this.gameState.config.width &&
@@ -139,6 +147,20 @@ export class GameControl {
 		if (this.isProcessing || this.isAnimating) return
 
 		const tile = this.getTileAtPosition(e.clientX, e.clientY)
+
+		if (!tile) return
+
+		this.handleTileSelect(tile.x, tile.y)
+	}
+
+	private handleTouchEnd(e: TouchEvent): void {
+		if (this.isProcessing || this.isAnimating) return
+		if (e.touches.length > 0) return // Если еще есть активные касания, игнорируем
+
+		const touch = e.changedTouches[0]
+		if (!touch) return
+
+		const tile = this.getTileAtPosition(touch.clientX, touch.clientY)
 		if (!tile) return
 
 		this.handleTileSelect(tile.x, tile.y)
@@ -150,10 +172,20 @@ export class GameControl {
 
 	private handleTileSelect(x: number, y: number): void {
 		const tile = this.gameState.grid[x]?.[y]
-		if (!tile) return
+		if (!tile) {
+			// Клик вне блока - сброс выделения
+			if (this.selectedTile) {
+				this.selectedTile = null
+			}
+			return
+		}
 
 		// Если плитка заблокирована (moves === 0), нельзя начинать ход с неё
 		if (tile.moves === 0 && !this.selectedTile) {
+			// Сброс выделения при клике на заблокированную плитку
+			if (this.selectedTile) {
+				this.selectedTile = null
+			}
 			return
 		}
 
@@ -161,9 +193,14 @@ export class GameControl {
 			// Выбор первой плитки
 			if (tile.moves > 0) {
 				this.selectedTile = { x, y }
-				this.render()
 			}
 		} else {
+			// Если кликнули на ту же плитку - сброс выделения
+			if (this.selectedTile.x === x && this.selectedTile.y === y) {
+				this.selectedTile = null
+				return
+			}
+
 			// Выбор второй плитки для обмена
 			const fromX = this.selectedTile.x
 			const fromY = this.selectedTile.y
@@ -175,10 +212,15 @@ export class GameControl {
 
 			if (isAdjacent) {
 				this.performMove(fromX, fromY, x, y)
+				this.selectedTile = null
+			} else {
+				// Если кликнули на другую плитку (не соседнюю), выбираем новую
+				if (tile.moves > 0) {
+					this.selectedTile = { x, y }
+				} else {
+					this.selectedTile = null
+				}
 			}
-
-			this.selectedTile = null
-			this.render()
 		}
 	}
 
@@ -334,9 +376,24 @@ export class GameControl {
 					this.selectedTile.x === x &&
 					this.selectedTile.y === y
 				) {
-					this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
-					this.ctx.lineWidth = 3
+					// Полупрозрачный фон для выделения
+					this.ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'
+					this.ctx.fillRect(px, py, this.tileSize, this.tileSize)
+
+					// Яркая обводка для выделения
+					this.ctx.strokeStyle = 'rgba(255, 255, 255, 1)'
+					this.ctx.lineWidth = 4
 					this.ctx.strokeRect(px, py, this.tileSize, this.tileSize)
+
+					// Дополнительная внутренняя обводка для лучшей видимости
+					this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)'
+					this.ctx.lineWidth = 2
+					this.ctx.strokeRect(
+						px + 2,
+						py + 2,
+						this.tileSize - 4,
+						this.tileSize - 4
+					)
 				}
 
 				// Показать количество ходов
@@ -405,5 +462,6 @@ export class GameControl {
 			'mousemove',
 			this.handleMouseMove.bind(this)
 		)
+		this.canvas.removeEventListener('touchend', this.handleTouchEnd.bind(this))
 	}
 }
