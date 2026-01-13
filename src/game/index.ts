@@ -128,16 +128,24 @@ export class GameControl {
 		// Получить scroll offset, если он доступен
 		const scrollOffset = this.getScrollOffset?.() ?? 0
 
-		const x = clientX - canvasRect.left
+		// Получить координаты относительно canvas в CSS пикселях
+		const cssX = clientX - canvasRect.left
 		// Учитываем scroll offset: когда контент скроллится через transform,
 		// getBoundingClientRect() уже учитывает transform, поэтому canvasRect.top
 		// показывает видимую позицию canvas. Чтобы получить координату относительно
 		// начала canvas (его логической позиции), нужно добавить scrollOffset
-		const y = clientY - canvasRect.top + scrollOffset
+		const cssY = clientY - canvasRect.top + scrollOffset
+
+		// Преобразовать CSS координаты в координаты canvas (учесть масштаб)
+		// canvas.width и canvas.height - это внутренние размеры canvas в пикселях
+		// canvasRect.width и canvasRect.height - это отображаемый размер в CSS пикселях
+		const scaleX = this.canvas.width / canvasRect.width
+		const scaleY = this.canvas.height / canvasRect.height
+		const x = cssX * scaleX
+		const y = cssY * scaleY
 
 		const gridX = Math.floor(x / this.tileSize)
 		const gridY = Math.floor(y / this.tileSize)
-		console.log('gridX', x, gridX, this.tileSize)
 		if (
 			gridX >= 0 &&
 			gridX < this.gameState.config.width &&
