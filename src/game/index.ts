@@ -50,6 +50,8 @@ export class GameControl {
 	// Взаимодействие
 	private selectedTile: { x: number; y: number } | null = null
 	private isProcessing: boolean = false
+	private lastClickTime: number = 0
+	private lastClickTile: { x: number; y: number } | null = null
 
 	// Анимации
 	private isAnimating: boolean = false
@@ -104,6 +106,11 @@ export class GameControl {
 		this.canvas.addEventListener('click', this.handleClick.bind(this))
 		this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this))
 
+		// Pointer events для лучшей совместимости с MomentumScroll
+		this.canvas.addEventListener('pointerup', this.handlePointerUp.bind(this), {
+			passive: true,
+		})
+
 		// Touch events для мобильных устройств
 		this.canvas.addEventListener('touchend', this.handleTouchEnd.bind(this), {
 			passive: true,
@@ -150,6 +157,44 @@ export class GameControl {
 
 		if (!tile) return
 
+		// Защита от двойной обработки (click и pointerup могут сработать оба)
+		const now = Date.now()
+		if (
+			now - this.lastClickTime < 100 &&
+			this.lastClickTile &&
+			this.lastClickTile.x === tile.x &&
+			this.lastClickTile.y === tile.y
+		) {
+			return
+		}
+
+		this.lastClickTime = now
+		this.lastClickTile = tile
+		this.handleTileSelect(tile.x, tile.y)
+	}
+
+	private handlePointerUp(e: PointerEvent): void {
+		// Обрабатываем pointerup для случаев, когда click событие может быть заблокировано
+		if (this.isProcessing || this.isAnimating) return
+		if (e.button !== 0 && e.pointerType === 'mouse') return
+
+		const tile = this.getTileAtPosition(e.clientX, e.clientY)
+
+		if (!tile) return
+
+		// Защита от двойной обработки (click и pointerup могут сработать оба)
+		const now = Date.now()
+		if (
+			now - this.lastClickTime < 100 &&
+			this.lastClickTile &&
+			this.lastClickTile.x === tile.x &&
+			this.lastClickTile.y === tile.y
+		) {
+			return
+		}
+
+		this.lastClickTime = now
+		this.lastClickTile = tile
 		this.handleTileSelect(tile.x, tile.y)
 	}
 
@@ -461,6 +506,10 @@ export class GameControl {
 		this.canvas.removeEventListener(
 			'mousemove',
 			this.handleMouseMove.bind(this)
+		)
+		this.canvas.removeEventListener(
+			'pointerup',
+			this.handlePointerUp.bind(this)
 		)
 		this.canvas.removeEventListener('touchend', this.handleTouchEnd.bind(this))
 	}

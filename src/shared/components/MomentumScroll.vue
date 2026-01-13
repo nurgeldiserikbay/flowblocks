@@ -163,7 +163,19 @@ function onPointerDown(e: PointerEvent) {
 	if (!container || !scroller) return
 	if (e.button !== 0 && e.pointerType === 'mouse') return
 
-	container.setPointerCapture(e.pointerId)
+	// Проверяем, является ли целевой элемент интерактивным (canvas, button и т.д.)
+	const target = e.target as HTMLElement
+	const isInteractiveElement =
+		target.tagName === 'CANVAS' ||
+		target.tagName === 'BUTTON' ||
+		target.closest('button') !== null ||
+		target.closest('canvas') !== null
+
+	// Если это интерактивный элемент, не перехватываем событие сразу
+	// Будем перехватывать только если пользователь начнет скроллить
+	if (!isInteractiveElement) {
+		container.setPointerCapture(e.pointerId)
+	}
 
 	isPointerDown = true
 	pointerId = e.pointerId
@@ -182,6 +194,9 @@ function onPointerDown(e: PointerEvent) {
 function onPointerMove(e: PointerEvent) {
 	if (!scroller || !isPointerDown || pointerId !== e.pointerId) return
 
+	const container = containerRef.value
+	if (!container) return
+
 	const deltaY = pointerLastY - e.clientY
 	pointerLastY = e.clientY
 
@@ -191,6 +206,10 @@ function onPointerMove(e: PointerEvent) {
 	if (!dragActivated) {
 		// если сильно потащил — можно активировать раньше, чем pressDelay
 		if (moved > props.pressMoveTolerance) {
+			// Теперь перехватываем событие, если пользователь начал скроллить
+			if (!container.hasPointerCapture(e.pointerId)) {
+				container.setPointerCapture(e.pointerId)
+			}
 			activateDrag()
 		} else {
 			return
@@ -213,13 +232,16 @@ function onPointerUp(e: PointerEvent) {
 		container.releasePointerCapture(e.pointerId)
 	}
 
+	const moved = Math.abs(e.clientY - pointerStartY)
 	isPointerDown = false
 	pointerId = null
 
-	// Если drag так и не активировался — это клик
-	if (!dragActivated) {
+	// Если drag так и не активировался и движения не было — это клик
+	// Позволяем событию клика пройти дальше к интерактивным элементам
+	if (!dragActivated && moved <= props.clickThreshold) {
 		isPressing.value = false
 		emit('click', e)
+		// Не вызываем preventDefault, чтобы клик прошел к canvas
 		return
 	}
 
