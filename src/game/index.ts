@@ -304,6 +304,7 @@ export class GameControl {
 			// Клик вне блока - сброс выделения
 			if (this.selectedTile) {
 				this.selectedTile = null
+				this.render() // Обновить визуализацию
 			}
 			return
 		}
@@ -313,6 +314,7 @@ export class GameControl {
 			// Сброс выделения при клике на заблокированную плитку
 			if (this.selectedTile) {
 				this.selectedTile = null
+				this.render() // Обновить визуализацию
 			}
 			return
 		}
@@ -321,11 +323,13 @@ export class GameControl {
 			// Выбор первой плитки
 			if (tile.moves > 0) {
 				this.selectedTile = { x, y }
+				this.render() // Обновить визуализацию для показа выделения
 			}
 		} else {
 			// Если кликнули на ту же плитку - сброс выделения
 			if (this.selectedTile.x === x && this.selectedTile.y === y) {
 				this.selectedTile = null
+				this.render() // Обновить визуализацию
 				return
 			}
 
@@ -341,12 +345,15 @@ export class GameControl {
 			if (isAdjacent) {
 				this.performMove(fromX, fromY, x, y)
 				this.selectedTile = null
+				// render() будет вызван в performMove
 			} else {
 				// Если кликнули на другую плитку (не соседнюю), выбираем новую
 				if (tile.moves > 0) {
 					this.selectedTile = { x, y }
+					this.render() // Обновить визуализацию для показа нового выделения
 				} else {
 					this.selectedTile = null
+					this.render() // Обновить визуализацию
 				}
 			}
 		}
@@ -704,12 +711,16 @@ export class GameControl {
 		if (isSelected) {
 			if (!sprite.highlight) {
 				const highlight = new Graphics()
+				// Полупрозрачный белый фон для выделения
 				highlight.rect(0, 0, this.tileSize, this.tileSize)
 				highlight.fill({ color: 0xffffff, alpha: 0.3 })
-				highlight.stroke({ color: 0xffffff, width: 4 })
+				// Яркая белая обводка
+				highlight.stroke({ color: 0xffffff, width: 4, alpha: 1 })
+				// Дополнительная внутренняя обводка для лучшей видимости
 				highlight.rect(2, 2, this.tileSize - 4, this.tileSize - 4)
 				highlight.stroke({ color: 0x000000, width: 2, alpha: 0.5 })
 				sprite.highlight = highlight
+				// Добавить highlight поверх всех элементов
 				sprite.addChild(highlight)
 			}
 		} else {
