@@ -166,8 +166,22 @@ export class GameControl {
 			this.handleMouseMove.bind(this)
 		)
 		this.app.canvas.addEventListener(
+			'pointerdown',
+			this.handlePointerDown.bind(this),
+			{
+				passive: true,
+			}
+		)
+		this.app.canvas.addEventListener(
 			'pointerup',
 			this.handlePointerUp.bind(this),
+			{
+				passive: true,
+			}
+		)
+		this.app.canvas.addEventListener(
+			'touchstart',
+			this.handleTouchStart.bind(this),
 			{
 				passive: true,
 			}
@@ -257,6 +271,13 @@ export class GameControl {
 		this.handleTileSelect(tile.x, tile.y)
 	}
 
+	private handlePointerDown(e: PointerEvent): void {
+		// Предотвращаем всплытие события, чтобы MomentumScroll не перехватывал его
+		if (e.pointerType === 'touch') {
+			e.stopPropagation()
+		}
+	}
+
 	private handlePointerUp(e: PointerEvent): void {
 		// Обрабатываем pointerup для случаев, когда click событие может быть заблокировано
 		if (this.isProcessing || this.isAnimating) return
@@ -281,6 +302,11 @@ export class GameControl {
 		this.handleTileSelect(tile.x, tile.y)
 	}
 
+	private handleTouchStart(e: TouchEvent): void {
+		// Предотвращаем всплытие события, чтобы MomentumScroll не перехватывал его
+		e.stopPropagation()
+	}
+
 	private handleTouchEnd(e: TouchEvent): void {
 		if (this.isProcessing || this.isAnimating) return
 		if (e.touches.length > 0) return // Если еще есть активные касания, игнорируем
@@ -291,6 +317,19 @@ export class GameControl {
 		const tile = this.getTileAtPosition(touch.clientX, touch.clientY)
 		if (!tile) return
 
+		// Защита от двойной обработки (touchend и pointerup могут сработать оба)
+		const now = Date.now()
+		if (
+			now - this.lastClickTime < 100 &&
+			this.lastClickTile &&
+			this.lastClickTile.x === tile.x &&
+			this.lastClickTile.y === tile.y
+		) {
+			return
+		}
+
+		this.lastClickTime = now
+		this.lastClickTile = tile
 		this.handleTileSelect(tile.x, tile.y)
 	}
 

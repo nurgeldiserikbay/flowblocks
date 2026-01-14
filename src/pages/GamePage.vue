@@ -367,6 +367,8 @@ function handleExit() {
 	image-rendering: pixelated;
 	image-rendering: -moz-crisp-edges;
 	image-rendering: crisp-edges;
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
 }
 
 .btn--back {

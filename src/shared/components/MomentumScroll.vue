@@ -171,11 +171,14 @@ function onPointerDown(e: PointerEvent) {
 		target.closest('button') !== null ||
 		target.closest('canvas') !== null
 
-	// Если это интерактивный элемент, не перехватываем событие сразу
-	// Будем перехватывать только если пользователь начнет скроллить
-	if (!isInteractiveElement) {
-		container.setPointerCapture(e.pointerId)
+	// Если это интерактивный элемент, не перехватываем событие и не запускаем таймер
+	// Позволяем событиям проходить к элементу
+	if (isInteractiveElement) {
+		return
 	}
+
+	// Для неинтерактивных элементов перехватываем событие
+	container.setPointerCapture(e.pointerId)
 
 	isPointerDown = true
 	pointerId = e.pointerId
