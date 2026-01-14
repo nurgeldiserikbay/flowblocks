@@ -44,6 +44,17 @@
 				cancel-text="Cancel"
 				@confirm="handleExit"
 			/>
+
+			<GameResultModal
+				v-model="isResultModalOpen"
+				:is-victory="gameResult?.reason === 'cleared'"
+				:score="gameResult?.finalScore ?? 0"
+				:time-ms="gameResult?.stats.timeMs ?? 0"
+				:current-level="level"
+				:mode="mode"
+				@next-level="handleNextLevel"
+				@level-menu="handleLevelMenu"
+			/>
 		</div>
 	</AppLayout>
 </template>
@@ -53,6 +64,7 @@ import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/shared/components/AppLayout.vue'
 import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
+import GameResultModal from '@/shared/components/GameResultModal.vue'
 import MomentumScroll from '@/shared/components/MomentumScroll.vue'
 import { GameControl } from '@/game'
 import { useAudio } from '@/composables/useAudio'
@@ -64,10 +76,12 @@ import type {
 	GameMode,
 } from '@/features/game/core/types'
 import { getLevelConfig } from '@/entities/level/levelConfig'
+import { useProgressStore } from '@/shared/stores/progressStore'
 
 const route = useRoute()
 const router = useRouter()
 const { playAudio } = useAudio()
+const progressStore = useProgressStore()
 
 const mode = (route.query.mode as GameMode) || 'endless'
 const level = route.query.level
@@ -85,7 +99,17 @@ let gameState: GameState | null = null
 const score = ref(0)
 const elapsedSeconds = ref(0)
 const isExitDialogOpen = ref(false)
+const isResultModalOpen = ref(false)
+const gameResult = ref<{
+	reason: 'cleared' | 'no_moves'
+	finalScore: number
+	stats: {
+		timeMs: number
+		leftTiles: number
+	}
+} | null>(null)
 let timeInterval: number | null = null
+let gameStartTime: number = 0
 
 /**
  * Получить количество цветов на основе сложности
@@ -147,6 +171,7 @@ const formattedTime = computed(() => {
 
 onMounted(() => {
 	// Start time timer
+	gameStartTime = Date.now()
 	timeInterval = window.setInterval(() => {
 		elapsedSeconds.value++
 	}, 1000)
@@ -206,8 +231,15 @@ onMounted(() => {
 								score.value = gameState.score
 							}
 						},
-						end: () => {
-							handleExit()
+						end: (result) => {
+							// Остановить таймер
+							if (timeInterval) {
+								window.clearInterval(timeInterval)
+								timeInterval = null
+							}
+							// Сохранить результат и показать модалку
+							gameResult.value = result
+							isResultModalOpen.value = true
 						},
 					},
 					onStateUpdate: (newState) => {
@@ -251,8 +283,15 @@ onMounted(() => {
 							playAudio('again')
 						},
 						setScore: () => {},
-						end: () => {
-							handleExit()
+						end: (result) => {
+							// Остановить таймер
+							if (timeInterval) {
+								window.clearInterval(timeInterval)
+								timeInterval = null
+							}
+							// Сохранить результат и показать модалку
+							gameResult.value = result
+							isResultModalOpen.value = true
 						},
 					},
 					onStateUpdate: (newState) => {
@@ -292,6 +331,23 @@ function showExitDialog() {
 
 function handleExit() {
 	router.push('/')
+}
+
+function handleNextLevel() {
+	if (level !== undefined && level < 50) {
+		const nextLevel = level + 1
+		// Разблокировать следующий уровень при победе
+		if (gameResult.value?.reason === 'cleared') {
+			progressStore.unlockLevel(difficulty, nextLevel)
+		}
+		router.push(`/game?mode=level&level=${nextLevel}&difficulty=${difficulty}`)
+	} else {
+		handleLevelMenu()
+	}
+}
+
+function handleLevelMenu() {
+	router.push(`/levels?difficulty=${difficulty}`)
 }
 </script>
 

@@ -25,7 +25,14 @@ export interface GameControlOptions {
 			overlapArea?: number,
 			tileArea?: number
 		) => void
-		end?: () => void
+		end?: (result: {
+			reason: 'cleared' | 'no_moves'
+			finalScore: number
+			stats: {
+				timeMs: number
+				leftTiles: number
+			}
+		}) => void
 	}
 	onStateUpdate?: (state: GameState) => void
 	getScrollOffset?: () => number
@@ -429,10 +436,7 @@ export class GameControl {
 			// Обновить счет
 			this.updateScore()
 
-			// Проверить окончание игры
-			if (this.gameState.isEnded) {
-				this.controls.end?.()
-			}
+			// Проверить окончание игры (end action уже обработан в processActions)
 		} catch (error) {
 			console.error('Error performing move:', error)
 		} finally {
@@ -469,7 +473,12 @@ export class GameControl {
 					// Можно добавить визуальный эффект комбо
 					break
 				case 'end':
-					// Игра окончена
+					// Игра окончена - передать информацию о результате
+					this.controls.end?.({
+						reason: action.reason,
+						finalScore: action.finalScore,
+						stats: action.stats,
+					})
 					break
 			}
 		}
