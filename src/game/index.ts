@@ -2,18 +2,12 @@
  * GameControl - управление игрой и рендеринг на Pixi.js
  */
 
-import {
-	Application,
-	Graphics,
-	Container,
-	Text,
-	TextStyle,
-	Point,
-} from 'pixi.js'
+import { Application, Container, Text, TextStyle, Point } from 'pixi.js'
 import { gsap } from 'gsap'
 import type { GameState, GameAction } from '@/features/game/core/types'
 import { applyMove } from '@/features/game/core/game'
 import { countTiles } from '@/features/game/core/state'
+import { Block } from './Block'
 
 export interface GameControlOptions {
 	canvas: HTMLCanvasElement
@@ -38,28 +32,6 @@ export interface GameControlOptions {
 	getScrollOffset?: () => number
 }
 
-// Цвета для плиток (базовая палитра)
-const TILE_COLORS = [
-	'#FF6B6B', // Красный
-	'#4ECDC4', // Бирюзовый
-	'#45B7D1', // Голубой
-	'#FFA07A', // Лососевый
-	'#98D8C8', // Мятный
-	'#F7DC6F', // Желтый
-	'#BB8FCE', // Фиолетовый
-	'#85C1E2', // Светло-голубой
-]
-
-// Тип для спрайта плитки
-interface TileSprite extends Container {
-	tileId: number
-	gridX: number
-	gridY: number
-	background: Graphics
-	text: Text | null
-	highlight: Graphics | null
-}
-
 export class GameControl {
 	private canvas: HTMLCanvasElement
 	private app: Application | null = null
@@ -72,7 +44,7 @@ export class GameControl {
 	private tileSize: number = 0
 	private container: HTMLElement | null = null
 	private gameContainer: Container | null = null
-	private tileSprites: Map<number, TileSprite> = new Map() // Map<id, sprite>
+	private blocks: Map<number, Block> = new Map() // Map<id, block>
 	private debugText: Text | null = null
 
 	// Взаимодействие
@@ -489,23 +461,23 @@ export class GameControl {
 	private async animateSwap(
 		action: GameAction & { type: 'swap' }
 	): Promise<void> {
-		const spriteA = this.tileSprites.get(action.aId)
-		const spriteB = this.tileSprites.get(action.bId)
+		const blockA = this.blocks.get(action.aId)
+		const blockB = this.blocks.get(action.bId)
 
-		if (!spriteA || !spriteB) {
+		if (!blockA || !blockB) {
 			this.render()
 			return
 		}
 
 		// Анимация обмена с помощью GSAP
-		const fromAX = spriteA.x
-		const fromAY = spriteA.y
-		const fromBX = spriteB.x
-		const fromBY = spriteB.y
+		const fromAX = blockA.x
+		const fromAY = blockA.y
+		const fromBX = blockB.x
+		const fromBY = blockB.y
 
 		await Promise.all([
 			new Promise<void>((resolve) => {
-				gsap.to(spriteA, {
+				gsap.to(blockA, {
 					x: fromBX,
 					y: fromBY,
 					duration: 0.2,
@@ -514,7 +486,7 @@ export class GameControl {
 				})
 			}),
 			new Promise<void>((resolve) => {
-				gsap.to(spriteB, {
+				gsap.to(blockB, {
 					x: fromAX,
 					y: fromAY,
 					duration: 0.2,
@@ -524,11 +496,9 @@ export class GameControl {
 			}),
 		])
 
-		// Обновить позиции в спрайтах
-		spriteA.gridX = action.aTo.x
-		spriteA.gridY = action.aTo.y
-		spriteB.gridX = action.bTo.x
-		spriteB.gridY = action.bTo.y
+		// Обновить позиции в блоках
+		blockA.updatePosition(action.aTo.x, action.aTo.y)
+		blockB.updatePosition(action.bTo.x, action.bTo.y)
 
 		this.render()
 	}
@@ -536,21 +506,21 @@ export class GameControl {
 	private async animateRemove(
 		action: GameAction & { type: 'remove' }
 	): Promise<void> {
-		const sprites = action.ids
-			.map((id) => this.tileSprites.get(id))
-			.filter((s): s is TileSprite => s !== undefined)
+		const blocks = action.ids
+			.map((id) => this.blocks.get(id))
+			.filter((b): b is Block => b !== undefined)
 
-		if (sprites.length === 0) {
+		if (blocks.length === 0) {
 			this.render()
 			return
 		}
 
 		// Анимация удаления: масштабирование и исчезновение
 		await Promise.all(
-			sprites.map(
-				(sprite) =>
+			blocks.map(
+				(block) =>
 					new Promise<void>((resolve) => {
-						gsap.to(sprite, {
+						gsap.to(block, {
 							alpha: 0,
 							scale: 0,
 							duration: 0.15,
@@ -561,13 +531,13 @@ export class GameControl {
 			)
 		)
 
-		// Удалить спрайты
-		sprites.forEach((sprite) => {
-			this.tileSprites.delete(sprite.tileId)
-			if (sprite.parent) {
-				sprite.parent.removeChild(sprite)
+		// Удалить блоки
+		blocks.forEach((block) => {
+			this.blocks.delete(block.tileId)
+			if (block.parent) {
+				block.parent.removeChild(block)
 			}
-			sprite.destroy()
+			block.destroy()
 		})
 
 		this.render()
@@ -579,8 +549,8 @@ export class GameControl {
 		const animations: Promise<void>[] = []
 
 		for (const move of action.moves) {
-			const sprite = this.tileSprites.get(move.id)
-			if (!sprite) continue
+			const block = this.blocks.get(move.id)
+			if (!block) continue
 
 			const fromX = move.from.x * this.tileSize
 			const fromY = move.from.y * this.tileSize
@@ -588,20 +558,19 @@ export class GameControl {
 			const toY = move.to.y * this.tileSize
 
 			// Установить начальную позицию
-			sprite.x = fromX
-			sprite.y = fromY
+			block.x = fromX
+			block.y = fromY
 
 			// Анимация падения
 			animations.push(
 				new Promise<void>((resolve) => {
-					gsap.to(sprite, {
+					gsap.to(block, {
 						x: toX,
 						y: toY,
 						duration: 0.3,
 						ease: 'power2.out',
 						onComplete: () => {
-							sprite.gridX = move.to.x
-							sprite.gridY = move.to.y
+							block.updatePosition(move.to.x, move.to.y)
 							resolve()
 						},
 					})
@@ -619,22 +588,20 @@ export class GameControl {
 		const animations: Promise<void>[] = []
 
 		for (const item of action.items) {
-			const sprite = this.createTileSprite(
-				item.id,
-				item.to.x,
-				item.to.y,
-				item.color,
-				item.moves
-			)
+			const block = this.createBlock(item.id, item.to.x, item.to.y, {
+				id: item.id,
+				color: item.color,
+				moves: item.moves,
+			})
 
 			// Начальное состояние: невидимый и маленький
-			sprite.alpha = 0
-			sprite.scale.set(0)
+			block.alpha = 0
+			block.scale.set(0)
 
 			// Анимация появления
 			animations.push(
 				new Promise<void>((resolve) => {
-					gsap.to(sprite, {
+					gsap.to(block, {
 						alpha: 1,
 						scale: 1,
 						duration: 0.15,
@@ -654,130 +621,28 @@ export class GameControl {
 		this.controls.setScore?.(tilesCount, 0, 0)
 	}
 
-	private createTileSprite(
+	private createBlock(
 		id: number,
 		x: number,
 		y: number,
-		color: number,
-		moves: number
-	): TileSprite {
+		tile: { id: number; color: number; moves: number }
+	): Block {
 		if (!this.gameContainer) {
 			throw new Error('Game container not initialized')
 		}
 
-		const container = new Container() as TileSprite
-		container.tileId = id
-		container.gridX = x
-		container.gridY = y
+		const block = new Block(id, x, y, this.tileSize, tile)
+		this.gameContainer.addChild(block)
+		this.blocks.set(id, block)
 
-		// Фон плитки
-		const background = new Graphics()
-		const colorIndex = color % TILE_COLORS.length
-		const colorHex = parseInt(TILE_COLORS[colorIndex].replace('#', ''), 16)
-
-		background.rect(0, 0, this.tileSize, this.tileSize)
-		background.fill(colorHex)
-		background.stroke({ color: 0x000000, width: 1, alpha: 0.2 })
-		container.background = background
-		container.addChild(background)
-
-		// Текст с количеством ходов
-		let text: Text | null = null
-		if (moves > 0) {
-			text = new Text({
-				text: String(moves),
-				style: new TextStyle({
-					fontFamily: 'Arial',
-					fontSize: Math.max(10, this.tileSize / 3),
-					fill: 0xffffff,
-					align: 'center',
-				}),
-			})
-			text.anchor.set(0.5)
-			text.x = this.tileSize / 2
-			text.y = this.tileSize / 2
-			container.text = text
-			container.addChild(text)
-		} else {
-			container.text = null
-		}
-
-		// Выделение (создается при необходимости)
-		container.highlight = null
-
-		// Позиция
-		container.x = x * this.tileSize
-		container.y = y * this.tileSize
-
-		this.gameContainer.addChild(container)
-		this.tileSprites.set(id, container)
-
-		return container
+		return block
 	}
 
-	private updateTileSprite(
-		sprite: TileSprite,
-		tile: { color: number; moves: number }
+	private updateBlock(
+		block: Block,
+		tile: { id: number; color: number; moves: number }
 	): void {
-		// Обновить цвет
-		const colorIndex = tile.color % TILE_COLORS.length
-		const colorHex = parseInt(TILE_COLORS[colorIndex].replace('#', ''), 16)
-		sprite.background.clear()
-		sprite.background.rect(0, 0, this.tileSize, this.tileSize)
-		sprite.background.fill(colorHex)
-		sprite.background.stroke({ color: 0x000000, width: 1, alpha: 0.2 })
-
-		// Обновить текст
-		if (tile.moves > 0) {
-			if (!sprite.text) {
-				sprite.text = new Text({
-					text: String(tile.moves),
-					style: new TextStyle({
-						fontFamily: 'Arial',
-						fontSize: Math.max(10, this.tileSize / 3),
-						fill: 0xffffff,
-						align: 'center',
-					}),
-				})
-				sprite.text.anchor.set(0.5)
-				sprite.text.x = this.tileSize / 2
-				sprite.text.y = this.tileSize / 2
-				sprite.addChild(sprite.text)
-			} else {
-				sprite.text.text = String(tile.moves)
-			}
-		} else {
-			if (sprite.text) {
-				sprite.removeChild(sprite.text)
-				sprite.text.destroy()
-				sprite.text = null
-			}
-		}
-	}
-
-	private updateHighlight(sprite: TileSprite, isSelected: boolean): void {
-		if (isSelected) {
-			if (!sprite.highlight) {
-				const highlight = new Graphics()
-				// Полупрозрачный белый фон для выделения
-				highlight.rect(0, 0, this.tileSize, this.tileSize)
-				highlight.fill({ color: 0xffffff, alpha: 0.3 })
-				// Яркая белая обводка
-				highlight.stroke({ color: 0xffffff, width: 4, alpha: 1 })
-				// Дополнительная внутренняя обводка для лучшей видимости
-				highlight.rect(2, 2, this.tileSize - 4, this.tileSize - 4)
-				highlight.stroke({ color: 0x000000, width: 2, alpha: 0.5 })
-				sprite.highlight = highlight
-				// Добавить highlight поверх всех элементов
-				sprite.addChild(highlight)
-			}
-		} else {
-			if (sprite.highlight) {
-				sprite.removeChild(sprite.highlight)
-				sprite.highlight.destroy()
-				sprite.highlight = null
-			}
-		}
+		block.draw(tile)
 	}
 
 	private render(): void {
@@ -785,39 +650,36 @@ export class GameControl {
 
 		const { width, height } = this.gameState.config
 
-		// Создать или обновить спрайты для всех плиток
+		// Создать или обновить блоки для всех плиток
 		for (let y = 0; y < height; y++) {
 			for (let x = 0; x < width; x++) {
 				const tile = this.gameState.grid[x]?.[y]
 				if (!tile) {
-					// Удалить спрайт если плитка отсутствует
-					const existingSprite = Array.from(this.tileSprites.values()).find(
-						(s) => s.gridX === x && s.gridY === y
+					// Удалить блок если плитка отсутствует
+					const existingBlock = Array.from(this.blocks.values()).find(
+						(b) => b.gridX === x && b.gridY === y
 					)
-					if (existingSprite) {
-						this.tileSprites.delete(existingSprite.tileId)
-						if (existingSprite.parent) {
-							existingSprite.parent.removeChild(existingSprite)
+					if (existingBlock) {
+						this.blocks.delete(existingBlock.tileId)
+						if (existingBlock.parent) {
+							existingBlock.parent.removeChild(existingBlock)
 						}
-						existingSprite.destroy()
+						existingBlock.destroy()
 					}
 					continue
 				}
 
-				// Найти или создать спрайт
-				let sprite = this.tileSprites.get(tile.id)
-				if (!sprite) {
-					sprite = this.createTileSprite(tile.id, x, y, tile.color, tile.moves)
+				// Найти или создать блок
+				let block = this.blocks.get(tile.id)
+				if (!block) {
+					block = this.createBlock(tile.id, x, y, tile)
 				} else {
 					// Обновить позицию если изменилась
-					if (sprite.gridX !== x || sprite.gridY !== y) {
-						sprite.x = x * this.tileSize
-						sprite.y = y * this.tileSize
-						sprite.gridX = x
-						sprite.gridY = y
+					if (block.gridX !== x || block.gridY !== y) {
+						block.updatePosition(x, y)
 					}
 					// Обновить визуал
-					this.updateTileSprite(sprite, tile)
+					this.updateBlock(block, tile)
 				}
 
 				// Обновить выделение
@@ -826,15 +688,15 @@ export class GameControl {
 						this.selectedTile.x === x &&
 						this.selectedTile.y === y
 				)
-				this.updateHighlight(sprite, isSelected)
+				block.setHighlight(isSelected)
 			}
 		}
 
 		// Debug overlay
 		if (this.showDebugOverlay && this.debugText) {
-			this.debugText.text = `tileSize: ${this.tileSize.toFixed(
-				1
-			)}px\nSprites: ${this.tileSprites.size}`
+			this.debugText.text = `tileSize: ${this.tileSize.toFixed(1)}px\nBlocks: ${
+				this.blocks.size
+			}`
 		}
 	}
 
@@ -848,15 +710,9 @@ export class GameControl {
 		if (this.app) {
 			this.app.renderer.resize(this.canvas.width, this.canvas.height)
 		}
-		// Обновить все спрайты с новым размером
-		this.tileSprites.forEach((sprite) => {
-			sprite.x = sprite.gridX * this.tileSize
-			sprite.y = sprite.gridY * this.tileSize
-			// Пересоздать графику с новым размером
-			const tile = this.gameState.grid[sprite.gridX]?.[sprite.gridY]
-			if (tile) {
-				this.updateTileSprite(sprite, tile)
-			}
+		// Обновить все блоки с новым размером
+		this.blocks.forEach((block) => {
+			block.updateTileSize(this.tileSize)
 		})
 		this.render()
 	}
@@ -870,14 +726,14 @@ export class GameControl {
 	}
 
 	destroy(): void {
-		// Удалить все спрайты
-		this.tileSprites.forEach((sprite) => {
-			if (sprite.parent) {
-				sprite.parent.removeChild(sprite)
+		// Удалить все блоки
+		this.blocks.forEach((block) => {
+			if (block.parent) {
+				block.parent.removeChild(block)
 			}
-			sprite.destroy()
+			block.destroy()
 		})
-		this.tileSprites.clear()
+		this.blocks.clear()
 
 		// Удалить обработчики событий
 		if (this.app) {

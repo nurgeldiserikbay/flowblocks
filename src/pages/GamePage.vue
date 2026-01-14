@@ -184,7 +184,7 @@ onMounted(() => {
 		if (!container) return
 
 		const containerRect = container.getBoundingClientRect()
-		const maxWidth = Math.min(containerRect.width - 32, 800)
+		const maxWidth = Math.min(containerRect.width, 800)
 
 		// Вычислить размер плитки на основе ширины
 		const tileSize = maxWidth / gameConfig.width
