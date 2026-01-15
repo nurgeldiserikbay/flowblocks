@@ -91,11 +91,18 @@ const formattedTime = computed(() => {
 	const totalSeconds = Math.floor(props.timeMs / 1000)
 	const minutes = Math.floor(totalSeconds / 60)
 	const seconds = totalSeconds % 60
-	return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+	return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(
+		2,
+		'0'
+	)}`
 })
 
 const showNextLevel = computed(() => {
-	return props.mode === 'level' && props.currentLevel !== undefined && props.currentLevel < 50
+	return (
+		props.mode === 'level' &&
+		props.currentLevel !== undefined &&
+		props.currentLevel < 50
+	)
 })
 
 function handleNextLevel() {

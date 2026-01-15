@@ -60,7 +60,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
+import {
+	ref,
+	computed,
+	onMounted,
+	onBeforeUnmount,
+	useTemplateRef,
+	nextTick,
+} from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/shared/components/AppLayout.vue'
 import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
@@ -251,8 +258,24 @@ onMounted(() => {
 					},
 				})
 
+				// Установить начальную позицию сверху перед инициализацией
+				momentumScrollRef.value?.scrollToTop()
+
 				await gameControl.init()
 				gameControl.start()
+
+				// Дождаться нескольких кадров, чтобы canvas был полностью отрисован
+				await nextTick()
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+
+				// Обновить границы скролла перед началом анимации
+				momentumScrollRef.value?.updateBounds()
+
+				// Запустить анимированный скролл вниз
+				// Метод сам будет ждать, пока высота контента будет вычислена
+				await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
 
 				// Handle resize
 				resizeHandler = () => {
@@ -304,6 +327,18 @@ onMounted(() => {
 				})
 				await gameControl.init()
 				gameControl.start()
+
+				// Дождаться нескольких кадров, чтобы canvas был полностью отрисован
+				await nextTick()
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+
+				// Обновить границы скролла перед началом анимации
+				momentumScrollRef.value?.updateBounds()
+
+				// Запустить анимированный скролл вниз
+				await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
 			}
 		}
 	}, 100)

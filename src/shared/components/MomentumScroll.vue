@@ -19,6 +19,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, nextTick, watch } from 'vue'
+import { gsap } from 'gsap'
 import {
 	ElasticScroll,
 	type ElasticScrollOptions,
@@ -45,6 +46,8 @@ export interface MomentumScrollProps {
 	autoUpdateBounds?: boolean
 	initialScroll?: number
 	enableWheel?: boolean
+	autoScrollToBottomOnMount?: boolean
+	autoScrollDuration?: number
 }
 
 const props = withDefaults(defineProps<MomentumScrollProps>(), {
@@ -65,6 +68,8 @@ const props = withDefaults(defineProps<MomentumScrollProps>(), {
 	autoUpdateBounds: true,
 	initialScroll: 0,
 	enableWheel: true,
+	autoScrollToBottomOnMount: true,
+	autoScrollDuration: 0.8,
 })
 
 const emit = defineEmits<{
@@ -95,6 +100,7 @@ let pointerLastY = 0
 
 let pressTimer: number | null = null
 let dragActivated = false
+let didAutoScrollOnMount = false
 
 function buildOptions(): ElasticScrollOptions {
 	return {
@@ -280,6 +286,65 @@ function scrollToBottom() {
 	if (!container || !content) return
 	scrollTo(Math.max(0, content.scrollHeight - container.clientHeight))
 }
+function scrollToBottomAnimated(duration = 1.2, maxWaitTime = 2000) {
+	const container = containerRef.value
+	const content = contentRef.value
+	if (!container || !content || !scroller) return Promise.resolve()
+
+	// Ждать, пока высота контента будет вычислена
+	return new Promise<void>((resolve) => {
+		const startTime = Date.now()
+		let lastHeight = 0
+
+		const checkAndScroll = () => {
+			// Обновить границы перед вычислением целевой позиции
+			updateBounds()
+
+			const currentHeight = content.scrollHeight
+			const containerHeight = container.clientHeight
+			const targetY = Math.max(0, currentHeight - containerHeight)
+
+			// Если высота изменилась, продолжаем ждать
+			if (currentHeight !== lastHeight && currentHeight > containerHeight) {
+				lastHeight = currentHeight
+			}
+
+			// Если прошло слишком много времени или высота стабильна и есть что скроллить
+			const elapsed = Date.now() - startTime
+			if (
+				elapsed > maxWaitTime ||
+				(currentHeight === lastHeight && targetY > 10)
+			) {
+				const currentY = scroller?.getY() ?? 0
+
+				if (targetY <= 0 || Math.abs(targetY - currentY) < 1) {
+					resolve()
+					return
+				}
+
+				// Запустить анимацию
+				const obj = { y: currentY }
+				gsap.to(obj, {
+					y: targetY,
+					duration,
+					ease: 'power2.out',
+					onUpdate: () => {
+						scroller?.setY(obj.y)
+					},
+					onComplete: () => {
+						scroller?.setY(targetY)
+						resolve()
+					},
+				})
+			} else {
+				// Продолжить проверку
+				requestAnimationFrame(checkAndScroll)
+			}
+		}
+
+		checkAndScroll()
+	})
+}
 function getScrollTop() {
 	return scroller?.getY() ?? 0
 }
@@ -291,6 +356,7 @@ defineExpose({
 	scrollTo,
 	scrollToTop,
 	scrollToBottom,
+	scrollToBottomAnimated,
 	getScrollTop,
 	updateBounds,
 
@@ -312,6 +378,20 @@ onMounted(() => {
 			resizeObserver = new ResizeObserver(() => updateBounds())
 			resizeObserver.observe(containerRef.value)
 			resizeObserver.observe(contentRef.value)
+		}
+
+		// ✅ Автоскролл вниз при первом открытии
+		if (props.autoScrollToBottomOnMount && !didAutoScrollOnMount) {
+			didAutoScrollOnMount = true
+
+			// 1) дать DOM/слоту прорендериться
+			requestAnimationFrame(() => {
+				// 2) пересчитать bounds
+				updateBounds()
+
+				// 3) прокрутить вниз (можно без анимации, но лучше плавно)
+				scrollToBottomAnimated(props.autoScrollDuration, 2500)
+			})
 		}
 	})
 })
