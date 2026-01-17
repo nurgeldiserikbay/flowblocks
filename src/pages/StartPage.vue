@@ -132,17 +132,10 @@
 				</div>
 			</div>
 
-			<!-- Mode buttons -->
-			<div class="mode-buttons">
-				<RouterLink to="/levels" class="mode-button mode-button--levels">
-					<span class="mode-button__text">Levels</span>
-				</RouterLink>
-
-				<RouterLink
-					to="/game?mode=endless"
-					class="mode-button mode-button--endless"
-				>
-					<span class="mode-button__text">Endless</span>
+			<!-- Play button -->
+			<div class="play-button-container">
+				<RouterLink to="/game" class="play-button">
+					<span class="play-button__text">Play</span>
 				</RouterLink>
 			</div>
 
@@ -392,21 +385,17 @@ const patternStyles = computed(() =>
 	}
 }
 
-// Mode buttons container
-.mode-buttons {
+// Play button container
+.play-button-container {
 	width: 100%;
 	max-width: 420px;
 	display: flex;
-	flex-direction: column;
-	gap: clamp(1rem, 3vw, 1.5rem);
-	padding: 0;
+	justify-content: center;
 	margin: clamp(1.5rem, 5vw, 2.5rem) 0;
-	box-sizing: border-box;
-	align-items: stretch;
 }
 
-// Mode button (Levels and Endless)
-.mode-button {
+// Play button
+.play-button {
 	width: 100%;
 	padding: clamp(1.25rem, 5vw, 1.75rem) clamp(1.5rem, 5vw, 2.5rem);
 	border-radius: clamp(20px, 5vw, 28px);
@@ -424,6 +413,8 @@ const patternStyles = computed(() =>
 		inset 0 2px 4px rgba(255, 255, 255, 0.2);
 	min-height: clamp(70px, 11vw, 90px);
 	box-sizing: border-box;
+	background: linear-gradient(135deg, #ec4899 0%, #d946ef 50%, #a855f7 100%);
+	border-color: rgba(249, 168, 212, 0.4);
 
 	&::before {
 		content: '';
@@ -441,62 +432,20 @@ const patternStyles = computed(() =>
 		transition: left 0.5s ease;
 	}
 
-	// Levels button - Bright Blue gradient
-	&--levels {
-		background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1e40af 100%);
-		box-shadow: 0 8px 32px rgba(59, 130, 246, 0.4),
-			0 4px 16px rgba(0, 0, 0, 0.2), inset 0 2px 4px rgba(255, 255, 255, 0.3);
-		border-color: rgba(147, 197, 253, 0.4);
+	&:hover {
+		transform: translateY(-6px) scale(1.02);
+		background: linear-gradient(135deg, #f472b6 0%, #e879f9 50%, #c084fc 100%);
+		box-shadow: 0 12px 40px rgba(236, 72, 153, 0.5),
+			0 6px 20px rgba(0, 0, 0, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+		border-color: rgba(249, 168, 212, 0.6);
 
-		&:hover {
-			transform: translateY(-6px) scale(1.02);
-			background: linear-gradient(
-				135deg,
-				#60a5fa 0%,
-				#3b82f6 50%,
-				#2563eb 100%
-			);
-			box-shadow: 0 12px 40px rgba(59, 130, 246, 0.5),
-				0 6px 20px rgba(0, 0, 0, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
-			border-color: rgba(147, 197, 253, 0.6);
-
-			&::before {
-				left: 100%;
-			}
-		}
-
-		&:active {
-			transform: translateY(-3px) scale(0.98);
+		&::before {
+			left: 100%;
 		}
 	}
 
-	// Endless button - Bright Pink/Purple gradient
-	&--endless {
-		background: linear-gradient(135deg, #ec4899 0%, #d946ef 50%, #a855f7 100%);
-		box-shadow: 0 8px 32px rgba(236, 72, 153, 0.4),
-			0 4px 16px rgba(0, 0, 0, 0.2), inset 0 2px 4px rgba(255, 255, 255, 0.3);
-		border-color: rgba(249, 168, 212, 0.4);
-
-		&:hover {
-			transform: translateY(-6px) scale(1.02);
-			background: linear-gradient(
-				135deg,
-				#f472b6 0%,
-				#e879f9 50%,
-				#c084fc 100%
-			);
-			box-shadow: 0 12px 40px rgba(236, 72, 153, 0.5),
-				0 6px 20px rgba(0, 0, 0, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
-			border-color: rgba(249, 168, 212, 0.6);
-
-			&::before {
-				left: 100%;
-			}
-		}
-
-		&:active {
-			transform: translateY(-3px) scale(0.98);
-		}
+	&:active {
+		transform: translateY(-3px) scale(0.98);
 	}
 
 	&__text {

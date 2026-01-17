@@ -8,6 +8,7 @@ import type { GameState, GameAction } from '@/features/game/core/types'
 import { applyMove } from '@/features/game/core/game'
 import { countTiles } from '@/features/game/core/state'
 import { Block } from './Block'
+import { loadBlockTextures } from './blockTextures'
 
 export interface GameControlOptions {
 	canvas: HTMLCanvasElement
@@ -94,6 +95,9 @@ export class GameControl {
 	}
 
 	async init(): Promise<void> {
+		// Загрузить текстуры блоков перед инициализацией
+		await loadBlockTextures()
+
 		// Создать Pixi.js Application
 		this.app = new Application()
 		await this.app.init({

@@ -3,7 +3,8 @@
 		<template #title>
 			<div class="game-header">
 				<div class="game-header__time">{{ formattedTime }}</div>
-				<div class="game-header__score">Score: {{ score }}</div>
+				<div class="game-header__score">Score: {{ gameStore.score }}</div>
+				<div class="game-header__wave">Wave: {{ gameStore.waveIndex }}</div>
 			</div>
 		</template>
 
@@ -19,15 +20,6 @@
 				class="game-page__scroll-container"
 			>
 				<div class="game-page__canvas-container">
-					<!-- <div
-						style="
-							height: 5000px;
-							background: linear-gradient(to bottom, #000000, #ffffff);
-							border: 5px solid red;
-						"
-					>
-						Hello
-					</div> -->
 					<canvas ref="canvas" class="game-canvas"></canvas>
 				</div>
 			</MomentumScroll>
@@ -45,349 +37,237 @@
 				@confirm="handleExit"
 			/>
 
-			<GameResultModal
-				v-model="isResultModalOpen"
-				:is-victory="gameResult?.reason === 'cleared'"
-				:score="gameResult?.finalScore ?? 0"
-				:time-ms="gameResult?.stats.timeMs ?? 0"
-				:current-level="level"
-				:mode="mode"
-				@next-level="handleNextLevel"
-				@level-menu="handleLevelMenu"
-			/>
+			<div v-if="gameStore.isGameOver" class="game-overlay">
+				<div class="game-overlay__content">
+					<h2>Game Over</h2>
+					<p>Final Score: {{ gameStore.score }}</p>
+					<button class="btn btn--restart" @click="restart">Restart</button>
+				</div>
+			</div>
 		</div>
 	</AppLayout>
 </template>
 
 <script setup lang="ts">
-import {
-	ref,
-	computed,
-	onMounted,
-	onBeforeUnmount,
-	useTemplateRef,
-	nextTick,
-} from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import AppLayout from '@/shared/components/AppLayout.vue'
 import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
-import GameResultModal from '@/shared/components/GameResultModal.vue'
 import MomentumScroll from '@/shared/components/MomentumScroll.vue'
-import { GameControl } from '@/game'
-import { useAudio } from '@/composables/useAudio'
-import { createGame } from '@/features/game/core/game'
-import type {
-	GameConfig,
-	GameState,
-	Difficulty,
-	GameMode,
-} from '@/features/game/core/types'
-import { getLevelConfig } from '@/entities/level/levelConfig'
-import { useProgressStore } from '@/shared/stores/progressStore'
+import { GameRenderer } from '@/game/render'
+import { GameController } from '@/game/GameController'
+import { useGameStore } from '@/shared/stores/gameStore'
+import { WIDTH, HEIGHT } from '@/game/logic'
 
-const route = useRoute()
 const router = useRouter()
-const { playAudio } = useAudio()
-const progressStore = useProgressStore()
-
-const mode = (route.query.mode as GameMode) || 'endless'
-const level = route.query.level
-	? parseInt(route.query.level as string)
-	: undefined
-const difficulty = (route.query.difficulty as Difficulty) || 'normal'
+const gameStore = useGameStore()
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
-const momentumScrollRef =
-	useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
-let gameControl: InstanceType<typeof GameControl> | null = null
-let resizeHandler: (() => void) | null = null
-let gameState: GameState | null = null
-
-const score = ref(0)
-const elapsedSeconds = ref(0)
+const momentumScrollRef = useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
 const isExitDialogOpen = ref(false)
-const isResultModalOpen = ref(false)
-const gameResult = ref<{
-	reason: 'cleared' | 'no_moves'
-	finalScore: number
-	stats: {
-		timeMs: number
-		leftTiles: number
-	}
-} | null>(null)
-let timeInterval: number | null = null
-let gameStartTime: number = 0
 
-/**
- * Получить количество цветов на основе сложности
- */
-function getNumColors(difficulty: Difficulty): number {
-	switch (difficulty) {
-		case 'easy':
-			// Easy: 4-5 цветов, выбираем случайно
-			return Math.random() < 0.5 ? 4 : 5
-		case 'normal':
-			return 6
-		case 'hard':
-			// Hard: 7-8 цветов, выбираем случайно
-			return Math.random() < 0.5 ? 7 : 8
-		default:
-			return 6
-	}
-}
+let gameController: GameController | null = null
+let renderer: GameRenderer | null = null
+let resizeHandler: (() => void) | null = null
 
-/**
- * Создать конфигурацию игры на основе режима и уровня
- */
-function createGameConfig(): GameConfig {
-	if (mode === 'level' && level) {
-		// Level Mode
-		const levelConfig = getLevelConfig(level)
-		if (!levelConfig) {
-			throw new Error(`Level ${level} not found`)
-		}
-
-		return {
-			width: 8, // Фиксированная ширина для Level Mode
-			height: levelConfig.rows,
-			mode: 'level',
-			difficulty,
-			numColors: getNumColors(difficulty),
-		}
-	} else {
-		// Endless Mode
-		const height = 40 + Math.floor(Math.random() * 21) // 40-60 рядов
-		return {
-			width: 10, // Рекомендуемая ширина для Endless Mode
-			height,
-			mode: 'endless',
-			difficulty,
-			numColors: getNumColors(difficulty),
-		}
-	}
-}
+// Drag state for input handling
+let dragStart: { r: number; c: number } | null = null
 
 const formattedTime = computed(() => {
-	const minutes = Math.floor(elapsedSeconds.value / 60)
-	const seconds = elapsedSeconds.value % 60
-	return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(
-		2,
-		'0'
-	)}`
+	const time = Math.max(0, Math.floor(gameStore.remainingTime))
+	const seconds = time % 60
+	return `${String(Math.floor(time / 60)).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 })
 
-onMounted(() => {
-	// Start time timer
-	gameStartTime = Date.now()
-	timeInterval = window.setInterval(() => {
-		elapsedSeconds.value++
-	}, 1000)
+function initCanvas(): void {
+	if (!canvas.value) return
 
-	// Initialize canvas size based on game grid
-	const initCanvas = (gameConfig: GameConfig) => {
-		if (!canvas.value) return
+	const container = canvas.value.parentElement
+	if (!container) return
 
-		const container = canvas.value.parentElement
-		if (!container) return
+	const containerRect = container.getBoundingClientRect()
+	const maxWidth = Math.min(containerRect.width, 800)
 
-		const containerRect = container.getBoundingClientRect()
-		const maxWidth = Math.min(containerRect.width, 800)
+	const tileSize = maxWidth / WIDTH
+	const canvasHeight = HEIGHT * tileSize
 
-		// Вычислить размер плитки на основе ширины
-		const tileSize = maxWidth / gameConfig.width
+	canvas.value.width = maxWidth
+	canvas.value.height = canvasHeight
+}
 
-		// Вычислить высоту canvas на основе высоты игрового поля
-		const canvasHeight = gameConfig.height * tileSize
+function getPositionFromEvent(e: MouseEvent | TouchEvent): { r: number; c: number } | null {
+	if (!canvas.value) return null
 
-		canvas.value.width = maxWidth
-		canvas.value.height = canvasHeight
+	const rect = canvas.value.getBoundingClientRect()
+	const scrollOffset = momentumScrollRef.value?.getScrollTop() ?? 0
+	const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
+	const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+
+	const x = clientX - rect.left
+	const y = clientY - rect.top + scrollOffset
+
+	const tileSize = canvas.value.width / WIDTH
+	const c = Math.floor(x / tileSize)
+	const r = Math.floor(y / tileSize)
+
+	if (r >= 0 && r < HEIGHT && c >= 0 && c < WIDTH) {
+		return { r, c }
 	}
 
-	// Wait for next tick to ensure DOM is ready
-	setTimeout(async () => {
-		if (canvas.value) {
-			playAudio('start')
+	return null
+}
 
-			try {
-				// Создать конфигурацию игры
-				const gameConfig = createGameConfig()
+function handlePointerDown(e: MouseEvent | TouchEvent): void {
+	if (gameStore.isLocked || gameStore.isGameOver) return
 
-				// Инициализировать canvas с правильными размерами
-				initCanvas(gameConfig)
-
-				// Инициализировать игру
-				gameState = createGame(gameConfig)
-
-				// Обновить начальный счет
-				score.value = gameState.score
-
-				gameControl = new GameControl({
-					canvas: canvas.value,
-					gameState: gameState,
-					controls: {
-						gameStart: () => {
-							playAudio('again')
-						},
-						setScore: (
-							_tilesCount: number,
-							_overlapArea?: number,
-							_tileArea?: number
-						) => {
-							// Update score from game state
-							if (gameState) {
-								score.value = gameState.score
-							}
-						},
-						end: (result) => {
-							// Остановить таймер
-							if (timeInterval) {
-								window.clearInterval(timeInterval)
-								timeInterval = null
-							}
-							// Сохранить результат и показать модалку
-							gameResult.value = result
-							isResultModalOpen.value = true
-						},
-					},
-					onStateUpdate: (newState) => {
-						gameState = newState
-						score.value = newState.score
-					},
-					getScrollOffset: () => {
-						return momentumScrollRef.value?.getScrollTop() ?? 0
-					},
-				})
-
-				// Установить начальную позицию сверху перед инициализацией
-				momentumScrollRef.value?.scrollToTop()
-
-				await gameControl.init()
-				gameControl.start()
-
-				// Дождаться нескольких кадров, чтобы canvas был полностью отрисован
-				await nextTick()
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-
-				// Обновить границы скролла перед началом анимации
-				momentumScrollRef.value?.updateBounds()
-
-				// Запустить анимированный скролл вниз
-				// Метод сам будет ждать, пока высота контента будет вычислена
-				await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
-
-				// Handle resize
-				resizeHandler = () => {
-					initCanvas(gameConfig)
-					gameControl?.adaptive()
-					// Обновить границы скролла после изменения размера
-				}
-				window.addEventListener('resize', resizeHandler, { passive: true })
-			} catch (error) {
-				console.error('Failed to initialize game:', error)
-				// Fallback: create minimal game state for error case
-				const fallbackConfig: GameConfig = {
-					width: 8,
-					height: 16,
-					mode: 'endless',
-					difficulty: 'normal',
-					numColors: 6,
-				}
-				initCanvas(fallbackConfig)
-				const fallbackState = createGame(fallbackConfig)
-				gameState = fallbackState
-
-				gameControl = new GameControl({
-					canvas: canvas.value,
-					gameState: fallbackState,
-					controls: {
-						gameStart: () => {
-							playAudio('again')
-						},
-						setScore: () => {},
-						end: (result) => {
-							// Остановить таймер
-							if (timeInterval) {
-								window.clearInterval(timeInterval)
-								timeInterval = null
-							}
-							// Сохранить результат и показать модалку
-							gameResult.value = result
-							isResultModalOpen.value = true
-						},
-					},
-					onStateUpdate: (newState) => {
-						gameState = newState
-						score.value = newState.score
-					},
-					getScrollOffset: () => {
-						return momentumScrollRef.value?.getScrollTop() ?? 0
-					},
-				})
-				await gameControl.init()
-				gameControl.start()
-
-				// Дождаться нескольких кадров, чтобы canvas был полностью отрисован
-				await nextTick()
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-
-				// Обновить границы скролла перед началом анимации
-				momentumScrollRef.value?.updateBounds()
-
-				// Запустить анимированный скролл вниз
-				await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
-			}
+	const pos = getPositionFromEvent(e)
+	if (pos) {
+		dragStart = pos
+		// Highlight selected tile
+		if (gameStore.grid[pos.r]?.[pos.c]) {
+			renderer?.setSelectedPosition(pos.r, pos.c)
+		} else {
+			renderer?.setSelectedPosition(null, null)
 		}
+	}
+}
+
+function handlePointerUp(e: MouseEvent | TouchEvent): void {
+	if (!dragStart || gameStore.isLocked || gameStore.isGameOver) return
+
+	const pos = getPositionFromEvent(e)
+	if (!pos) {
+		dragStart = null
+		renderer?.setSelectedPosition(null, null)
+		return
+	}
+
+	// Determine action
+	const dr = pos.r - dragStart.r
+	const dc = pos.c - dragStart.c
+
+	if (dr === 0 && dc === 0) {
+		// Click on same cell - just select it
+		if (gameStore.grid[pos.r]?.[pos.c]) {
+			renderer?.setSelectedPosition(pos.r, pos.c)
+		} else {
+			renderer?.setSelectedPosition(null, null)
+		}
+		dragStart = null
+		return
+	}
+
+	// Check if adjacent
+	const isAdjacent = (Math.abs(dr) === 1 && dc === 0) || (dr === 0 && Math.abs(dc) === 1)
+
+	if (isAdjacent) {
+		// Check if target has cube for swap, or empty for slide
+		const targetCube = gameStore.grid[pos.r]?.[pos.c]
+		const fromCube = gameStore.grid[dragStart.r]?.[dragStart.c]
+
+		if (targetCube && fromCube) {
+			// Both have cubes - swap
+			gameController?.applyUserAction('swap', dragStart, pos)
+		} else if (!targetCube && fromCube && Math.abs(dc) === 1 && dr === 0) {
+			// Target empty and horizontal move - slide
+			gameController?.applyUserAction('slide', dragStart, pos)
+		}
+	}
+
+	// Clear selection after move
+	renderer?.setSelectedPosition(null, null)
+	dragStart = null
+}
+
+onMounted(async () => {
+	setTimeout(async () => {
+		if (!canvas.value) return
+
+		initCanvas()
+
+		// Create renderer
+		const tileSize = canvas.value.width / WIDTH
+		renderer = new GameRenderer({
+			canvas: canvas.value,
+			tileSize,
+		})
+
+		await renderer.init()
+
+		// Create game controller
+		gameController = new GameController(renderer)
+
+		// Set initial scroll position to top
+		momentumScrollRef.value?.scrollToTop()
+
+		// Start game
+		await gameController.startGame()
+
+		// Setup input handlers
+		canvas.value.addEventListener('pointerdown', handlePointerDown)
+		canvas.value.addEventListener('pointerup', handlePointerUp)
+		canvas.value.addEventListener('touchstart', handlePointerDown, { passive: true })
+		canvas.value.addEventListener('touchend', handlePointerUp, { passive: true })
+
+		// Wait for canvas to render
+		await nextTick()
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+
+		// Update scroll bounds
+		momentumScrollRef.value?.updateBounds()
+
+		// Animate scroll to bottom
+		await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
+
+		// Handle resize
+		resizeHandler = () => {
+			initCanvas()
+			const newTileSize = canvas.value ? canvas.value.width / WIDTH : 0
+			renderer?.updateTileSize(newTileSize)
+			renderer?.renderGrid(gameStore.grid, 1)
+			momentumScrollRef.value?.updateBounds()
+		}
+		window.addEventListener('resize', resizeHandler, { passive: true })
 	}, 100)
 })
 
 onBeforeUnmount(() => {
-	if (timeInterval) {
-		window.clearInterval(timeInterval)
-		timeInterval = null
-	}
 	if (resizeHandler) {
 		window.removeEventListener('resize', resizeHandler)
 		resizeHandler = null
 	}
-	if (gameControl) {
-		gameControl.destroy()
-		gameControl = null
+
+	if (canvas.value) {
+		canvas.value.removeEventListener('pointerdown', handlePointerDown)
+		canvas.value.removeEventListener('pointerup', handlePointerUp)
+		canvas.value.removeEventListener('touchstart', handlePointerDown)
+		canvas.value.removeEventListener('touchend', handlePointerUp)
 	}
-	gameState = null
+
+	gameController?.destroy()
+	gameController = null
+	renderer = null
 })
 
-function showExitDialog() {
+function showExitDialog(): void {
 	isExitDialogOpen.value = true
 }
 
-function handleExit() {
+function handleExit(): void {
 	router.push('/')
 }
 
-function handleNextLevel() {
-	if (level !== undefined && level < 50) {
-		const nextLevel = level + 1
-		// Разблокировать следующий уровень при победе
-		if (gameResult.value?.reason === 'cleared') {
-			progressStore.unlockLevel(difficulty, nextLevel)
-		}
-		router.push(`/game?mode=level&level=${nextLevel}&difficulty=${difficulty}`)
-	} else {
-		handleLevelMenu()
+function restart(): void {
+	if (gameController) {
+		gameController.stop()
+		gameController.startGame()
 	}
-}
-
-function handleLevelMenu() {
-	router.push(`/levels?difficulty=${difficulty}`)
 }
 </script>
 
 <style lang="scss" scoped>
-// Override AppLayout background for game page
 :deep(.app-layout) {
 	background: transparent;
 }
@@ -396,7 +276,7 @@ function handleLevelMenu() {
 	flex: 1;
 	display: flex;
 	flex-direction: column;
-	padding: 1rem;
+	padding: 1rem 2rem;
 	gap: 1rem;
 	position: relative;
 	overflow: hidden;
@@ -430,7 +310,8 @@ function handleLevelMenu() {
 	flex-wrap: wrap;
 
 	&__time,
-	&__score {
+	&__score,
+	&__wave {
 		font-size: clamp(0.875rem, 3vw, 1rem);
 		font-weight: 700;
 		color: white;
@@ -462,6 +343,38 @@ function handleLevelMenu() {
 	-webkit-tap-highlight-color: transparent;
 }
 
+.game-overlay {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.8);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 10;
+
+	&__content {
+		background: rgba(255, 255, 255, 0.1);
+		backdrop-filter: blur(20px);
+		padding: 2rem;
+		border-radius: 16px;
+		text-align: center;
+		color: white;
+
+		h2 {
+			margin: 0 0 1rem;
+			font-size: 2rem;
+		}
+
+		p {
+			margin: 0 0 1.5rem;
+			font-size: 1.25rem;
+		}
+	}
+}
+
 .btn--back {
 	padding: clamp(0.875rem, 2.5vw, 1rem) clamp(1.25rem, 4vw, 1.75rem);
 	border-radius: clamp(14px, 3vw, 16px);
@@ -481,32 +394,11 @@ function handleLevelMenu() {
 	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 	position: relative;
 	z-index: 1;
-	overflow: hidden;
-
-	&::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background: linear-gradient(
-			135deg,
-			rgba(239, 68, 68, 0.3) 0%,
-			rgba(220, 38, 38, 0.3) 100%
-		);
-		opacity: 0;
-		transition: opacity 0.3s ease;
-	}
 
 	&:hover {
 		transform: translateY(-4px) scale(1.02);
 		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
 		border-color: rgba(255, 255, 255, 0.5);
-
-		&::before {
-			opacity: 1;
-		}
 	}
 
 	&:active {
@@ -517,13 +409,17 @@ function handleLevelMenu() {
 		max-width: 200px;
 		margin: 0 auto;
 		width: 100%;
-		position: relative;
-		z-index: 1;
 	}
 
-	@media (max-width: 640px) {
-		padding: clamp(0.875rem, 2vw, 1rem) 1.25rem;
-		border-radius: 12px;
+	&--restart {
+		background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+		border-color: rgba(147, 197, 253, 0.4);
+		padding: 1rem 2rem;
+		font-size: 1.125rem;
+
+		&:hover {
+			background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+		}
 	}
 }
 </style>

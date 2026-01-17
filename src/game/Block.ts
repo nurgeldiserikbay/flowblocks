@@ -2,35 +2,37 @@
  * Block - класс для представления и отрисовки блока на игровом поле
  */
 
-import {
-	Container,
-	Graphics,
-	Text,
-	TextStyle,
-} from 'pixi.js'
+import { Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js'
 import type { Tile } from '@/features/game/core/types'
+import { getBlockTexture } from './blockTextures'
 
-// Цвета для плиток (базовая палитра)
-const TILE_COLORS = [
-	'#FF6B6B', // Красный
-	'#4ECDC4', // Бирюзовый
-	'#45B7D1', // Голубой
-	'#FFA07A', // Лососевый
-	'#98D8C8', // Мятный
-	'#F7DC6F', // Желтый
-	'#BB8FCE', // Фиолетовый
-	'#85C1E2', // Светло-голубой
-]
+// Padding между блоками (в пикселях)
+const TILE_PADDING = 2
 
 export class Block extends Container {
 	public readonly tileId: number
 	public gridX: number
 	public gridY: number
-	private background: Graphics
+	private sprite: Sprite | null = null
+	private fallbackGraphics: Graphics | null = null
 	private text: Text | null = null
 	private highlight: Graphics | null = null
 	private tileSize: number
 	private currentTile: Tile // Храним текущее состояние плитки
+
+	/**
+	 * Вычислить размер спрайта с учетом padding
+	 */
+	private getSpriteSize(): number {
+		return Math.max(1, this.tileSize - TILE_PADDING * 2)
+	}
+
+	/**
+	 * Вычислить смещение для центрирования спрайта
+	 */
+	private getSpriteOffset(): number {
+		return TILE_PADDING
+	}
 
 	constructor(
 		tileId: number,
@@ -47,10 +49,6 @@ export class Block extends Container {
 		this.tileSize = tileSize
 		this.currentTile = { ...tile }
 
-		// Создать фон
-		this.background = new Graphics()
-		this.addChild(this.background)
-
 		// Нарисовать блок
 		this.draw(tile)
 
@@ -66,14 +64,71 @@ export class Block extends Container {
 		// Сохранить текущее состояние
 		this.currentTile = { ...tile }
 
-		// Отрисовать фон
-		const colorIndex = tile.color % TILE_COLORS.length
-		const colorHex = parseInt(TILE_COLORS[colorIndex].replace('#', ''), 16)
+		// Получить текстуру для цвета блока
+		const texture = getBlockTexture(tile.color)
+		const spriteSize = this.getSpriteSize()
+		const spriteOffset = this.getSpriteOffset()
 
-		this.background.clear()
-		this.background.rect(0, 0, this.tileSize, this.tileSize)
-		this.background.fill(colorHex)
-		this.background.stroke({ color: 0x000000, width: 1, alpha: 0.2 })
+		if (texture) {
+			// Удалить fallback если он есть
+			if (this.fallbackGraphics) {
+				this.removeChild(this.fallbackGraphics)
+				this.fallbackGraphics.destroy()
+				this.fallbackGraphics = null
+			}
+
+			// Использовать Sprite с текстурой
+			if (!this.sprite) {
+				this.sprite = new Sprite(texture)
+				this.sprite.width = spriteSize
+				this.sprite.height = spriteSize
+				this.sprite.x = spriteOffset
+				this.sprite.y = spriteOffset
+				this.addChild(this.sprite)
+			} else {
+				// Обновить текстуру если цвет изменился
+				if (this.sprite.texture !== texture) {
+					this.sprite.texture = texture
+				}
+				// Обновить размер и позицию
+				this.sprite.width = spriteSize
+				this.sprite.height = spriteSize
+				this.sprite.x = spriteOffset
+				this.sprite.y = spriteOffset
+			}
+		} else {
+			// Удалить sprite если он есть
+			if (this.sprite) {
+				this.removeChild(this.sprite)
+				this.sprite.destroy()
+				this.sprite = null
+			}
+
+			// Fallback: если текстура не загружена, использовать цветной прямоугольник
+			if (!this.fallbackGraphics) {
+				this.fallbackGraphics = new Graphics()
+				this.fallbackGraphics.rect(
+					spriteOffset,
+					spriteOffset,
+					spriteSize,
+					spriteSize
+				)
+				this.fallbackGraphics.fill(0x888888) // Серый цвет как fallback
+				this.fallbackGraphics.stroke({ color: 0x000000, width: 1, alpha: 0.2 })
+				this.addChild(this.fallbackGraphics)
+			} else {
+				// Обновить размер fallback
+				this.fallbackGraphics.clear()
+				this.fallbackGraphics.rect(
+					spriteOffset,
+					spriteOffset,
+					spriteSize,
+					spriteSize
+				)
+				this.fallbackGraphics.fill(0x888888)
+				this.fallbackGraphics.stroke({ color: 0x000000, width: 1, alpha: 0.2 })
+			}
+		}
 
 		// Обновить или создать текст с количеством ходов
 		if (tile.moves > 0) {
@@ -87,6 +142,8 @@ export class Block extends Container {
 						align: 'center',
 					}),
 				})
+				// Установить stroke отдельно через свойство style
+				this.text.style.stroke = { color: 0x000000, width: 2 }
 				this.text.anchor.set(0.5)
 				this.text.x = this.tileSize / 2
 				this.text.y = this.tileSize / 2
@@ -133,17 +190,40 @@ export class Block extends Container {
 		if (isSelected) {
 			if (!this.highlight) {
 				const highlight = new Graphics()
+				const spriteSize = this.getSpriteSize()
+				const spriteOffset = this.getSpriteOffset()
+
 				// Полупрозрачный белый фон для выделения
-				highlight.rect(0, 0, this.tileSize, this.tileSize)
+				highlight.rect(spriteOffset, spriteOffset, spriteSize, spriteSize)
 				highlight.fill({ color: 0xffffff, alpha: 0.3 })
 				// Яркая белая обводка
 				highlight.stroke({ color: 0xffffff, width: 4, alpha: 1 })
 				// Дополнительная внутренняя обводка для лучшей видимости
-				highlight.rect(2, 2, this.tileSize - 4, this.tileSize - 4)
+				highlight.rect(
+					spriteOffset + 2,
+					spriteOffset + 2,
+					spriteSize - 4,
+					spriteSize - 4
+				)
 				highlight.stroke({ color: 0x000000, width: 2, alpha: 0.5 })
 				this.highlight = highlight
 				// Добавить highlight поверх всех элементов
 				this.addChild(highlight)
+			} else {
+				// Обновить размер highlight при изменении размера плитки
+				const spriteSize = this.getSpriteSize()
+				const spriteOffset = this.getSpriteOffset()
+				this.highlight.clear()
+				this.highlight.rect(spriteOffset, spriteOffset, spriteSize, spriteSize)
+				this.highlight.fill({ color: 0xffffff, alpha: 0.3 })
+				this.highlight.stroke({ color: 0xffffff, width: 4, alpha: 1 })
+				this.highlight.rect(
+					spriteOffset + 2,
+					spriteOffset + 2,
+					spriteSize - 4,
+					spriteSize - 4
+				)
+				this.highlight.stroke({ color: 0x000000, width: 2, alpha: 0.5 })
 			}
 		} else {
 			if (this.highlight) {
@@ -173,7 +253,14 @@ export class Block extends Container {
 			this.highlight.destroy()
 			this.highlight = null
 		}
-		this.background.destroy()
+		if (this.sprite) {
+			this.sprite.destroy()
+			this.sprite = null
+		}
+		if (this.fallbackGraphics) {
+			this.fallbackGraphics.destroy()
+			this.fallbackGraphics = null
+		}
 		super.destroy()
 	}
 }
