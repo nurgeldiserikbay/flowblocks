@@ -4,7 +4,7 @@ import type { Cube } from '@/game/logic/types'
 
 const WIDTH = 8
 const HEIGHT = 20
-const WAVE_DURATION = 12 // seconds
+const WAVE_DURATION = 36 // seconds
 const NUM_COLORS = 6
 
 export const useGameStore = defineStore('game', () => {
