@@ -72,6 +72,8 @@ let resizeHandler: (() => void) | null = null
 
 // Drag state for input handling
 let dragStart: { r: number; c: number } | null = null
+// First block selected by click (for swap on second click)
+let selectedForSwap: { r: number; c: number } | null = null
 
 const formattedTime = computed(() => {
 	const time = Math.max(0, Math.floor(gameStore.remainingTime))
@@ -138,6 +140,7 @@ function handlePointerUp(e: MouseEvent | TouchEvent): void {
 	const pos = getPositionFromEvent(e)
 	if (!pos) {
 		dragStart = null
+		selectedForSwap = null
 		renderer?.setSelectedPosition(null, null)
 		return
 	}
@@ -147,12 +150,52 @@ function handlePointerUp(e: MouseEvent | TouchEvent): void {
 	const dc = pos.c - dragStart.c
 
 	if (dr === 0 && dc === 0) {
-		// Click on same cell - just select it
-		if (gameStore.grid[pos.r]?.[pos.c]) {
-			renderer?.setSelectedPosition(pos.r, pos.c)
-		} else {
+		// Click without drag — support swap by two clicks: first select, second click on adjacent to swap
+		const fromCube = gameStore.grid[pos.r]?.[pos.c]
+		if (!fromCube) {
+			selectedForSwap = null
 			renderer?.setSelectedPosition(null, null)
+			dragStart = null
+			return
 		}
+		if (!selectedForSwap) {
+			// First click: select this block
+			selectedForSwap = { r: pos.r, c: pos.c }
+			renderer?.setSelectedPosition(pos.r, pos.c)
+			dragStart = null
+			return
+		}
+		if (selectedForSwap.r === pos.r && selectedForSwap.c === pos.c) {
+			// Click same block again — deselect
+			selectedForSwap = null
+			renderer?.setSelectedPosition(null, null)
+			dragStart = null
+			return
+		}
+		// Second click on another block
+		const adjR = Math.abs(pos.r - selectedForSwap.r) === 1 && pos.c === selectedForSwap.c
+		const adjC = pos.r === selectedForSwap.r && Math.abs(pos.c - selectedForSwap.c) === 1
+		const isAdjacentClick = adjR || adjC
+		const targetCube = gameStore.grid[pos.r]?.[pos.c]
+		const fromCubeSel = gameStore.grid[selectedForSwap.r]?.[selectedForSwap.c]
+		if (isAdjacentClick && targetCube && fromCubeSel) {
+			gameController?.applyUserAction('swap', selectedForSwap, pos)
+			selectedForSwap = null
+			renderer?.setSelectedPosition(null, null)
+			dragStart = null
+			return
+		}
+		if (isAdjacentClick && !targetCube && fromCubeSel && Math.abs(pos.c - selectedForSwap.c) === 1 && pos.r === selectedForSwap.r) {
+			// Horizontal slide into empty
+			gameController?.applyUserAction('slide', selectedForSwap, pos)
+			selectedForSwap = null
+			renderer?.setSelectedPosition(null, null)
+			dragStart = null
+			return
+		}
+		// Not adjacent or invalid: select the clicked block as new first selection
+		selectedForSwap = { r: pos.r, c: pos.c }
+		renderer?.setSelectedPosition(pos.r, pos.c)
 		dragStart = null
 		return
 	}
@@ -174,7 +217,8 @@ function handlePointerUp(e: MouseEvent | TouchEvent): void {
 		}
 	}
 
-	// Clear selection after move
+	// Clear selection after move (swipe or click-to-swap)
+	selectedForSwap = null
 	renderer?.setSelectedPosition(null, null)
 	dragStart = null
 }
@@ -260,6 +304,8 @@ function handleExit(): void {
 }
 
 function restart(): void {
+	selectedForSwap = null
+	renderer?.setSelectedPosition(null, null)
 	if (gameController) {
 		gameController.stop()
 		gameController.startGame()

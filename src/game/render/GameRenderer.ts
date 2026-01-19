@@ -186,16 +186,13 @@ export class GameRenderer {
 	}
 
 	setSelectedPosition(r: number | null, c: number | null): void {
-		// Remove previous selection
-		if (this.selectedPosition) {
-			const prevCubeId = this.findCubeIdAt(this.selectedPosition.r, this.selectedPosition.c)
-			if (prevCubeId !== null) {
-				const prevContainer = this.cubeContainers.get(prevCubeId)
-				if (prevContainer?.highlight) {
-					prevContainer.highlight.visible = false
-				}
-			}
-		}
+		// Remove previous selection: clear highlight on ALL cubes.
+		// We cannot use findCubeIdAt(selectedPosition) because after swap/move
+		// the highlighted cube has moved to another cell; the cube now at
+		// selectedPosition is a different one, so the old highlight would stay.
+		this.cubeContainers.forEach((cc) => {
+			if (cc.highlight) cc.highlight.visible = false
+		})
 
 		// Set new selection
 		if (r !== null && c !== null) {

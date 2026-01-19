@@ -8,7 +8,6 @@ import {
 	createInitialGrid,
 	trySwap,
 	trySlide,
-	isSupported,
 	applyGravityWithFallTracking,
 	resolveAfterMove,
 	spawnWave,
@@ -193,30 +192,24 @@ export class GameController {
 		// Positions of moved tiles for match resolution (only matches touching these are removed)
 		let checkPositions: Position[] = [from, to]
 
-		// After slide move, check if cube needs to fall
+		// After slide move: from is always empty — blocks above it must fall. Always apply gravity.
 		if (action === 'slide' && success) {
-			const cube = grid[to.r]?.[to.c]
-			if (cube && !isSupported(grid, to.r, to.c)) {
-				// Cube is not supported - apply gravity with fall tracking
-				const fallItems = applyGravityWithFallTracking(grid)
-				this.store.setGrid(grid)
+			const fallItems = applyGravityWithFallTracking(grid)
+			this.store.setGrid(grid)
 
-				// Animate fall if there are fall events
-				if (fallItems.length > 0 && this.renderer) {
-					const fallEvent: GameEvent = {
-						type: 'fall',
-						items: fallItems,
-					}
-					await this.renderer.applyEvents([fallEvent])
-					// Sync positions after fall animation
-					await this.renderer.syncGridPositions(grid)
+			if (fallItems.length > 0 && this.renderer) {
+				const fallEvent: GameEvent = {
+					type: 'fall',
+					items: fallItems,
 				}
-				// Use final position of the moved cube after fall for match check
-				const ourFallItem = fallItems.find((f) => f.from.r === to.r && f.from.c === to.c)
-				if (ourFallItem) {
-					checkPositions = [ourFallItem.to]
-				}
+				await this.renderer.applyEvents([fallEvent])
+				await this.renderer.syncGridPositions(grid)
 			}
+
+			// For resolve: all landing positions; add to if the moved cube did not fall
+			const movedCubeFell = fallItems.some((f) => f.from.r === to.r && f.from.c === to.c)
+			checkPositions = fallItems.map((f) => f.to)
+			if (!movedCubeFell) checkPositions.push(to)
 		}
 
 		// Apply gravity and resolve matches
