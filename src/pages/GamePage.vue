@@ -127,14 +127,19 @@ const levelBarColor = computed(() => {
 	return 'rgb(74, 222, 128)' // green
 })
 
-// При расширении сосуда (рост height): переразмер канваса, рендер, обновление скролла
-watch(gameHeight, (newH, oldH) => {
+// При расширении сосуда: переразмер, рендер, сдвиг скролла так, чтобы низ сосуда оставался видимым
+watch(gameHeight, async (newH, oldH) => {
 	if (newH <= (oldH ?? 0) || !renderer || !canvas.value) return
 	initCanvas()
 	renderer.resizeCanvas(canvas.value.width, canvas.value.height)
-	renderer.renderGrid(gameStore.grid, 1)
+	await renderer.renderGrid(gameStore.grid, 1)
+	await nextTick()
+	// Дождаться, пока layout применит новый размер канваса (content.scrollHeight обновится)
+	await new Promise((r) => requestAnimationFrame(r))
+	await new Promise((r) => requestAnimationFrame(r))
 	momentumScrollRef.value?.updateBounds()
-	momentumScrollRef.value?.scrollToBottomAnimated(0.4, 800)
+	// Сдвинуть скролл к низу контента, чтобы низ сосуда оставался видимым
+	momentumScrollRef.value?.scrollToBottom()
 })
 
 function initCanvas(): void {
