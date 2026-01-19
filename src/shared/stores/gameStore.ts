@@ -3,25 +3,52 @@ import { ref } from 'vue'
 import type { Cube } from '@/game/logic/types'
 
 const WIDTH = 8
-const HEIGHT = 20
-const WAVE_DURATION = 36 // seconds
+const BASE_HEIGHT = 20
+const BASE_WAVE_DURATION = 36
+const MIN_WAVE_DURATION = 12
+const WAVE_DURATION_DECREASE = 1.5
 const NUM_COLORS = 6
+
+/** Длительность волны в секундах: с ростом уровня уменьшается (мин. MIN_WAVE_DURATION) */
+export function getWaveDuration(level: number): number {
+	return Math.max(MIN_WAVE_DURATION, Math.floor(BASE_WAVE_DURATION - level * WAVE_DURATION_DECREASE))
+}
+
+/** Строк спавна за волну: с ростом уровня растёт (макс. 8) */
+export function getSpawnRowsForLevel(level: number): number {
+	return Math.min(8, 2 + Math.floor(level / 2))
+}
+
+/** Высота сосуда: каждые 5 уровней +4 ряда для бесконечной игры */
+export function getHeightForLevel(level: number): number {
+	return BASE_HEIGHT + 4 * Math.floor(level / 5)
+}
 
 export const useGameStore = defineStore('game', () => {
 	const grid = ref<(Cube | null)[][]>([])
 	const score = ref(0)
 	const waveIndex = ref(0)
-	const remainingTime = ref(WAVE_DURATION)
+	const remainingTime = ref(BASE_WAVE_DURATION)
 	const spawnRows = ref(2)
+	const height = ref(BASE_HEIGHT)
 	const isLocked = ref(false)
 	const isGameOver = ref(false)
+
+	function getHeight(): number {
+		return height.value
+	}
+
+	function setHeight(h: number) {
+		height.value = h
+	}
 
 	function reset() {
 		grid.value = []
 		score.value = 0
 		waveIndex.value = 0
-		remainingTime.value = WAVE_DURATION
-		spawnRows.value = 4
+		remainingTime.value = getWaveDuration(0)
+		spawnRows.value = getSpawnRowsForLevel(0)
+		height.value = BASE_HEIGHT
 		isLocked.value = false
 		isGameOver.value = false
 	}
@@ -61,12 +88,12 @@ export const useGameStore = defineStore('game', () => {
 		waveIndex,
 		remainingTime,
 		spawnRows,
+		height,
 		isLocked,
 		isGameOver,
 		// Constants
 		WIDTH,
-		HEIGHT,
-		WAVE_DURATION,
+		BASE_HEIGHT,
 		NUM_COLORS,
 		// Actions
 		reset,
@@ -75,7 +102,12 @@ export const useGameStore = defineStore('game', () => {
 		setWaveIndex,
 		setRemainingTime,
 		setSpawnRows,
+		setHeight,
+		getHeight,
 		setLocked,
 		setGameOver,
+		getWaveDuration,
+		getSpawnRowsForLevel,
+		getHeightForLevel,
 	}
 })

@@ -6,7 +6,7 @@ import { Application, Container, Sprite, Text, TextStyle, Graphics } from 'pixi.
 import { gsap } from 'gsap'
 import type { GameEvent, Cube } from '../logic/types'
 import { getBlockTexture, loadBlockTextures } from '../blockTextures'
-import { HEIGHT, WIDTH } from '../logic/grid'
+import { WIDTH } from '../logic/grid'
 
 const TILE_PADDING = 2
 
@@ -71,7 +71,7 @@ export class GameRenderer {
 		this.cubePositions.clear()
 
 		// Render all cubes
-		for (let r = 0; r < HEIGHT; r++) {
+		for (let r = 0; r < grid.length; r++) {
 			for (let c = 0; c < WIDTH; c++) {
 				const cube = grid[r]?.[c]
 				if (cube) {
@@ -510,11 +510,11 @@ export class GameRenderer {
 
 	updateTileSize(newTileSize: number): void {
 		this.tileSize = newTileSize
-		// Update all sprite positions and sizes
-		this.cubeContainers.forEach((cubeContainer, cubeId) => {
-			// We'd need to track positions to update properly
-			// For now, re-render will handle it
-		})
+	}
+
+	/** Переразмер канваса (Pixi) при расширении сосуда */
+	resizeCanvas(width: number, height: number): void {
+		this.app?.renderer?.resize(width, height)
 	}
 
 	async showFullClearBonus(bonus: number): Promise<void> {
@@ -573,7 +573,7 @@ export class GameRenderer {
 		const cubesInGrid = new Set<number>()
 
 		// Collect all cube IDs from grid
-		for (let r = 0; r < HEIGHT; r++) {
+		for (let r = 0; r < grid.length; r++) {
 			for (let c = 0; c < WIDTH; c++) {
 				const cube = grid[r]?.[c]
 				if (cube) {

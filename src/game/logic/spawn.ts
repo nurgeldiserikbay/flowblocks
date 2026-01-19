@@ -3,7 +3,7 @@
  */
 
 import type { Cube, GameEvent, SpawnResult } from './types'
-import { HEIGHT, WIDTH, getCube, setCube } from './grid'
+import { WIDTH, getCube, setCube } from './grid'
 import { applyGravityWithFallTracking } from './gravity'
 import { findMatchesAround } from './matches'
 
@@ -20,11 +20,12 @@ export function spawnWave(
 	// Existing cubes stay in place, new ones spawn above and fall
 	const newCubes: Array<{ cube: Cube; startRow: number; targetRow: number; c: number }> = []
 	
-	// Find the topmost occupied row for each column (or HEIGHT if column is empty)
+	const h = grid.length
+	// Find the topmost occupied row for each column (or h if column is empty)
 	const topRows: number[] = []
 	for (let c = 0; c < WIDTH; c++) {
-		let topRow = HEIGHT // Default: column is empty
-		for (let r = 0; r < HEIGHT; r++) {
+		let topRow = h
+		for (let r = 0; r < h; r++) {
 			if (getCube(grid, r, c) !== null) {
 				topRow = r
 				break
@@ -83,7 +84,7 @@ export function spawnWave(
 	// Place new cubes at their target positions (after gravity calculation)
 	// They will be animated falling from above
 	for (const { cube, targetRow, c } of newCubes) {
-		if (targetRow >= 0 && targetRow < HEIGHT) {
+		if (targetRow >= 0 && targetRow < h) {
 			setCube(grid, targetRow, c, cube)
 		}
 	}

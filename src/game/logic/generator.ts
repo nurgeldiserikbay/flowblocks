@@ -3,19 +3,19 @@
  */
 
 import type { Cube } from './types'
-import { HEIGHT, WIDTH, setCube } from './grid'
+import { WIDTH, setCube } from './grid'
 
 const NUM_COLORS = 6
 
-export function createInitialGrid(nextId: number = 1): {
+export function createInitialGrid(height: number, nextId: number = 1): {
 	grid: (Cube | null)[][]
 	nextId: number
 } {
 	const grid: (Cube | null)[][] = []
 
 	// Fill bottom half (rows H/2..H-1) with random cubes
-	const startRow = Math.floor(HEIGHT / 2)
-	for (let r = startRow; r < HEIGHT; r++) {
+	const startRow = Math.floor(height / 2)
+	for (let r = startRow; r < height; r++) {
 		grid[r] = []
 		for (let c = 0; c < WIDTH; c++) {
 			const color = Math.floor(Math.random() * NUM_COLORS)

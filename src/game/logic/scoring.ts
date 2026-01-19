@@ -3,10 +3,10 @@
  *
  * - Base: (moves + 5) per tile when it disappears
  * - Combo: extra points when tiles disappear in quick succession (invisible timer)
- * - Vessel clear: bonus = WIDTH * HEIGHT when grid is fully empty before next spawn
+ * - Vessel clear: bonus = WIDTH * height when grid is fully empty before next spawn
  */
 
-import { WIDTH, HEIGHT } from './grid'
+import { WIDTH } from './grid'
 
 /** Base score per removal batch: sum of (moves + 5) for each cell */
 export function calculateBaseRemovalScore(cells: { moves: number }[]): number {
@@ -20,6 +20,6 @@ export function calculateComboBonus(comboLevel: number, tileCount: number): numb
 }
 
 /** Vessel clear bonus when grid is fully empty before spawn: size of vessel */
-export function getVesselClearBonus(): number {
-	return WIDTH * HEIGHT
+export function getVesselClearBonus(grid: (unknown | null)[][]): number {
+	return WIDTH * grid.length
 }

@@ -68,18 +68,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '@/shared/components/AppLayout.vue'
 import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
 import MomentumScroll from '@/shared/components/MomentumScroll.vue'
 import { GameRenderer } from '@/game/render'
 import { GameController } from '@/game/GameController'
+import { storeToRefs } from 'pinia'
 import { useGameStore } from '@/shared/stores/gameStore'
-import { WIDTH, HEIGHT } from '@/game/logic'
+import { WIDTH } from '@/game/logic'
 
 const router = useRouter()
 const gameStore = useGameStore()
+const { height: gameHeight } = storeToRefs(gameStore)
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
 const momentumScrollRef = useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
@@ -100,26 +102,39 @@ const formattedTime = computed(() => {
 	return `${String(Math.floor(time / 60)).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 })
 
+const gridHeight = computed(() => gameStore.grid?.length ?? gameStore.getHeight())
 // Индикатор «сколько рядов до верха сосуда»: верхняя занятая строка (0 = у края, game over)
 const topmostRow = computed(() => {
 	const g = gameStore.grid
-	if (!g?.length) return HEIGHT
-	for (let r = 0; r < HEIGHT; r++) {
+	const h = gridHeight.value
+	if (!g?.length) return h
+	for (let r = 0; r < h; r++) {
 		for (let c = 0; c < WIDTH; c++) {
 			if (g[r]?.[c]) return r
 		}
 	}
-	return HEIGHT
+	return h
 })
 const rowsToTop = computed(() => topmostRow.value)
-const levelFillPercent = computed(() =>
-	Math.round(((HEIGHT - topmostRow.value) / HEIGHT) * 100)
-)
+const levelFillPercent = computed(() => {
+	const h = gridHeight.value
+	return h > 0 ? Math.round(((h - topmostRow.value) / h) * 100) : 0
+})
 const levelBarColor = computed(() => {
 	const p = levelFillPercent.value
 	if (p >= 80) return 'rgb(239, 68, 68)' // red
 	if (p >= 50) return 'rgb(250, 204, 21)' // amber
 	return 'rgb(74, 222, 128)' // green
+})
+
+// При расширении сосуда (рост height): переразмер канваса, рендер, обновление скролла
+watch(gameHeight, (newH, oldH) => {
+	if (newH <= (oldH ?? 0) || !renderer || !canvas.value) return
+	initCanvas()
+	renderer.resizeCanvas(canvas.value.width, canvas.value.height)
+	renderer.renderGrid(gameStore.grid, 1)
+	momentumScrollRef.value?.updateBounds()
+	momentumScrollRef.value?.scrollToBottomAnimated(0.4, 800)
 })
 
 function initCanvas(): void {
@@ -130,9 +145,10 @@ function initCanvas(): void {
 
 	const containerRect = container.getBoundingClientRect()
 	const maxWidth = Math.min(containerRect.width, 800)
+	const h = gameStore.getHeight()
 
 	const tileSize = maxWidth / WIDTH
-	const canvasHeight = HEIGHT * tileSize
+	const canvasHeight = h * tileSize
 
 	canvas.value.width = maxWidth
 	canvas.value.height = canvasHeight
@@ -152,8 +168,9 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent): { r: number; c: numbe
 	const tileSize = canvas.value.width / WIDTH
 	const c = Math.floor(x / tileSize)
 	const r = Math.floor(y / tileSize)
+	const h = gameStore.getHeight()
 
-	if (r >= 0 && r < HEIGHT && c >= 0 && c < WIDTH) {
+	if (r >= 0 && r < h && c >= 0 && c < WIDTH) {
 		return { r, c }
 	}
 

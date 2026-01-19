@@ -15,9 +15,9 @@ import {
 	calculateComboBonus,
 	getVesselClearBonus,
 	cloneGrid,
+	expandGrid,
 	type Position,
 	WIDTH,
-	HEIGHT,
 } from './logic'
 import type { GameEvent } from './logic/types'
 
@@ -41,7 +41,7 @@ export class GameController {
 		this.store.reset()
 
 		// Create initial grid
-		const { grid, nextId } = createInitialGrid(1)
+		const { grid, nextId } = createInitialGrid(this.store.getHeight(), 1)
 		this.nextCubeId = nextId
 		this.store.setGrid(grid)
 
@@ -85,8 +85,9 @@ export class GameController {
 
 		this.store.setLocked(true)
 
-		// Reset timer
-		this.store.setRemainingTime(this.store.WAVE_DURATION)
+		const newWaveIndex = this.store.waveIndex + 1
+		// Reset timer (длительность волны уменьшается с уровнем)
+		this.store.setRemainingTime(this.store.getWaveDuration(newWaveIndex))
 
 		// Spawn wave
 		const grid = cloneGrid(this.store.grid)
@@ -104,11 +105,17 @@ export class GameController {
 			await this.renderer.applyEvents(result.events)
 		}
 
-		// Update spawn rows: every 4 waves spawnRows += 1 up to max 6
-		const newWaveIndex = this.store.waveIndex + 1
 		this.store.setWaveIndex(newWaveIndex)
-		if (newWaveIndex % 4 === 0 && this.store.spawnRows < 6) {
-			this.store.setSpawnRows(this.store.spawnRows + 1)
+		// С ростом уровня растёт количество строк спавна (макс. 8)
+		this.store.setSpawnRows(this.store.getSpawnRowsForLevel(newWaveIndex))
+
+		// Расширение сосуда каждые 5 уровней для бесконечной игры
+		if (!result.gameOver) {
+			const newHeight = this.store.getHeightForLevel(newWaveIndex)
+			if (newHeight > this.store.getHeight()) {
+				expandGrid(grid, newHeight)
+				this.store.setHeight(newHeight)
+			}
 		}
 
 		// Sync positions after spawn animations
@@ -264,7 +271,7 @@ export class GameController {
 
 		// Check for vessel clear bonus
 		let isEmpty = true
-		for (let r = 0; r < HEIGHT; r++) {
+		for (let r = 0; r < grid.length; r++) {
 			for (let c = 0; c < WIDTH; c++) {
 				if (grid[r]?.[c]) {
 					isEmpty = false
@@ -275,7 +282,7 @@ export class GameController {
 		}
 
 		if (isEmpty) {
-			const clearBonus = getVesselClearBonus()
+			const clearBonus = getVesselClearBonus(grid)
 			this.store.addScore(clearBonus)
 			await this.renderer?.showFullClearBonus(clearBonus)
 		}

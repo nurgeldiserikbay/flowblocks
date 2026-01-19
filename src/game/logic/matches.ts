@@ -3,13 +3,13 @@
  */
 
 import type { Cube, Position } from './types'
-import { getCube, HEIGHT, WIDTH } from './grid'
+import { getCube, WIDTH } from './grid'
 
 export function findMatches(grid: (Cube | null)[][]): Position[] {
 	const matched = new Set<string>()
+	const h = grid.length
 
-	// Check horizontal matches
-	for (let r = 0; r < HEIGHT; r++) {
+	for (let r = 0; r < h; r++) {
 		let start = 0
 		let lastColor: number | null = null
 		
@@ -31,13 +31,11 @@ export function findMatches(grid: (Cube | null)[][]): Position[] {
 		}
 	}
 
-	// Check vertical matches
 	for (let c = 0; c < WIDTH; c++) {
 		let start = 0
 		let lastColor: number | null = null
-		
-		for (let r = 0; r <= HEIGHT; r++) {
-			const cube = r < HEIGHT ? getCube(grid, r, c) : null
+		for (let r = 0; r <= h; r++) {
+			const cube = r < h ? getCube(grid, r, c) : null
 			const currentColor = cube ? cube.color : null
 
 			if (currentColor !== lastColor) {
@@ -72,6 +70,7 @@ export function findMatchesAround(
 ): Position[] {
 	const movedSet = new Set(positions.map((p) => `${p.r},${p.c}`))
 	const matched = new Set<string>()
+	const h = grid.length
 
 	// Helper: does this segment [start, end) in row r contain any moved position?
 	const segmentTouchesMovedHorz = (r: number, start: number, end: number): boolean => {
@@ -91,9 +90,8 @@ export function findMatchesAround(
 	const rowsToCheck = new Set(positions.map((p) => p.r))
 	const colsToCheck = new Set(positions.map((p) => p.c))
 
-	// Horizontal: only in rows that have a moved tile, and only segments that touch a moved tile
 	for (const r of rowsToCheck) {
-		if (r < 0 || r >= HEIGHT) continue
+		if (r < 0 || r >= h) continue
 
 		let start = 0
 		let lastColor: number | null = null
@@ -114,15 +112,12 @@ export function findMatchesAround(
 		}
 	}
 
-	// Vertical: only in columns that have a moved tile, and only segments that touch a moved tile
 	for (const c of colsToCheck) {
 		if (c < 0 || c >= WIDTH) continue
-
 		let start = 0
 		let lastColor: number | null = null
-
-		for (let r = 0; r <= HEIGHT; r++) {
-			const cube = r < HEIGHT ? getCube(grid, r, c) : null
+		for (let r = 0; r <= h; r++) {
+			const cube = r < h ? getCube(grid, r, c) : null
 			const currentColor = cube ? cube.color : null
 
 			if (currentColor !== lastColor) {

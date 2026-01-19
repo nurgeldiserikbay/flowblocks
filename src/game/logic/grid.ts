@@ -1,18 +1,18 @@
 /**
- * Grid helper functions
+ * Grid helper functions.
+ * Высота определяется grid.length (сосуд может расти с уровнем).
  */
 
 import type { Cube, Position } from './types'
 
 const WIDTH = 8
-const HEIGHT = 20
 
 export function getCube(
 	grid: (Cube | null)[][],
 	r: number,
 	c: number
 ): Cube | null {
-	if (r < 0 || r >= HEIGHT || c < 0 || c >= WIDTH) return null
+	if (r < 0 || r >= grid.length || c < 0 || c >= WIDTH) return null
 	return grid[r]?.[c] ?? null
 }
 
@@ -22,9 +22,16 @@ export function setCube(
 	c: number,
 	cube: Cube | null
 ): void {
-	if (r < 0 || r >= HEIGHT || c < 0 || c >= WIDTH) return
+	if (r < 0 || r >= grid.length || c < 0 || c >= WIDTH) return
 	if (!grid[r]) grid[r] = []
 	grid[r][c] = cube
+}
+
+/** Добавить пустые ряды вниз сосуда (расширение для бесконечной игры) */
+export function expandGrid(grid: (Cube | null)[][], newHeight: number): void {
+	while (grid.length < newHeight) {
+		grid.push(Array(WIDTH).fill(null))
+	}
 }
 
 export function posToIdx(r: number, c: number): number {
@@ -59,4 +66,4 @@ export function isAdjacent(a: Position, b: Position): boolean {
 	return (dr === 1 && dc === 0) || (dr === 0 && dc === 1)
 }
 
-export { WIDTH, HEIGHT }
+export { WIDTH }

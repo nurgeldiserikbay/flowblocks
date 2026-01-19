@@ -3,7 +3,7 @@
  */
 
 import type { Cube, Position } from './types'
-import { getCube, isAdjacent, swapCubes, setCube, HEIGHT } from './grid'
+import { getCube, isAdjacent, swapCubes, setCube } from './grid'
 
 export function trySwap(
 	grid: (Cube | null)[][],
@@ -55,10 +55,7 @@ export function trySlide(
 }
 
 export function isSupported(grid: (Cube | null)[][], r: number, c: number): boolean {
-	// Floor supports everything
-	if (r === HEIGHT - 1) return true
-
-	// Check if there's a cube below
+	if (r === grid.length - 1) return true
 	const below = getCube(grid, r + 1, c)
 	return below !== null
 }
