@@ -21,7 +21,7 @@ export const useGameStore = defineStore('game', () => {
 		score.value = 0
 		waveIndex.value = 0
 		remainingTime.value = WAVE_DURATION
-		spawnRows.value = 2
+		spawnRows.value = 4
 		isLocked.value = false
 		isGameOver.value = false
 	}
