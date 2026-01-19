@@ -1,44 +1,25 @@
 /**
  * Scoring logic
+ *
+ * - Base: (moves + 5) per tile when it disappears
+ * - Combo: extra points when tiles disappear in quick succession (invisible timer)
+ * - Vessel clear: bonus = WIDTH * HEIGHT when grid is fully empty before next spawn
  */
 
-export function calculateRemovalScore(removedCounts: number[]): number {
-	let totalScore = 0
+import { WIDTH, HEIGHT } from './grid'
 
-	for (const N of removedCounts) {
-		// Base: 10*N + 5*max(0, N-3)
-		const base = 10 * N + 5 * Math.max(0, N - 3)
-		totalScore += base
-	}
-
-	return totalScore
+/** Base score per removal batch: sum of (moves + 5) for each cell */
+export function calculateBaseRemovalScore(cells: { moves: number }[]): number {
+	return cells.reduce((sum, c) => sum + (c.moves + 5), 0)
 }
 
-export function calculateChainMultiplier(chainIndex: number): number {
-	// multiplier = 1 + (chainIndex-1)*0.25 (cap 3x)
-	return Math.min(3, 1 + (chainIndex - 1) * 0.25)
+/** Combo bonus: comboLevel * 6 * tileCount. comboLevel 0 = no bonus (first in chain). */
+export function calculateComboBonus(comboLevel: number, tileCount: number): number {
+	if (comboLevel <= 0) return 0
+	return comboLevel * 6 * tileCount
 }
 
-export function calculateVesselClearBonus(
-	remainingTime: number,
-	waveDuration: number,
-	waveIndex: number
-): number {
-	// timeFactor = remainingTime / waveDuration
-	const timeFactor = remainingTime / waveDuration
-
-	// clearBonus = round(500 + 1500 * pow(timeFactor, 1.6)) * (1 + waveIndex*0.03)
-	const baseBonus = 500 + 1500 * Math.pow(timeFactor, 1.6)
-	const waveMultiplier = 1 + waveIndex * 0.03
-	const bonus = Math.round(baseBonus * waveMultiplier)
-
-	return bonus
-}
-
-export function calculateTotalScore(
-	removalBatchScore: number,
-	chainMultiplier: number,
-	vesselClearBonus: number = 0
-): number {
-	return Math.round(removalBatchScore * chainMultiplier) + vesselClearBonus
+/** Vessel clear bonus when grid is fully empty before spawn: size of vessel */
+export function getVesselClearBonus(): number {
+	return WIDTH * HEIGHT
 }

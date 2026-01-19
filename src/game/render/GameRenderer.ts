@@ -222,7 +222,11 @@ export class GameRenderer {
 					await this.animateFall(event.items)
 					break
 				case 'remove':
-					await this.animateRemove(event.cells)
+					await this.animateRemove(
+						event.cells,
+						event.baseScore,
+						event.comboBonus
+					)
 					break
 				case 'spawn':
 					await this.animateSpawn(event.cells)
@@ -335,7 +339,9 @@ export class GameRenderer {
 	}
 
 	private async animateRemove(
-		cells: Array<{ r: number; c: number; color: number; id: number }>
+		cells: Array<{ r: number; c: number; color: number; id: number; moves?: number }>,
+		baseScore?: number,
+		comboBonus?: number
 	): Promise<void> {
 		// Use cube IDs directly from the event instead of finding by position
 		const cubeIdsToRemove: number[] = cells.map((cell) => cell.id)
@@ -345,6 +351,71 @@ export class GameRenderer {
 			.filter((c): c is CubeContainer => c !== undefined)
 
 		if (containers.length === 0) return
+
+		// Score popup at centroid of removed cells
+		if (
+			this.gameContainer &&
+			cells.length > 0 &&
+			(baseScore !== undefined || (comboBonus !== undefined && (comboBonus ?? 0) > 0))
+		) {
+			const avgC = cells.reduce((s, c) => s + c.c, 0) / cells.length
+			const avgR = cells.reduce((s, c) => s + c.r, 0) / cells.length
+			const cx = (avgC + 0.5) * this.tileSize
+			const cy = (avgR + 0.5) * this.tileSize
+
+			const popup = new Container()
+			popup.x = cx
+			popup.y = cy
+
+			const baseVal = baseScore ?? 0
+			if (baseVal > 0) {
+				const t = new Text({
+					text: `+${baseVal}`,
+					style: new TextStyle({
+						fontFamily: 'Arial',
+						fontSize: Math.max(14, this.tileSize / 2),
+						fill: 0x7cff7c,
+						align: 'center',
+						fontWeight: 'bold',
+					}),
+				})
+				t.anchor.set(0.5)
+				t.x = 0
+				t.y = 0
+				t.style.stroke = { color: 0x000000, width: 2 }
+				popup.addChild(t)
+			}
+			const comboVal = comboBonus ?? 0
+			if (comboVal > 0) {
+				const t = new Text({
+					text: `+${comboVal} COMBO`,
+					style: new TextStyle({
+						fontFamily: 'Arial',
+						fontSize: Math.max(12, this.tileSize / 2.5),
+						fill: 0xffaa00,
+						align: 'center',
+						fontWeight: 'bold',
+					}),
+				})
+				t.anchor.set(0.5)
+				t.x = 0
+				t.y = baseVal > 0 ? -22 : 0
+				t.style.stroke = { color: 0x000000, width: 2 }
+				popup.addChild(t)
+			}
+
+			this.gameContainer.addChild(popup)
+			gsap.to(popup, {
+				y: cy - 45,
+				alpha: 0,
+				duration: 2.0,
+				ease: 'power2.out',
+				onComplete: () => {
+					if (popup.parent) popup.parent.removeChild(popup)
+					popup.destroy({ children: true })
+				},
+			})
+		}
 
 		await Promise.all(
 			containers.map(
@@ -443,6 +514,55 @@ export class GameRenderer {
 		this.cubeContainers.forEach((cubeContainer, cubeId) => {
 			// We'd need to track positions to update properly
 			// For now, re-render will handle it
+		})
+	}
+
+	async showFullClearBonus(bonus: number): Promise<void> {
+		if (!this.app) return
+
+		const popup = new Container()
+		popup.x = this.canvas.width / 2
+		popup.y = this.canvas.height / 2
+
+		const t = new Text({
+			text: `CLEAR! +${bonus}`,
+			style: new TextStyle({
+				fontFamily: 'Arial',
+				fontSize: Math.max(28, this.tileSize * 1.2),
+				fill: 0xffdd00,
+				align: 'center',
+				fontWeight: 'bold',
+			}),
+		})
+		t.anchor.set(0.5)
+		t.x = 0
+		t.y = 0
+		t.style.stroke = { color: 0x000000, width: 4 }
+		popup.addChild(t)
+
+		popup.alpha = 0
+		popup.scale.set(0.5)
+		this.app.stage.addChild(popup)
+
+		await new Promise<void>((resolve) => {
+			gsap.to(popup, {
+				alpha: 1,
+				duration: 0.3,
+				ease: 'back.out',
+			})
+			gsap.to(popup.scale, { x: 1.2, y: 1.2, duration: 0.3, ease: 'back.out' })
+			gsap.to(popup, {
+				alpha: 0,
+				y: popup.y - 60,
+				duration: 1.0,
+				delay: 1.4,
+				ease: 'power2.in',
+				onComplete: () => {
+					if (popup.parent) popup.parent.removeChild(popup)
+					popup.destroy({ children: true })
+					resolve()
+				},
+			})
 		})
 	}
 

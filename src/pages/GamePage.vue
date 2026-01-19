@@ -9,20 +9,35 @@
 		</template>
 
 		<div class="game-page">
-			<MomentumScroll
-				ref="momentumScrollRef"
-				:drag-mult="1.55"
-				:wheel-mult="2.2"
-				:max-overscroll="80"
-				:momentum-resistance="0.9"
-				:spring-k="90"
-				:spring-damping="0.88"
-				class="game-page__scroll-container"
-			>
-				<div class="game-page__canvas-container">
-					<canvas ref="canvas" class="game-canvas"></canvas>
+			<div class="game-page__play-area">
+				<MomentumScroll
+					ref="momentumScrollRef"
+					:drag-mult="1.55"
+					:wheel-mult="2.2"
+					:max-overscroll="80"
+					:momentum-resistance="0.9"
+					:spring-k="90"
+					:spring-damping="0.88"
+					class="game-page__scroll-container"
+				>
+					<div class="game-page__canvas-container">
+						<canvas ref="canvas" class="game-canvas"></canvas>
+					</div>
+				</MomentumScroll>
+
+				<div v-if="!gameStore.isGameOver" class="level-indicator" :title="`До верха: ${rowsToTop} ряд.`">
+					<div class="level-indicator__label">{{ rowsToTop }}</div>
+					<div class="level-indicator__bar">
+						<div
+							class="level-indicator__fill"
+							:style="{
+								height: levelFillPercent + '%',
+								backgroundColor: levelBarColor,
+							}"
+						/>
+					</div>
 				</div>
-			</MomentumScroll>
+			</div>
 
 			<button class="btn btn--back btn--game" @click="showExitDialog">
 				← Exit
@@ -39,9 +54,13 @@
 
 			<div v-if="gameStore.isGameOver" class="game-overlay">
 				<div class="game-overlay__content">
-					<h2>Game Over</h2>
-					<p>Final Score: {{ gameStore.score }}</p>
-					<button class="btn btn--restart" @click="restart">Restart</button>
+					<div class="game-overlay__icon">✕</div>
+					<h2 class="game-overlay__title">Game Over</h2>
+					<p class="game-overlay__score">Final Score: <strong>{{ gameStore.score }}</strong></p>
+					<button class="btn btn--restart" @click="restart">
+						<span class="btn--restart__icon">↻</span>
+						Restart
+					</button>
 				</div>
 			</div>
 		</div>
@@ -79,6 +98,28 @@ const formattedTime = computed(() => {
 	const time = Math.max(0, Math.floor(gameStore.remainingTime))
 	const seconds = time % 60
 	return `${String(Math.floor(time / 60)).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+})
+
+// Индикатор «сколько рядов до верха сосуда»: верхняя занятая строка (0 = у края, game over)
+const topmostRow = computed(() => {
+	const g = gameStore.grid
+	if (!g?.length) return HEIGHT
+	for (let r = 0; r < HEIGHT; r++) {
+		for (let c = 0; c < WIDTH; c++) {
+			if (g[r]?.[c]) return r
+		}
+	}
+	return HEIGHT
+})
+const rowsToTop = computed(() => topmostRow.value)
+const levelFillPercent = computed(() =>
+	Math.round(((HEIGHT - topmostRow.value) / HEIGHT) * 100)
+)
+const levelBarColor = computed(() => {
+	const p = levelFillPercent.value
+	if (p >= 80) return 'rgb(239, 68, 68)' // red
+	if (p >= 50) return 'rgb(250, 204, 21)' // amber
+	return 'rgb(74, 222, 128)' // green
 })
 
 function initCanvas(): void {
@@ -322,10 +363,18 @@ function restart(): void {
 	flex: 1;
 	display: flex;
 	flex-direction: column;
-	padding: 1rem 2rem;
+	padding: 1rem 1rem 1rem 2rem;
 	gap: 1rem;
 	position: relative;
 	overflow: hidden;
+
+	&__play-area {
+		display: flex;
+		align-items: stretch;
+		gap: 0.5rem;
+		flex: 1;
+		min-height: 400px;
+	}
 
 	&__scroll-container {
 		flex: 1;
@@ -344,6 +393,51 @@ function restart(): void {
 		align-items: flex-start;
 		justify-content: center;
 		width: 100%;
+	}
+}
+
+.level-indicator {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	width: 1.25rem;
+	flex-shrink: 0;
+	gap: 0.25rem;
+
+	&__label {
+		font-size: 0.7rem;
+		font-weight: 700;
+		color: rgba(255, 255, 255, 0.95);
+		background: linear-gradient(
+			135deg,
+			rgba(102, 126, 234, 0.5) 0%,
+			rgba(118, 75, 162, 0.5) 100%
+		);
+		backdrop-filter: blur(8px);
+		border-radius: 6px;
+		padding: 0.15rem 0.35rem;
+		line-height: 1;
+		border: 1px solid rgba(255, 255, 255, 0.25);
+	}
+
+	&__bar {
+		flex: 1;
+		width: 100%;
+		min-height: 60px;
+		background: rgba(0, 0, 0, 0.4);
+		border-radius: 6px;
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		position: relative;
+		overflow: hidden;
+	}
+
+	&__fill {
+		position: absolute;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		border-radius: 0 0 5px 5px;
+		transition: height 0.25s ease, background-color 0.2s ease;
 	}
 }
 
@@ -395,29 +489,99 @@ function restart(): void {
 	left: 0;
 	right: 0;
 	bottom: 0;
-	background: rgba(0, 0, 0, 0.8);
+	background: rgba(0, 0, 0, 0.75);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	z-index: 10;
+	animation: game-overlay-fade 0.35s ease-out;
 
 	&__content {
-		background: rgba(255, 255, 255, 0.1);
-		backdrop-filter: blur(20px);
-		padding: 2rem;
-		border-radius: 16px;
+		background: linear-gradient(
+			145deg,
+			rgba(30, 31, 58, 0.95) 0%,
+			rgba(43, 47, 108, 0.9) 50%,
+			rgba(30, 31, 58, 0.95) 100%
+		);
+		backdrop-filter: blur(24px);
+		-webkit-backdrop-filter: blur(24px);
+		padding: clamp(2rem, 5vw, 2.75rem) clamp(2rem, 5vw, 3rem);
+		border-radius: 28px;
+		max-width: min(500px, 80vw);
+		width: 70%;
 		text-align: center;
 		color: white;
+		border: 2px solid rgba(255, 255, 255, 0.15);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.12),
+			0 0 0 1px rgba(139, 92, 246, 0.2),
+			0 24px 48px rgba(0, 0, 0, 0.5),
+			0 0 80px rgba(139, 92, 246, 0.15);
+		animation: game-overlay-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
+	}
 
-		h2 {
-			margin: 0 0 1rem;
-			font-size: 2rem;
-		}
+	&__icon {
+		width: 64px;
+		height: 64px;
+		margin: 0 auto 1.15rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 1.65rem;
+		font-weight: 700;
+		color: rgba(248, 113, 113, 0.95);
+		background: rgba(248, 113, 113, 0.15);
+		border-radius: 50%;
+		border: 2px solid rgba(248, 113, 113, 0.35);
+		box-shadow: 0 0 24px rgba(248, 113, 113, 0.2);
+	}
 
-		p {
-			margin: 0 0 1.5rem;
-			font-size: 1.25rem;
+	&__title {
+		margin: 0 0 0.9rem;
+		font-size: clamp(1.9rem, 5.5vw, 2.5rem);
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		background: linear-gradient(135deg, #f8f4ff 0%, #e9e0ff 50%, #c4b5fd 100%);
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+		text-shadow: none;
+	}
+
+	&__score {
+		margin: 0 0 2rem;
+		font-size: 1.25rem;
+		color: rgba(255, 255, 255, 0.85);
+		line-height: 1.5;
+
+		strong {
+			font-size: 1.65rem;
+			font-weight: 800;
+			color: #c4b5fd;
+			text-shadow: 0 0 20px rgba(196, 181, 253, 0.5);
 		}
+	}
+}
+
+@keyframes game-overlay-fade {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes game-overlay-pop {
+	from {
+		opacity: 0;
+		transform: scale(0.85) translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1) translateY(0);
 	}
 }
 
@@ -456,16 +620,46 @@ function restart(): void {
 		margin: 0 auto;
 		width: 100%;
 	}
+}
 
-	&--restart {
-		background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-		border-color: rgba(147, 197, 253, 0.4);
-		padding: 1rem 2rem;
-		font-size: 1.125rem;
+.btn--restart {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	cursor: pointer;
+	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
+	background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 50%, #5b21b6 100%);
+	border: 2px solid rgba(196, 181, 253, 0.4);
+	padding: 1.1rem 2.25rem;
+	font-size: 1.2rem;
+	font-weight: 700;
+	border-radius: 18px;
+	box-shadow:
+		0 4px 16px rgba(139, 92, 246, 0.4),
+		inset 0 1px 0 rgba(255, 255, 255, 0.2);
+	color: #fff;
 
-		&:hover {
-			background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
-		}
+	&:hover {
+		background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 50%, #7c3aed 100%);
+		border-color: rgba(196, 181, 253, 0.6);
+		box-shadow:
+			0 6px 24px rgba(139, 92, 246, 0.5),
+			0 0 32px rgba(139, 92, 246, 0.25),
+			inset 0 1px 0 rgba(255, 255, 255, 0.25);
+		transform: translateY(-2px);
+	}
+
+	&:active {
+		transform: translateY(0) scale(0.98);
+		box-shadow: 0 2px 12px rgba(139, 92, 246, 0.4);
+	}
+
+	&__icon {
+		font-size: 1.45rem;
+		line-height: 1;
 	}
 }
 </style>

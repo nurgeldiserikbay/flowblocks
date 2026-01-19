@@ -35,12 +35,12 @@ export function resolveAfterMove(
 
 		if (matches.length > 0) {
 			chainCount++
-			const removeCells: Array<{ r: number; c: number; color: number; id: number }> = []
+			const removeCells: Array<{ r: number; c: number; color: number; id: number; moves: number }> = []
 
 			for (const { r, c } of matches) {
 				const cube = getCube(grid, r, c)
 				if (cube) {
-					removeCells.push({ r, c, color: cube.color, id: cube.id })
+					removeCells.push({ r, c, color: cube.color, id: cube.id, moves: cube.moves })
 					setCube(grid, r, c, null)
 				}
 			}

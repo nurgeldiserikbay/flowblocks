@@ -41,7 +41,10 @@ export type GameEvent =
 				c: number
 				color: number
 				id: number
+				moves: number
 			}>
+			baseScore?: number
+			comboBonus?: number
 	  }
 	| {
 			type: 'spawn'

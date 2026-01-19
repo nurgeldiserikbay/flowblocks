@@ -11,10 +11,9 @@ import {
 	applyGravityWithFallTracking,
 	resolveAfterMove,
 	spawnWave,
-	calculateRemovalScore,
-	calculateChainMultiplier,
-	calculateVesselClearBonus,
-	calculateTotalScore,
+	calculateBaseRemovalScore,
+	calculateComboBonus,
+	getVesselClearBonus,
 	cloneGrid,
 	type Position,
 	WIDTH,
@@ -22,12 +21,16 @@ import {
 } from './logic'
 import type { GameEvent } from './logic/types'
 
+const COMBO_WINDOW_MS = 2500
+
 export class GameController {
 	private renderer: GameRenderer | null = null
 	private store = useGameStore()
 	private nextCubeId: number = 1
 	private timerInterval: number | null = null
 	private lastTickTime: number = 0
+	private comboLevel: number = 0
+	private comboTimer: ReturnType<typeof setTimeout> | null = null
 
 	constructor(renderer: GameRenderer) {
 		this.renderer = renderer
@@ -73,6 +76,12 @@ export class GameController {
 
 	private async onWaveEnd(): Promise<void> {
 		if (this.store.isLocked || this.store.isGameOver) return
+
+		if (this.comboTimer !== null) {
+			clearTimeout(this.comboTimer)
+			this.comboTimer = null
+		}
+		this.comboLevel = 0
 
 		this.store.setLocked(true)
 
@@ -218,12 +227,25 @@ export class GameController {
 		const resolveResult = resolveAfterMove(grid, checkPositions)
 		this.store.setGrid(grid)
 
-		// Calculate score
-		if (resolveResult.removedCounts.length > 0) {
-			const removalScore = calculateRemovalScore(resolveResult.removedCounts)
-			const chainMultiplier = calculateChainMultiplier(resolveResult.chainCount)
-			const totalScore = calculateTotalScore(removalScore, chainMultiplier)
-			this.store.addScore(totalScore)
+		// Enrich remove events with baseScore/comboBonus and add score
+		for (const ev of resolveResult.events) {
+			if (ev.type !== 'remove') continue
+			const baseScore = calculateBaseRemovalScore(ev.cells)
+			let comboBonus = 0
+			if (this.comboTimer !== null) {
+				this.comboLevel++
+				comboBonus = calculateComboBonus(this.comboLevel, ev.cells.length)
+				clearTimeout(this.comboTimer)
+			} else {
+				this.comboLevel = 1
+			}
+			this.comboTimer = setTimeout(() => {
+				this.comboTimer = null
+				this.comboLevel = 0
+			}, COMBO_WINDOW_MS)
+			ev.baseScore = baseScore
+			ev.comboBonus = comboBonus
+			this.store.addScore(baseScore + comboBonus)
 		}
 
 		// Apply resolve events (remove, fall, etc.)
@@ -253,12 +275,9 @@ export class GameController {
 		}
 
 		if (isEmpty) {
-			const clearBonus = calculateVesselClearBonus(
-				this.store.remainingTime,
-				this.store.WAVE_DURATION,
-				this.store.waveIndex
-			)
+			const clearBonus = getVesselClearBonus()
 			this.store.addScore(clearBonus)
+			await this.renderer?.showFullClearBonus(clearBonus)
 		}
 
 		this.store.setLocked(false)
@@ -278,6 +297,10 @@ export class GameController {
 		if (this.timerInterval) {
 			window.clearInterval(this.timerInterval)
 			this.timerInterval = null
+		}
+		if (this.comboTimer !== null) {
+			clearTimeout(this.comboTimer)
+			this.comboTimer = null
 		}
 	}
 
