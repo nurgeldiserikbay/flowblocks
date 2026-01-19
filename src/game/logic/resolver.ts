@@ -1,30 +1,42 @@
 /**
  * Resolve matches and gravity after a move
+ *
+ * Matches are removed only if they touch "moved" blocks:
+ * - 1st iteration: blocks moved by the player (from, to)
+ * - Cascade: blocks that fell in the previous step (landing positions)
+ * Thus, pre-existing matches that were not affected by the move or by falls never disappear.
  */
 
-import type { GameEvent, ResolveResult } from './types'
+import type { GameEvent, ResolveResult, Position } from './types'
 import { getCube, setCube } from './grid'
-import { applyGravity } from './gravity'
-import { findMatches } from './matches'
+import { applyGravityWithFallTracking } from './gravity'
+import { findMatchesAround } from './matches'
 
 export function resolveAfterMove(
-	grid: (Cube | null)[][]
+	grid: (Cube | null)[][],
+	checkPositions?: Position[]
 ): ResolveResult {
 	const events: GameEvent[] = []
 	const removedCounts: number[] = []
 	let chainCount = 0
 
 	let hasChanges = true
+	// Positions to consider "moved": 1st = player move; cascade = blocks that just fell
+	let currentCheckPositions: Position[] = checkPositions ?? []
+
 	while (hasChanges) {
 		hasChanges = false
 
-		// Find matches
-		const matches = findMatches(grid)
+		// Only remove matches that touch moved blocks (player move or blocks that fell)
+		const matches =
+			currentCheckPositions.length > 0
+				? findMatchesAround(grid, currentCheckPositions)
+				: []
+
 		if (matches.length > 0) {
 			chainCount++
 			const removeCells: Array<{ r: number; c: number; color: number; id: number }> = []
 
-			// Remove matched cubes and collect info
 			for (const { r, c } of matches) {
 				const cube = getCube(grid, r, c)
 				if (cube) {
@@ -34,26 +46,15 @@ export function resolveAfterMove(
 			}
 
 			removedCounts.push(removeCells.length)
+			events.push({ type: 'remove', cells: removeCells })
 
-			// Add remove event
-			events.push({
-				type: 'remove',
-				cells: removeCells,
-			})
+			const fallItems = applyGravityWithFallTracking(grid)
 
-			// Apply gravity
-			applyGravity(grid)
-
-			// Collect fall events (simplified: just track what moved)
-			const fallItems: Array<{ from: { r: number; c: number }; to: { r: number; c: number }; color: number }> = []
-			// Note: In a full implementation, we'd track actual positions before/after gravity
-			// For now, we'll generate fall events on the renderer side if needed
+			// Next cascade: only matches that touch blocks that just fell
+			currentCheckPositions = fallItems.map((f) => f.to)
 
 			if (fallItems.length > 0) {
-				events.push({
-					type: 'fall',
-					items: fallItems,
-				})
+				events.push({ type: 'fall', items: fallItems })
 			}
 
 			hasChanges = true

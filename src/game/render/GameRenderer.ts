@@ -377,45 +377,36 @@ export class GameRenderer {
 		})
 	}
 
-	private async animateSpawn(cells: Array<{ r: number; c: number; color: number; fromRow?: number; toRow?: number }>): Promise<void> {
-		// Find cubes that need to be animated (they should already be in the grid from renderGrid)
+	private async animateSpawn(cells: Array<{ id: number; r: number; c: number; color: number; fromRow?: number; toRow?: number }>): Promise<void> {
 		const animations = cells.map((cell) => {
-			const targetRow = cell.toRow !== undefined ? cell.toRow : cell.r
-			const cubeId = this.findCubeIdAt(targetRow, cell.c)
-			if (cubeId === null) return Promise.resolve()
+			const cubeContainer = this.cubeContainers.get(cell.id)
+			if (!cubeContainer) return Promise.resolve() // removed in resolve
 
-			const cubeContainer = this.cubeContainers.get(cubeId)
-			if (!cubeContainer) return Promise.resolve()
+			const pos = this.cubePositions.get(cell.id)
+			if (!pos) return Promise.resolve()
 
-			// If fromRow is specified, animate falling from above
+			const targetRow = pos.r
+			const targetY = targetRow * this.tileSize
+
 			if (cell.fromRow !== undefined && cell.fromRow < 0) {
-				// Calculate positions
 				const startY = cell.fromRow * this.tileSize
-				const targetY = targetRow * this.tileSize
-				
-				// Move container to starting position above grid
 				cubeContainer.container.y = startY
 				cubeContainer.container.alpha = 1
 				cubeContainer.container.scale.set(1)
-
-				// Animate falling down smoothly
 				return new Promise<void>((resolve) => {
 					gsap.to(cubeContainer.container, {
 						y: targetY,
 						duration: 0.6,
 						ease: 'power2.out',
 						onComplete: () => {
-							// Ensure final position is correct
 							cubeContainer.container.y = targetY
 							resolve()
 						},
 					})
 				})
 			} else {
-				// Fallback: fade in animation
 				cubeContainer.container.alpha = 0
 				cubeContainer.container.scale.set(0)
-
 				return new Promise<void>((resolve) => {
 					gsap.to(cubeContainer.container, {
 						alpha: 1,
@@ -427,7 +418,6 @@ export class GameRenderer {
 				})
 			}
 		})
-
 		await Promise.all(animations)
 	}
 

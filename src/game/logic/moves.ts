@@ -15,6 +15,9 @@ export function trySwap(
 	const cubeB = getCube(grid, b.r, b.c)
 	if (!cubeA || !cubeB) return false
 
+	// Starting cube (a) must have moves > 0 (cannot start move from locked tile)
+	if (cubeA.moves === 0) return false
+
 	// Must be adjacent
 	if (!isAdjacent(a, b)) return false
 
@@ -32,6 +35,9 @@ export function trySlide(
 	const cube = getCube(grid, from.r, from.c)
 	if (!cube) return false
 
+	// Starting cube must have moves > 0 (cannot start move from locked tile)
+	if (cube.moves === 0) return false
+
 	// To must be empty
 	const targetCube = getCube(grid, to.r, to.c)
 	if (targetCube) return false
@@ -41,17 +47,14 @@ export function trySlide(
 	const dc = to.c - from.c
 	if (dr !== 0 || Math.abs(dc) !== 1) return false
 
-	// Cube must be supported from below (on floor or another cube)
-	if (!isSupported(grid, from.r, from.c)) return false
-
-	// Perform slide
+	// Perform slide (cube may fall after move, checked separately)
 	const fromCube = getCube(grid, from.r, from.c)
 	setCube(grid, from.r, from.c, null)
 	setCube(grid, to.r, to.c, fromCube!)
 	return true
 }
 
-function isSupported(grid: (Cube | null)[][], r: number, c: number): boolean {
+export function isSupported(grid: (Cube | null)[][], r: number, c: number): boolean {
 	// Floor supports everything
 	if (r === HEIGHT - 1) return true
 

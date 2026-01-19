@@ -4,8 +4,8 @@
 
 import type { Cube, GameEvent, SpawnResult } from './types'
 import { HEIGHT, WIDTH, getCube, setCube } from './grid'
-import { applyGravity } from './gravity'
-import { findMatches } from './matches'
+import { applyGravityWithFallTracking } from './gravity'
+import { findMatchesAround } from './matches'
 
 const NUM_COLORS = 6
 
@@ -33,42 +33,51 @@ export function spawnWave(
 		topRows[c] = topRow
 	}
 
-	// Create new cubes that will spawn above and fall
+	// For each column, track which rows are already assigned to new cubes (to avoid overwriting)
+	const usedRowsByCol: Map<number, Set<number>> = new Map()
+	for (let c = 0; c < WIDTH; c++) {
+		usedRowsByCol.set(c, new Set())
+	}
+
+	// Create new cubes — only in truly empty rows (never overwrite existing — avoids "changing colors")
 	for (let spawnIndex = 0; spawnIndex < spawnRows; spawnIndex++) {
 		for (let c = 0; c < WIDTH; c++) {
+			// Desired row: above existing blocks. Can be negative when column is almost full.
+			let targetRow = topRows[c] - spawnRows + spawnIndex
+			const used = usedRowsByCol.get(c)!
+			// If negative or already taken by another new cube, pick the next free *empty* row (0..topRows[c]-1)
+			if (targetRow < 0 || used.has(targetRow)) {
+				let found = false
+				for (let r = 0; r < topRows[c]; r++) {
+					if (!used.has(r)) {
+						targetRow = r
+						found = true
+						break
+					}
+				}
+				if (!found) continue // no empty row — skip this cube to avoid overwriting existing
+			}
+			used.add(targetRow)
+
 			const color = Math.floor(Math.random() * NUM_COLORS)
 			const moves = Math.floor(Math.random() * 20) + 1 // 1-20
-			const cube: Cube = {
-				id: nextId++,
-				color,
-				moves,
-			}
-			
-			// Calculate where cube should land
-			// If column has cubes, place above them; otherwise place at top
-			const targetRow = Math.max(0, topRows[c] - spawnRows + spawnIndex)
-			
-			// Start from above the grid (negative row for animation)
+			const cube: Cube = { id: nextId++, color, moves }
 			const startRow = -spawnRows + spawnIndex
-			
 			newCubes.push({ cube, startRow, targetRow, c })
 		}
 	}
 
-	// Create spawn event BEFORE placing cubes (for animation)
+	// Create spawn event before place/gravity/resolve (for animation; id lets renderer find cube after its final position is known)
 	if (newCubes.length > 0) {
 		const spawnCells = newCubes.map(({ cube, startRow, targetRow, c }) => ({
+			id: cube.id,
 			r: targetRow,
 			c,
 			color: cube.color,
-			fromRow: startRow, // Starting position above grid
-			toRow: targetRow, // Target position
+			fromRow: startRow,
+			toRow: targetRow,
 		}))
-		
-		events.push({
-			type: 'spawn',
-			cells: spawnCells,
-		})
+		events.push({ type: 'spawn', cells: spawnCells })
 	}
 
 	// Place new cubes at their target positions (after gravity calculation)
@@ -79,28 +88,21 @@ export function spawnWave(
 		}
 	}
 
-	// Apply gravity to settle everything (existing cubes may shift)
-	applyGravity(grid)
+	// Gravity: settle everything; only matches that touch moved blocks are removed (like resolveAfterMove)
+	const fallItems = applyGravityWithFallTracking(grid)
+	let checkPositions = fallItems.map((f) => f.to)
 
-	// Resolve any immediate matches after gravity
 	let hasChanges = true
 	while (hasChanges) {
-		const matches = findMatches(grid)
+		const matches = findMatchesAround(grid, checkPositions)
 		if (matches.length > 0) {
-			const removeCells: Array<{ r: number; c: number; color: number; id: number }> = []
 			for (const { r, c } of matches) {
 				const cube = getCube(grid, r, c)
-				if (cube) {
-					removeCells.push({ r, c, color: cube.color, id: cube.id })
-					setCube(grid, r, c, null)
-				}
+				if (cube) setCube(grid, r, c, null)
 			}
-			events.push({
-				type: 'remove',
-				cells: removeCells,
-			})
-			applyGravity(grid)
-			hasChanges = matches.length > 0
+			const nextFall = applyGravityWithFallTracking(grid)
+			checkPositions = nextFall.map((f) => f.to)
+			hasChanges = true
 		} else {
 			hasChanges = false
 		}

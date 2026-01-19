@@ -46,11 +46,12 @@ export type GameEvent =
 	| {
 			type: 'spawn'
 			cells: Array<{
-				r: number // target row
+				id: number
+				r: number
 				c: number
 				color: number
-				fromRow?: number // starting row (above grid, negative)
-				toRow?: number // target row
+				fromRow?: number
+				toRow?: number
 			}>
 	  }
 	| {
