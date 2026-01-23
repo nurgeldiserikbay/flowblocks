@@ -338,7 +338,7 @@ const patternStyles = computed(() =>
 	display: flex;
 	justify-content: center;
 	align-items: center;
-	margin-bottom: clamp(2.5rem, 6vw, 4rem);
+	margin-bottom: clamp(5rem, 6vw, 4rem);
 }
 
 .logo {
@@ -466,7 +466,7 @@ const patternStyles = computed(() =>
 
 // Privacy link
 .privacy-link {
-	font-size: clamp(0.75rem, 3vw, 0.875rem);
+	font-size: clamp(1.2rem, 3vw, 0.875rem);
 	color: rgba(255, 255, 255, 0.6);
 	text-decoration: none;
 	transition: all 0.2s ease;
