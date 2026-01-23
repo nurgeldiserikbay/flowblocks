@@ -132,17 +132,17 @@ export function spawnNewTiles(
 				// Empty cell - spawn new tile
 				const color = chooseSpawnColor(state, x, y, numColors, rng)
 
-				// Random moves within range (with small chance for high moves 15-20)
+				// Random moves within range (with small chance for high moves 7-9)
 				let moves: number
 				if (rng() < 0.05) {
 					// 5% chance for high moves
-					moves = 15 + Math.floor(rng() * 6) // 15-20
+					moves = 7 + Math.floor(rng() * 3) // 7-9
 				} else {
 					moves =
 						movesRange.min +
 						Math.floor(rng() * (movesRange.max - movesRange.min + 1))
 				}
-				moves = Math.min(moves, 20) // Cap at 20
+				moves = Math.min(moves, 9) // Cap at 9
 
 				const newTile: Tile = {
 					id: state.nextId++,

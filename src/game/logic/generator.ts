@@ -19,7 +19,7 @@ export function createInitialGrid(height: number, nextId: number = 1): {
 		grid[r] = []
 		for (let c = 0; c < WIDTH; c++) {
 			const color = Math.floor(Math.random() * NUM_COLORS)
-			const moves = Math.floor(Math.random() * 20) + 1 // 1-20
+			const moves = Math.floor(Math.random() * 9) + 1 // 1-9
 			const cube: Cube = {
 				id: nextId++,
 				color,

@@ -26,7 +26,7 @@ export function createGameState(config: GameConfig): GameState {
 				grid[x][y] = {
 					id: nextId++,
 					color,
-					moves: Math.max(0, Math.min(20, moves)), // Clamp [0..20] как в SPEC §3
+					moves: Math.max(0, Math.min(9, moves)), // Clamp [0..9] как в SPEC §3
 				}
 			}
 		}

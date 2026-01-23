@@ -5,7 +5,7 @@
 export type Cube = {
 	id: number
 	color: number // 0..NUM_COLORS-1
-	moves: number // [0..20], количество возможных ходов
+	moves: number // [0..9], количество возможных ходов
 }
 
 export type Position = {

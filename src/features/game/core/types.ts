@@ -16,13 +16,13 @@ export type Vec2 = {
 /**
  * Плитка (куб) на игровом поле
  *
- * SPEC §3: Each cell has id, color [0..C-1], moves [0..20]
+ * SPEC §3: Each cell has id, color [0..C-1], moves [0..9]
  * Tile is "locked" when moves==0 (cannot be START of move)
  */
 export type Tile = {
 	id: number
 	color: number // [0..C-1], где C - количество цветов
-	moves: number // [0..20], locked когда moves == 0
+	moves: number // [0..9], locked когда moves == 0
 }
 
 /**
@@ -55,7 +55,7 @@ export type GameConfig = {
 	numColors: number // C - количество цветов (зависит от сложности, SPEC §11)
 	initialGrid?: {
 		colors: number[] // Массив цветов [0..C-1], длина W*H
-		moves: number[] // Массив moves [0..20], длина W*H
+		moves: number[] // Массив moves [0..9], длина W*H
 	}
 }
 

@@ -76,17 +76,17 @@ export function generateGrid(
 
 			grid[x][y] = color
 
-			// Generate moves (with small chance for high moves 15-20)
+			// Generate moves (with small chance for high moves 7-9)
 			let tileMoves: number
 			if (rng() < 0.05) {
 				// 5% chance for high moves
-				tileMoves = 15 + Math.floor(rng() * 6) // 15-20
+				tileMoves = 7 + Math.floor(rng() * 3) // 7-9
 			} else {
 				tileMoves =
 					movesRange.min +
 					Math.floor(rng() * (movesRange.max - movesRange.min + 1))
 			}
-			tileMoves = Math.min(tileMoves, 20) // Cap at 20
+			tileMoves = Math.min(tileMoves, 9) // Cap at 9
 
 			// Store in flat array (row-major: y * width + x)
 			const idx = y * width + x

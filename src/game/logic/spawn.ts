@@ -61,7 +61,7 @@ export function spawnWave(
 			used.add(targetRow)
 
 			const color = Math.floor(Math.random() * NUM_COLORS)
-			const moves = Math.floor(Math.random() * 20) + 1 // 1-20
+			const moves = Math.floor(Math.random() * 9) + 1 // 1-9
 			const cube: Cube = { id: nextId++, color, moves }
 			const startRow = -spawnRows + spawnIndex
 			newCubes.push({ cube, startRow, targetRow, c })
