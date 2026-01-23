@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { Cube } from '@/game/logic/types'
 import { WIDTH } from '@/game/logic/grid'
-const BASE_HEIGHT = 40
+const BASE_HEIGHT = 30
 const BASE_WAVE_DURATION = 30
 const MIN_WAVE_DURATION = 10
 const WAVE_DURATION_DECREASE = 1.5
