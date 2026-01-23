@@ -218,6 +218,7 @@ const patternStyles = computed(() =>
 	overflow: hidden;
 	background: linear-gradient(180deg, #1e1f3a 0%, #2b2f6c 50%, #1e1f3a 100%);
 	background-attachment: fixed;
+	padding-bottom: env(safe-area-inset-bottom, 0px);
 
 	// Decorative soft shapes in background
 	&::before {
@@ -253,7 +254,7 @@ const patternStyles = computed(() =>
 		flex-direction: column;
 		align-items: center;
 		justify-content: flex-start;
-		padding: clamp(6rem, 14vw, 8rem) clamp(1.5rem, 5vw, 2.5rem)
+		padding: calc(clamp(6rem, 14vw, 8rem) + env(safe-area-inset-top, 0px)) clamp(1.5rem, 5vw, 2.5rem)
 			clamp(2rem, 6vw, 4rem);
 		gap: 0;
 		position: relative;
@@ -282,8 +283,8 @@ const patternStyles = computed(() =>
 // Sound button (top right)
 .sound-button {
 	position: fixed;
-	top: 1rem;
-	right: 1rem;
+	top: calc(1rem + env(safe-area-inset-top, 0px));
+	right: calc(1rem + env(safe-area-inset-right, 0px));
 	width: 48px;
 	height: 48px;
 	border-radius: 14px;
@@ -313,8 +314,8 @@ const patternStyles = computed(() =>
 	@media (max-width: 480px) {
 		width: 44px;
 		height: 44px;
-		top: 0.75rem;
-		right: 0.75rem;
+		top: calc(0.75rem + env(safe-area-inset-top, 0px));
+		right: calc(0.75rem + env(safe-area-inset-right, 0px));
 		border-radius: 12px;
 	}
 
