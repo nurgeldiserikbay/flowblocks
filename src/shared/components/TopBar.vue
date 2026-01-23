@@ -73,6 +73,8 @@ function toggleSound() {
 		gap: 0.75rem;
 		flex: 1;
 		min-width: 0;
+		/* Предотвращаем изменение размеров при изменении layout дочерних элементов */
+		contain: layout style;
 	}
 
 	&__sound {

@@ -103,6 +103,8 @@ let dragActivated = false
 let didAutoScrollOnMount = false
 /** Чтобы при росте контента (напр. расширение сосуда) проскроллить к низу. */
 let lastContentScrollHeight = 0
+let pendingBoundsUpdate: (() => void) | null = null
+let boundsUpdateTimer: number | null = null
 
 function buildOptions(): ElasticScrollOptions {
 	return {
@@ -147,8 +149,35 @@ function updateBounds() {
 	if (!container || !content || !scroller) return
 
 	const minY = 0
-	const maxY = Math.max(0, content.scrollHeight - container.clientHeight)
-	scroller.setBounds(minY, maxY)
+	const state = scroller.getState()
+	const oldMaxY = state?.maxY ?? 0
+	const newMaxY = Math.max(0, content.scrollHeight - container.clientHeight)
+	
+	// Если пользователь активно взаимодействует, откладываем обновление границ
+	if (isDragging.value || isScrolling.value || isPointerDown || dragActivated) {
+		// Обновляем только границы без изменения позиции (setBounds не будет clamp во время dragging)
+		scroller.setBounds(minY, newMaxY)
+		return
+	}
+	
+	// Сохраняем относительную позицию скролла (расстояние от низа)
+	// чтобы избежать неожиданного сдвига при изменении высоты контента
+	if (oldMaxY > 0 && newMaxY !== oldMaxY) {
+		const currentY = scroller.getY()
+		const distanceFromBottom = Math.max(0, oldMaxY - currentY)
+		
+		// Обновляем границы (это может изменить позицию из-за clamp)
+		scroller.setBounds(minY, newMaxY)
+		
+		// Восстанавливаем относительную позицию (расстояние от низа)
+		if (newMaxY > 0) {
+			const newY = Math.max(0, Math.min(newMaxY, newMaxY - distanceFromBottom))
+			scroller.setY(newY)
+		}
+	} else {
+		// Если высота не изменилась, просто обновляем границы
+		scroller.setBounds(minY, newMaxY)
+	}
 }
 
 /** Реакция на изменение размера контента: обновить bounds и при росте — проскроллить к низу. */
@@ -157,8 +186,51 @@ function onResize() {
 	if (!content || !scroller) return
 
 	const newHeight = content.scrollHeight
+	
+	// Если пользователь активно взаимодействует, откладываем обновление границ
+	if (isDragging.value || isScrolling.value || isPointerDown || dragActivated) {
+		// Сохраняем функцию обновления для вызова после завершения взаимодействия
+		pendingBoundsUpdate = () => {
+			updateBounds()
+			// Не скроллим вниз, если пользователь активно взаимодействует со скроллом
+			if (
+				lastContentScrollHeight > 0 &&
+				newHeight > lastContentScrollHeight &&
+				!isDragging.value &&
+				!isScrolling.value &&
+				!isPointerDown
+			) {
+				scrollToBottom()
+			}
+		}
+		
+		// Отменяем предыдущий таймер
+		if (boundsUpdateTimer !== null) {
+			clearTimeout(boundsUpdateTimer)
+		}
+		
+		// Устанавливаем таймер для отложенного обновления
+		boundsUpdateTimer = window.setTimeout(() => {
+			if (pendingBoundsUpdate && !isDragging.value && !isScrolling.value && !isPointerDown && !dragActivated) {
+				pendingBoundsUpdate()
+				pendingBoundsUpdate = null
+			}
+			boundsUpdateTimer = null
+		}, 100)
+		
+		return
+	}
+	
+	// Если пользователь не взаимодействует, обновляем сразу
 	updateBounds()
-	if (lastContentScrollHeight > 0 && newHeight > lastContentScrollHeight) {
+	// Не скроллим вниз, если пользователь активно взаимодействует со скроллом
+	if (
+		lastContentScrollHeight > 0 &&
+		newHeight > lastContentScrollHeight &&
+		!isDragging.value &&
+		!isScrolling.value &&
+		!isPointerDown
+	) {
 		scrollToBottom()
 	}
 	lastContentScrollHeight = newHeight
@@ -273,6 +345,17 @@ function onPointerUp(e: PointerEvent) {
 	scroller.onDragEnd()
 	emit('scrollEnd')
 	dragActivated = false
+	
+	// После завершения взаимодействия выполняем отложенное обновление границ
+	if (pendingBoundsUpdate) {
+		// Небольшая задержка, чтобы убедиться, что взаимодействие полностью завершено
+		setTimeout(() => {
+			if (pendingBoundsUpdate && !isDragging.value && !isScrolling.value && !isPointerDown && !dragActivated) {
+				pendingBoundsUpdate()
+				pendingBoundsUpdate = null
+			}
+		}, 50)
+	}
 }
 
 function attachWheel() {
@@ -414,6 +497,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 	clearPressTimer()
+	
+	if (boundsUpdateTimer !== null) {
+		clearTimeout(boundsUpdateTimer)
+		boundsUpdateTimer = null
+	}
+	pendingBoundsUpdate = null
 
 	detachWheel?.()
 	detachWheel = null

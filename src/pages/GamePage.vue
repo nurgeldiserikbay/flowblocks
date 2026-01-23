@@ -97,6 +97,10 @@ let orientationListener: { remove: () => void } | null = null
 let resizeTimeout: ReturnType<typeof setTimeout> | null = null
 let pointerMoveHandler: ((e: PointerEvent) => void) | null = null
 let touchMoveHandler: ((e: TouchEvent) => void) | null = null
+// Кэш для getBoundingClientRect, чтобы избежать лишних reflow
+let cachedCanvasRect: DOMRect | null = null
+let cachedContainerRect: DOMRect | null = null
+let rectCacheValid = false
 
 // Drag state for input handling
 let dragStart: { r: number; c: number } | null = null
@@ -146,6 +150,10 @@ async function handleVesselExpanded(): Promise<void> {
 	
 	// Обновляем размер плитки в renderer (на случай если ширина контейнера изменилась)
 	const container = canvas.value.parentElement
+	// Инвалидируем кэш перед получением новых размеров
+	rectCacheValid = false
+	cachedContainerRect = null
+	cachedCanvasRect = null
 	const containerWidth = container?.getBoundingClientRect().width ?? canvas.value.width
 	const newTileSize = Math.max(containerWidth, 320) / WIDTH
 	// forceUpdatePositions = true гарантирует, что все позиции будут пересчитаны даже если tileSize не изменился
@@ -168,8 +176,12 @@ function initCanvas(): void {
 	if (!container) return
 
 	// Принудительно используем полную ширину контейнера для 8 кубиков
-	const containerRect = container.getBoundingClientRect()
-	const maxWidth = Math.max(containerRect.width, 320) // Минимум 320px для мобильных
+	// Инвалидируем кэш перед получением новых размеров
+	if (!cachedContainerRect || !rectCacheValid) {
+		cachedContainerRect = container.getBoundingClientRect()
+		rectCacheValid = true
+	}
+	const maxWidth = Math.max(cachedContainerRect.width, 320) // Минимум 320px для мобильных
 	// Используем фактическую высоту grid, а не gameStore.getHeight()
 	// Это важно, чтобы высота канваса всегда соответствовала фактической высоте grid
 	const h = gameStore.grid?.length ?? gameStore.getHeight()
@@ -188,12 +200,22 @@ function initCanvas(): void {
 	const devicePixelRatio = window.devicePixelRatio || 1
 	canvas.value.width = maxWidth * devicePixelRatio
 	canvas.value.height = canvasHeight * devicePixelRatio
+	
+	// Инвалидируем кэш после изменения размеров
+	cachedCanvasRect = null
+	rectCacheValid = false
 }
 
 function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: number; c: number } | null {
 	if (!canvas.value) return null
 
-	const rect = canvas.value.getBoundingClientRect()
+	// Используем кэшированное значение getBoundingClientRect для избежания лишних reflow
+	// Обновляем кэш только если он невалиден
+	if (!cachedCanvasRect || !rectCacheValid) {
+		cachedCanvasRect = canvas.value.getBoundingClientRect()
+		rectCacheValid = true
+	}
+	const rect = cachedCanvasRect
 	
 	// Получаем координаты в зависимости от типа события
 	let clientX: number
@@ -415,6 +437,14 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 }
 
 onMounted(async () => {
+	// Инвалидируем кэш getBoundingClientRect в начале каждого кадра
+	// чтобы избежать использования устаревших значений
+	const invalidateRectCache = () => {
+		rectCacheValid = false
+		requestAnimationFrame(invalidateRectCache)
+	}
+	requestAnimationFrame(invalidateRectCache)
+	
 	setTimeout(async () => {
 		// Initialize AudioManager
 		await AudioManager.init()
@@ -430,7 +460,8 @@ onMounted(async () => {
 
 		// Create renderer с правильным tileSize (всегда ширина / 8)
 		const container = canvas.value.parentElement
-		const containerWidth = container?.getBoundingClientRect().width ?? canvas.value.width
+		// Используем кэшированное значение из initCanvas
+		const containerWidth = cachedContainerRect?.width ?? container?.getBoundingClientRect().width ?? canvas.value.width
 		const tileSize = Math.max(containerWidth, 320) / WIDTH // Минимум 320px для мобильных
 		
 		renderer = new GameRenderer({
@@ -550,6 +581,11 @@ onMounted(async () => {
 			
 			resizeTimeout = setTimeout(async () => {
 				if (!canvas.value) return
+				
+				// Инвалидируем кэш перед изменением размеров
+				rectCacheValid = false
+				cachedCanvasRect = null
+				cachedContainerRect = null
 				
 				// Для мобильных устройств нужно дать время браузеру обновить размеры после изменения ориентации
 				// Используем requestAnimationFrame для получения актуальных размеров
@@ -775,7 +811,13 @@ function restart(): void {
 	align-items: center;
 	width: 100%;
 	gap: 1rem;
-	flex-wrap: wrap;
+	/* Убираем flex-wrap, чтобы элементы не переносились на новую строку */
+	flex-wrap: nowrap;
+	/* Оптимизация для предотвращения пересчета layout при изменении размеров canvas */
+	will-change: contents;
+	contain: layout style;
+	/* Минимальная ширина для предотвращения сжатия */
+	min-width: 0;
 
 	&__time,
 	&__score,
@@ -795,6 +837,14 @@ function restart(): void {
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 		white-space: nowrap;
+		/* Оптимизация для предотвращения пересчета layout */
+		flex-shrink: 0;
+		flex-grow: 0;
+		/* Минимальная ширина для предотвращения сжатия */
+		min-width: fit-content;
+		will-change: transform;
+		/* Изоляция от изменений layout родителя */
+		contain: layout style paint;
 	}
 }
 
