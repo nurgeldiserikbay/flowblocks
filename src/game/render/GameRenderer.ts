@@ -593,16 +593,17 @@ export class GameRenderer {
 		}
 		
 		// Устанавливаем CSS размеры (логические пиксели)
+		// Это важно для правильного отображения на мобильных устройствах
 		this.canvas.style.width = `${width}px`
 		this.canvas.style.height = `${height}px`
 		
-		// Устанавливаем внутренние размеры canvas (физические пиксели)
-		const devicePixelRatio = window.devicePixelRatio || 1
-		this.canvas.width = width * devicePixelRatio
-		this.canvas.height = height * devicePixelRatio
-		
+		// С autoDensity: true PixiJS сам управляет внутренними размерами canvas
+		// Мы только устанавливаем CSS размеры и вызываем resize с логическими размерами
 		// Resize renderer - передаем логические размеры, PixiJS использует их с resolution
 		this.app.renderer.resize(width, height)
+		
+		// После resize PixiJS автоматически обновит внутренние размеры canvas
+		// через autoDensity, поэтому мы не устанавливаем их вручную
 		
 		// При изменении размера canvas нужно пересчитать позиции всех блоков
 		// Это важно при расширении сосуда, когда высота canvas меняется
@@ -726,6 +727,19 @@ export class GameRenderer {
 		// Restore selection if it exists
 		if (this.selectedPosition) {
 			this.setSelectedPosition(this.selectedPosition.r, this.selectedPosition.c)
+		}
+	}
+
+	/**
+	 * Получить логические размеры экрана из PixiJS
+	 * Это важно для правильного расчета координат на мобильных устройствах
+	 */
+	getScreenSize(): { width: number; height: number } | null {
+		if (!this.app) return null
+		// Используем screen из PixiJS, который содержит логические размеры
+		return {
+			width: this.app.screen.width,
+			height: this.app.screen.height,
 		}
 	}
 

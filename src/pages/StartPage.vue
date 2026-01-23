@@ -211,14 +211,17 @@ const patternStyles = computed(() =>
 
 <style lang="scss" scoped>
 .start-page {
-	min-height: 100dvh;
+	min-height: calc(100dvh + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px));
 	display: flex;
 	flex-direction: column;
 	position: relative;
 	overflow: hidden;
 	background: linear-gradient(180deg, #1e1f3a 0%, #2b2f6c 50%, #1e1f3a 100%);
 	background-attachment: fixed;
+	padding-top: env(safe-area-inset-top, 0px);
 	padding-bottom: env(safe-area-inset-bottom, 0px);
+	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
+	margin-bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
 
 	// Decorative soft shapes in background
 	&::before {

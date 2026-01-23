@@ -97,10 +97,8 @@ let orientationListener: { remove: () => void } | null = null
 let resizeTimeout: ReturnType<typeof setTimeout> | null = null
 let pointerMoveHandler: ((e: PointerEvent) => void) | null = null
 let touchMoveHandler: ((e: TouchEvent) => void) | null = null
-// Кэш для getBoundingClientRect, чтобы избежать лишних reflow
-let cachedCanvasRect: DOMRect | null = null
+// Кэш для getBoundingClientRect контейнера (используется только в initCanvas)
 let cachedContainerRect: DOMRect | null = null
-let rectCacheValid = false
 
 // Drag state for input handling
 let dragStart: { r: number; c: number } | null = null
@@ -108,6 +106,9 @@ let dragStartClient: { x: number; y: number } | null = null
 // First block selected by click (for swap on second click)
 let selectedForSwap: { r: number; c: number } | null = null
 let isDragging = false
+// Защита от двойной обработки событий на мобильных устройствах
+let lastEventTime = 0
+let lastEventType: string | null = null
 
 const formattedTime = computed(() => {
 	const time = Math.max(0, Math.floor(gameStore.remainingTime))
@@ -151,18 +152,21 @@ async function handleVesselExpanded(): Promise<void> {
 	// Обновляем размер плитки в renderer (на случай если ширина контейнера изменилась)
 	const container = canvas.value.parentElement
 	// Инвалидируем кэш перед получением новых размеров
-	rectCacheValid = false
 	cachedContainerRect = null
-	cachedCanvasRect = null
-	const containerWidth = container?.getBoundingClientRect().width ?? canvas.value.width
+	const containerWidth = (container?.getBoundingClientRect().width ?? parseInt(canvas.value.style.width)) || 320
 	const newTileSize = Math.max(containerWidth, 320) / WIDTH
+	
+	// Получаем логические размеры из CSS стилей (не внутренние размеры canvas!)
+	const logicalWidth = parseInt(canvas.value.style.width) || containerWidth
+	const logicalHeight = parseInt(canvas.value.style.height) || (gridHeight * newTileSize)
+	
 	// forceUpdatePositions = true гарантирует, что все позиции будут пересчитаны даже если tileSize не изменился
 	// Передаем gridHeight для правильного расчета позиций снизу
 	// Это важно при расширении сосуда, когда canvas становится выше, но tileSize остается тем же
 	renderer.updateTileSize(newTileSize, true, gridHeight)
 	
-	// Передаем gridHeight для правильного расчета позиций при изменении размера canvas
-	renderer.resizeCanvas(canvas.value.width, canvas.value.height, gridHeight)
+	// Передаем логические размеры для правильного расчета позиций при изменении размера canvas
+	renderer.resizeCanvas(logicalWidth, logicalHeight, gridHeight)
 	// Синхронизируем позиции блоков после изменения размера canvas
 	// forceUpdate = true гарантирует, что все позиции будут пересчитаны даже если индексы не изменились
 	// Это важно при расширении сосуда, когда canvas становится выше
@@ -176,12 +180,10 @@ function initCanvas(): void {
 	if (!container) return
 
 	// Принудительно используем полную ширину контейнера для 8 кубиков
-	// Инвалидируем кэш перед получением новых размеров
-	if (!cachedContainerRect || !rectCacheValid) {
-		cachedContainerRect = container.getBoundingClientRect()
-		rectCacheValid = true
-	}
-	const maxWidth = Math.max(cachedContainerRect.width, 320) // Минимум 320px для мобильных
+	// Получаем актуальные размеры контейнера
+	const containerRect = container.getBoundingClientRect()
+	cachedContainerRect = containerRect
+	const maxWidth = Math.max(containerRect.width, 320) // Минимум 320px для мобильных
 	// Используем фактическую высоту grid, а не gameStore.getHeight()
 	// Это важно, чтобы высота канваса всегда соответствовала фактической высоте grid
 	const h = gameStore.grid?.length ?? gameStore.getHeight()
@@ -191,32 +193,20 @@ function initCanvas(): void {
 	const canvasHeight = h * tileSize
 
 	// Устанавливаем CSS размеры (логические пиксели)
+	// Это важно для правильного отображения на мобильных устройствах
 	canvas.value.style.width = `${maxWidth}px`
 	canvas.value.style.height = `${canvasHeight}px`
 	canvas.value.style.display = 'block'
 	
-	// Устанавливаем внутренние размеры canvas (физические пиксели)
-	// С autoDensity: true PixiJS будет использовать эти размеры и автоматически масштабировать
-	const devicePixelRatio = window.devicePixelRatio || 1
-	canvas.value.width = maxWidth * devicePixelRatio
-	canvas.value.height = canvasHeight * devicePixelRatio
-	
-	// Инвалидируем кэш после изменения размеров
-	cachedCanvasRect = null
-	rectCacheValid = false
+	// НЕ устанавливаем внутренние размеры canvas вручную!
+	// PixiJS с autoDensity: true сам управляет внутренними размерами
+	// на основе CSS размеров и devicePixelRatio
+	// Установка внутренних размеров вручную может вызвать проблемы на Android
 }
 
 function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: number; c: number } | null {
-	if (!canvas.value) return null
+	if (!canvas.value || !renderer) return null
 
-	// Используем кэшированное значение getBoundingClientRect для избежания лишних reflow
-	// Обновляем кэш только если он невалиден
-	if (!cachedCanvasRect || !rectCacheValid) {
-		cachedCanvasRect = canvas.value.getBoundingClientRect()
-		rectCacheValid = true
-	}
-	const rect = cachedCanvasRect
-	
 	// Получаем координаты в зависимости от типа события
 	let clientX: number
 	let clientY: number
@@ -236,25 +226,32 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 		clientY = (e as MouseEvent).clientY
 	}
 
+	// Получаем bounding rect для расчета относительных координат
+	const rect = canvas.value.getBoundingClientRect()
+	
 	// Координаты относительно canvas (getBoundingClientRect учитывает все трансформации и скролл)
 	const x = clientX - rect.left
 	const y = clientY - rect.top
 
-	// Используем внутренние размеры canvas для точного расчета
-	// Это важно для правильного преобразования координат
-	const devicePixelRatio = window.devicePixelRatio || 1
-	const logicalWidth = canvas.value.width / devicePixelRatio
-	const logicalHeight = canvas.value.height / devicePixelRatio
-	const tileSize = logicalWidth / WIDTH
+	// Используем размеры экрана из PixiJS для точного расчета координат
+	// Это важно на Android, где могут быть проблемы с devicePixelRatio
+	const screenSize = renderer.getScreenSize()
+	if (!screenSize) return null
 	
-	// Преобразуем координаты с учетом масштаба между CSS и внутренними размерами
-	const scaleX = logicalWidth / rect.width
-	const scaleY = logicalHeight / rect.height
+	// Масштабируем координаты с учетом реальных размеров canvas на экране
+	// и логических размеров в PixiJS
+	const scaleX = screenSize.width / rect.width
+	const scaleY = screenSize.height / rect.height
+	
 	const canvasX = x * scaleX
 	const canvasY = y * scaleY
 	
+	// Используем tileSize из renderer для точного расчета позиции
+	const tileSize = screenSize.width / WIDTH
+	
 	const c = Math.floor(canvasX / tileSize)
 	const r = Math.floor(canvasY / tileSize)
+	
 	// Используем фактическую высоту grid для проверки границ
 	const h = gameStore.grid?.length ?? gameStore.getHeight()
 
@@ -268,6 +265,17 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	if (gameStore.isLocked || gameStore.isGameOver) return
 
+	// Защита от двойной обработки событий на мобильных устройствах
+	// На мобильных устройствах pointerdown и touchstart могут срабатывать одновременно
+	const eventType = e instanceof TouchEvent ? 'touch' : e instanceof PointerEvent ? 'pointer' : 'mouse'
+	const now = Date.now()
+	if (now - lastEventTime < 50 && lastEventType !== eventType) {
+		// Игнорируем событие, если недавно было обработано событие другого типа
+		return
+	}
+	lastEventTime = now
+	lastEventType = eventType
+
 	// Unlock audio context on first interaction (iOS/Android)
 	AudioManager.unlock()
 
@@ -279,6 +287,10 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 		if (canvas.value && e.pointerId !== undefined) {
 			canvas.value.setPointerCapture(e.pointerId)
 		}
+	} else if (e instanceof TouchEvent) {
+		// Для touch событий также предотвращаем скролл
+		e.preventDefault()
+		e.stopPropagation()
 	} else if (e instanceof MouseEvent) {
 		e.stopPropagation()
 	}
@@ -327,6 +339,10 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		if (canvas.value && e.pointerId !== undefined) {
 			canvas.value.releasePointerCapture(e.pointerId)
 		}
+	} else if (e instanceof TouchEvent) {
+		// Для touch событий также предотвращаем скролл
+		e.preventDefault()
+		e.stopPropagation()
 	} else if (e instanceof MouseEvent) {
 		e.stopPropagation()
 	}
@@ -437,13 +453,8 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 }
 
 onMounted(async () => {
-	// Инвалидируем кэш getBoundingClientRect в начале каждого кадра
-	// чтобы избежать использования устаревших значений
-	const invalidateRectCache = () => {
-		rectCacheValid = false
-		requestAnimationFrame(invalidateRectCache)
-	}
-	requestAnimationFrame(invalidateRectCache)
+	// Удаляем кэширование getBoundingClientRect, так как теперь всегда используем актуальные значения
+	// Это гарантирует правильную работу на мобильных устройствах
 	
 	setTimeout(async () => {
 		// Initialize AudioManager
@@ -470,6 +481,15 @@ onMounted(async () => {
 		})
 
 		await renderer.init()
+		
+		// После инициализации PixiJS нужно убедиться, что размеры canvas правильные
+		// Получаем актуальные размеры из CSS (они уже установлены в initCanvas)
+		const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
+		
+		const canvasWidth = parseInt(canvas.value.style.width) || containerWidth
+		const canvasHeight = parseInt(canvas.value.style.height) || (gridHeight * tileSize)
+		// Обновляем размеры через renderer, чтобы PixiJS правильно их обработал
+		renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
 
 		// Create game controller
 		gameController = new GameController(renderer, { onVesselExpanded: handleVesselExpanded })
@@ -583,8 +603,6 @@ onMounted(async () => {
 				if (!canvas.value) return
 				
 				// Инвалидируем кэш перед изменением размеров
-				rectCacheValid = false
-				cachedCanvasRect = null
 				cachedContainerRect = null
 				
 				// Для мобильных устройств нужно дать время браузеру обновить размеры после изменения ориентации
@@ -596,11 +614,16 @@ onMounted(async () => {
 				// Пересчитываем canvas с правильной шириной
 				initCanvas()
 				
-				// Всегда используем ширину canvas / WIDTH для размера плитки
-				const newTileSize = canvas.value.width / WIDTH
+				// Получаем логические размеры из CSS стилей (не внутренние размеры canvas!)
+				const logicalWidth = parseInt(canvas.value.style.width) || canvas.value.getBoundingClientRect().width
+				const logicalHeight = parseInt(canvas.value.style.height) || canvas.value.getBoundingClientRect().height
+				const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
+				
+				// Всегда используем логическую ширину / WIDTH для размера плитки
+				const newTileSize = logicalWidth / WIDTH
 				if (renderer && newTileSize > 0) {
 					renderer.updateTileSize(newTileSize)
-					renderer.resizeCanvas(canvas.value.width, canvas.value.height)
+					renderer.resizeCanvas(logicalWidth, logicalHeight, gridHeight)
 					// Синхронизировать позиции после изменения размера
 					await renderer.syncGridPositions(gameStore.grid)
 				}
@@ -754,9 +777,12 @@ function restart(): void {
 
 	&__canvas-container {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		justify-content: center;
 		width: 100%;
+		/* Предотвращаем растяжение canvas */
+		min-width: 0;
+		overflow: hidden;
 	}
 }
 
@@ -861,6 +887,9 @@ function restart(): void {
 	-webkit-tap-highlight-color: transparent;
 	/* Предотвращаем изменение размера при изменении ориентации */
 	box-sizing: border-box;
+	/* Предотвращаем растяжение на мобильных устройствах */
+	object-fit: contain;
+	flex-shrink: 0;
 }
 
 .game-overlay {
