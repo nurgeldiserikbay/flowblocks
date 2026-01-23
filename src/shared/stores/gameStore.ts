@@ -2,8 +2,8 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { Cube } from '@/game/logic/types'
 import { WIDTH } from '@/game/logic/grid'
-const BASE_HEIGHT = 20
-const BASE_WAVE_DURATION = 24
+const BASE_HEIGHT = 40
+const BASE_WAVE_DURATION = 30
 const MIN_WAVE_DURATION = 10
 const WAVE_DURATION_DECREASE = 1.5
 const NUM_COLORS = 6
@@ -15,7 +15,7 @@ export function getWaveDuration(level: number): number {
 
 /** Строк спавна за волну: с ростом уровня растёт (макс. 8) */
 export function getSpawnRowsForLevel(level: number): number {
-	return Math.min(8, 2 + Math.floor(level / 2))
+	return Math.min(10, 4 + Math.floor(level / 2))
 }
 
 /** Высота сосуда: каждые 5 уровней +4 ряда для бесконечной игры */
