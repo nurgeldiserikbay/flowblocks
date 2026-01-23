@@ -99,8 +99,10 @@ let touchMoveHandler: ((e: TouchEvent) => void) | null = null
 
 // Drag state for input handling
 let dragStart: { r: number; c: number } | null = null
+let dragStartClient: { x: number; y: number } | null = null
 // First block selected by click (for swap on second click)
 let selectedForSwap: { r: number; c: number } | null = null
+let isDragging = false
 
 const formattedTime = computed(() => {
 	const time = Math.max(0, Math.floor(gameStore.remainingTime))
@@ -189,7 +191,6 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 	if (!canvas.value) return null
 
 	const rect = canvas.value.getBoundingClientRect()
-	const scrollOffset = momentumScrollRef.value?.getScrollTop() ?? 0
 	
 	// Получаем координаты в зависимости от типа события
 	let clientX: number
@@ -210,14 +211,24 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 		clientY = (e as MouseEvent).clientY
 	}
 
+	// Координаты относительно canvas (getBoundingClientRect учитывает все трансформации и скролл)
 	const x = clientX - rect.left
-	const y = clientY - rect.top + scrollOffset
+	const y = clientY - rect.top
 
-	// Используем CSS размер canvas (rect.width) для правильного расчета позиции
-	// Это гарантирует правильное преобразование координат даже если canvas масштабируется
-	const tileSize = rect.width / WIDTH
-	const c = Math.floor(x / tileSize)
-	const r = Math.floor(y / tileSize)
+	// Используем внутренние размеры canvas для точного расчета
+	// Это важно для правильного преобразования координат
+	const canvasWidth = canvas.value.width
+	const canvasHeight = canvas.value.height
+	const tileSize = canvasWidth / WIDTH
+	
+	// Преобразуем координаты с учетом масштаба между CSS и внутренними размерами
+	const scaleX = canvasWidth / rect.width
+	const scaleY = canvasHeight / rect.height
+	const canvasX = x * scaleX
+	const canvasY = y * scaleY
+	
+	const c = Math.floor(canvasX / tileSize)
+	const r = Math.floor(canvasY / tileSize)
 	const h = gameStore.getHeight()
 
 	if (r >= 0 && r < h && c >= 0 && c < WIDTH) {
@@ -231,9 +242,32 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	if (gameStore.isLocked || gameStore.isGameOver) return
 
 	// Предотвращаем скролл при взаимодействии с canvas
-	if (e instanceof PointerEvent || e instanceof MouseEvent) {
+	if (e instanceof PointerEvent) {
+		e.preventDefault()
+		e.stopPropagation()
+		// Захватываем pointer для отслеживания движения
+		if (canvas.value && e.pointerId !== undefined) {
+			canvas.value.setPointerCapture(e.pointerId)
+		}
+	} else if (e instanceof MouseEvent) {
 		e.stopPropagation()
 	}
+
+	// Сохраняем начальные координаты клиента для определения свайпа
+	let clientX: number
+	let clientY: number
+	if (e instanceof PointerEvent) {
+		clientX = e.clientX
+		clientY = e.clientY
+	} else if ('touches' in e && e.touches.length > 0) {
+		clientX = e.touches[0].clientX
+		clientY = e.touches[0].clientY
+	} else {
+		clientX = (e as MouseEvent).clientX
+		clientY = (e as MouseEvent).clientY
+	}
+	dragStartClient = { x: clientX, y: clientY }
+	isDragging = false
 
 	const pos = getPositionFromEvent(e)
 	if (pos) {
@@ -248,17 +282,31 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 }
 
 function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
-	if (!dragStart || gameStore.isLocked || gameStore.isGameOver) return
+	if (!dragStart || gameStore.isLocked || gameStore.isGameOver) {
+		dragStart = null
+		dragStartClient = null
+		isDragging = false
+		return
+	}
 
 	// Предотвращаем скролл при взаимодействии с canvas
-	if (e instanceof PointerEvent || e instanceof MouseEvent) {
+	if (e instanceof PointerEvent) {
+		e.preventDefault()
+		e.stopPropagation()
+		// Освобождаем pointer
+		if (canvas.value && e.pointerId !== undefined) {
+			canvas.value.releasePointerCapture(e.pointerId)
+		}
+	} else if (e instanceof MouseEvent) {
 		e.stopPropagation()
 	}
 
 	const pos = getPositionFromEvent(e)
 	if (!pos) {
 		dragStart = null
+		dragStartClient = null
 		selectedForSwap = null
+		isDragging = false
 		renderer?.setSelectedPosition(null, null)
 		return
 	}
@@ -267,7 +315,35 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 	const dr = pos.r - dragStart.r
 	const dc = pos.c - dragStart.c
 
-	if (dr === 0 && dc === 0) {
+	// Если был свайп (isDragging = true), обрабатываем его
+	if (isDragging) {
+		// Check if adjacent
+		const isAdjacent = (Math.abs(dr) === 1 && dc === 0) || (dr === 0 && Math.abs(dc) === 1)
+
+		if (isAdjacent) {
+			// Check if target has cube for swap, or empty for slide
+			const targetCube = gameStore.grid[pos.r]?.[pos.c]
+			const fromCube = gameStore.grid[dragStart.r]?.[dragStart.c]
+
+			if (targetCube && fromCube) {
+				// Both have cubes - swap
+				gameController?.applyUserAction('swap', dragStart, pos)
+			} else if (!targetCube && fromCube && Math.abs(dc) === 1 && dr === 0) {
+				// Target empty and horizontal move - slide
+				gameController?.applyUserAction('slide', dragStart, pos)
+			}
+		}
+
+		// Clear selection after move (swipe)
+		selectedForSwap = null
+		renderer?.setSelectedPosition(null, null)
+		dragStart = null
+		dragStartClient = null
+		isDragging = false
+		return
+	}
+
+	if (dr === 0 && dc === 0 && !isDragging) {
 		// Click without drag — support swap by two clicks: first select, second click on adjacent to swap
 		const fromCube = gameStore.grid[pos.r]?.[pos.c]
 		if (!fromCube) {
@@ -315,30 +391,19 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		selectedForSwap = { r: pos.r, c: pos.c }
 		renderer?.setSelectedPosition(pos.r, pos.c)
 		dragStart = null
+		dragStartClient = null
+		isDragging = false
 		return
 	}
 
-	// Check if adjacent
-	const isAdjacent = (Math.abs(dr) === 1 && dc === 0) || (dr === 0 && Math.abs(dc) === 1)
-
-	if (isAdjacent) {
-		// Check if target has cube for swap, or empty for slide
-		const targetCube = gameStore.grid[pos.r]?.[pos.c]
-		const fromCube = gameStore.grid[dragStart.r]?.[dragStart.c]
-
-		if (targetCube && fromCube) {
-			// Both have cubes - swap
-			gameController?.applyUserAction('swap', dragStart, pos)
-		} else if (!targetCube && fromCube && Math.abs(dc) === 1 && dr === 0) {
-			// Target empty and horizontal move - slide
-			gameController?.applyUserAction('slide', dragStart, pos)
-		}
+	// Если это был клик без движения, но не свайп
+	if (!isDragging) {
+		// Clear selection after click
+		selectedForSwap = null
+		renderer?.setSelectedPosition(null, null)
+		dragStart = null
+		dragStartClient = null
 	}
-
-	// Clear selection after move (swipe or click-to-swap)
-	selectedForSwap = null
-	renderer?.setSelectedPosition(null, null)
-	dragStart = null
 }
 
 onMounted(async () => {
@@ -377,12 +442,36 @@ onMounted(async () => {
 		// Используем pointer events с preventDefault для предотвращения скролла
 		canvas.value.addEventListener('pointerdown', handlePointerDown, { passive: false })
 		canvas.value.addEventListener('pointerup', handlePointerUp, { passive: false })
+		canvas.value.addEventListener('pointercancel', handlePointerUp, { passive: false })
 		
-		// Обработчик для pointermove
+		// Обработчик для pointermove - отслеживаем свайп
 		pointerMoveHandler = (e: PointerEvent) => {
+			if (!dragStart || !dragStartClient || gameStore.isLocked || gameStore.isGameOver) {
+				return
+			}
+
 			// Предотвращаем скролл при движении по canvas
-			if (dragStart) {
-				e.stopPropagation()
+			e.preventDefault()
+			e.stopPropagation()
+
+			// Проверяем, было ли движение достаточно большим для свайпа
+			const dx = Math.abs(e.clientX - dragStartClient.x)
+			const dy = Math.abs(e.clientY - dragStartClient.y)
+			const threshold = 10 // Порог в пикселях для определения свайпа
+
+			if (dx > threshold || dy > threshold) {
+				isDragging = true
+				
+				// Обновляем выделение при движении
+				const pos = getPositionFromEvent(e)
+				if (pos) {
+					// Highlight tile under pointer
+					if (gameStore.grid[pos.r]?.[pos.c]) {
+						renderer?.setSelectedPosition(pos.r, pos.c)
+					} else {
+						renderer?.setSelectedPosition(dragStart.r, dragStart.c)
+					}
+				}
 			}
 		}
 		canvas.value.addEventListener('pointermove', pointerMoveHandler, { passive: false })
@@ -390,13 +479,39 @@ onMounted(async () => {
 		// Touch events для мобильных устройств
 		canvas.value.addEventListener('touchstart', handlePointerDown, { passive: false })
 		canvas.value.addEventListener('touchend', handlePointerUp, { passive: false })
+		canvas.value.addEventListener('touchcancel', handlePointerUp, { passive: false })
 		
-		// Обработчик для touchmove
+		// Обработчик для touchmove - отслеживаем свайп
 		touchMoveHandler = (e: TouchEvent) => {
+			if (!dragStart || !dragStartClient || gameStore.isLocked || gameStore.isGameOver) {
+				return
+			}
+
 			// Предотвращаем скролл при свайпе по canvas
-			if (dragStart) {
-				e.preventDefault()
-				e.stopPropagation()
+			e.preventDefault()
+			e.stopPropagation()
+
+			if (e.touches.length > 0) {
+				const touch = e.touches[0]
+				// Проверяем, было ли движение достаточно большим для свайпа
+				const dx = Math.abs(touch.clientX - dragStartClient!.x)
+				const dy = Math.abs(touch.clientY - dragStartClient!.y)
+				const threshold = 10 // Порог в пикселях для определения свайпа
+
+				if (dx > threshold || dy > threshold) {
+					isDragging = true
+					
+					// Обновляем выделение при движении
+					const pos = getPositionFromEvent(e)
+					if (pos) {
+						// Highlight tile under pointer
+						if (gameStore.grid[pos.r]?.[pos.c]) {
+							renderer?.setSelectedPosition(pos.r, pos.c)
+						} else {
+							renderer?.setSelectedPosition(dragStart.r, dragStart.c)
+						}
+					}
+				}
 			}
 		}
 		canvas.value.addEventListener('touchmove', touchMoveHandler, { passive: false })
@@ -512,11 +627,13 @@ onBeforeUnmount(() => {
 	if (canvas.value) {
 		canvas.value.removeEventListener('pointerdown', handlePointerDown)
 		canvas.value.removeEventListener('pointerup', handlePointerUp)
+		canvas.value.removeEventListener('pointercancel', handlePointerUp)
 		if (pointerMoveHandler) {
 			canvas.value.removeEventListener('pointermove', pointerMoveHandler)
 		}
 		canvas.value.removeEventListener('touchstart', handlePointerDown)
 		canvas.value.removeEventListener('touchend', handlePointerUp)
+		canvas.value.removeEventListener('touchcancel', handlePointerUp)
 		if (touchMoveHandler) {
 			canvas.value.removeEventListener('touchmove', touchMoveHandler)
 		}
@@ -537,6 +654,9 @@ function handleExit(): void {
 
 function restart(): void {
 	selectedForSwap = null
+	dragStart = null
+	dragStartClient = null
+	isDragging = false
 	renderer?.setSelectedPosition(null, null)
 	if (gameController) {
 		gameController.stop()
