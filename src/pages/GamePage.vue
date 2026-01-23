@@ -68,20 +68,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { ScreenOrientation } from '@capacitor/screen-orientation'
+import { Capacitor } from '@capacitor/core'
 import AppLayout from '@/shared/components/AppLayout.vue'
 import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
 import MomentumScroll from '@/shared/components/MomentumScroll.vue'
 import { GameRenderer } from '@/game/render'
 import { GameController } from '@/game/GameController'
-import { storeToRefs } from 'pinia'
 import { useGameStore } from '@/shared/stores/gameStore'
 import { WIDTH } from '@/game/logic'
 
 const router = useRouter()
 const gameStore = useGameStore()
-const { height: gameHeight } = storeToRefs(gameStore)
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
 const momentumScrollRef = useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
@@ -90,6 +90,12 @@ const isExitDialogOpen = ref(false)
 let gameController: GameController | null = null
 let renderer: GameRenderer | null = null
 let resizeHandler: (() => void) | null = null
+let resizeObserver: ResizeObserver | null = null
+let orientationHandler: (() => void) | null = null
+let orientationListener: { remove: () => void } | null = null
+let resizeTimeout: ReturnType<typeof setTimeout> | null = null
+let pointerMoveHandler: ((e: PointerEvent) => void) | null = null
+let touchMoveHandler: ((e: TouchEvent) => void) | null = null
 
 // Drag state for input handling
 let dragStart: { r: number; c: number } | null = null
@@ -127,20 +133,30 @@ const levelBarColor = computed(() => {
 	return 'rgb(74, 222, 128)' // green
 })
 
-// При расширении сосуда: переразмер, рендер, сдвиг скролла так, чтобы низ сосуда оставался видимым
-watch(gameHeight, async (newH, oldH) => {
-	if (newH <= (oldH ?? 0) || !renderer || !canvas.value) return
+/** При расширении сосуда: только переразмер канваса и Pixi. Скролл (updateBounds, scrollToBottom) — в MomentumScroll по ResizeObserver. */
+async function handleVesselExpanded(): Promise<void> {
+	if (!renderer || !canvas.value) return
 	initCanvas()
-	renderer.resizeCanvas(canvas.value.width, canvas.value.height)
-	await renderer.renderGrid(gameStore.grid, 1)
-	await nextTick()
-	// Дождаться, пока layout применит новый размер канваса (content.scrollHeight обновится)
-	await new Promise((r) => requestAnimationFrame(r))
-	await new Promise((r) => requestAnimationFrame(r))
-	momentumScrollRef.value?.updateBounds()
-	// Сдвинуть скролл к низу контента, чтобы низ сосуда оставался видимым
-	momentumScrollRef.value?.scrollToBottom()
-})
+	
+	// Получаем актуальную высоту grid для правильного расчета позиций
+	const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
+	
+	// Обновляем размер плитки в renderer (на случай если ширина контейнера изменилась)
+	const container = canvas.value.parentElement
+	const containerWidth = container?.getBoundingClientRect().width ?? canvas.value.width
+	const newTileSize = Math.max(containerWidth, 320) / WIDTH
+	// forceUpdatePositions = true гарантирует, что все позиции будут пересчитаны даже если tileSize не изменился
+	// Передаем gridHeight для правильного расчета позиций снизу
+	// Это важно при расширении сосуда, когда canvas становится выше, но tileSize остается тем же
+	renderer.updateTileSize(newTileSize, true, gridHeight)
+	
+	// Передаем gridHeight для правильного расчета позиций при изменении размера canvas
+	renderer.resizeCanvas(canvas.value.width, canvas.value.height, gridHeight)
+	// Синхронизируем позиции блоков после изменения размера canvas
+	// forceUpdate = true гарантирует, что все позиции будут пересчитаны даже если индексы не изменились
+	// Это важно при расширении сосуда, когда canvas становится выше
+	await renderer.syncGridPositions(gameStore.grid, true)
+}
 
 function initCanvas(): void {
 	if (!canvas.value) return
@@ -148,29 +164,58 @@ function initCanvas(): void {
 	const container = canvas.value.parentElement
 	if (!container) return
 
+	// Принудительно используем полную ширину контейнера для 8 кубиков
 	const containerRect = container.getBoundingClientRect()
-	const maxWidth = Math.min(containerRect.width, 800)
+	const maxWidth = Math.max(containerRect.width, 320) // Минимум 320px для мобильных
 	const h = gameStore.getHeight()
 
+	// Всегда делим на WIDTH (8) для получения размера плитки
 	const tileSize = maxWidth / WIDTH
 	const canvasHeight = h * tileSize
 
+	// Устанавливаем внутренние размеры canvas (логические пиксели)
+	// С resolution = 1 и autoDensity = false размеры будут совпадать
 	canvas.value.width = maxWidth
 	canvas.value.height = canvasHeight
+	
+	// CSS размеры должны ТОЧНО совпадать с внутренними размерами
+	// Это гарантирует, что 8 плиток всегда будут отображаться правильно
+	canvas.value.style.width = `${maxWidth}px`
+	canvas.value.style.height = `${canvasHeight}px`
+	canvas.value.style.display = 'block'
 }
 
-function getPositionFromEvent(e: MouseEvent | TouchEvent): { r: number; c: number } | null {
+function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: number; c: number } | null {
 	if (!canvas.value) return null
 
 	const rect = canvas.value.getBoundingClientRect()
 	const scrollOffset = momentumScrollRef.value?.getScrollTop() ?? 0
-	const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-	const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+	
+	// Получаем координаты в зависимости от типа события
+	let clientX: number
+	let clientY: number
+	
+	if (e instanceof PointerEvent) {
+		clientX = e.clientX
+		clientY = e.clientY
+	} else if ('touches' in e && e.touches.length > 0) {
+		clientX = e.touches[0].clientX
+		clientY = e.touches[0].clientY
+	} else if ('changedTouches' in e && e.changedTouches.length > 0) {
+		// Для touchend используем changedTouches
+		clientX = e.changedTouches[0].clientX
+		clientY = e.changedTouches[0].clientY
+	} else {
+		clientX = (e as MouseEvent).clientX
+		clientY = (e as MouseEvent).clientY
+	}
 
 	const x = clientX - rect.left
 	const y = clientY - rect.top + scrollOffset
 
-	const tileSize = canvas.value.width / WIDTH
+	// Используем CSS размер canvas (rect.width) для правильного расчета позиции
+	// Это гарантирует правильное преобразование координат даже если canvas масштабируется
+	const tileSize = rect.width / WIDTH
 	const c = Math.floor(x / tileSize)
 	const r = Math.floor(y / tileSize)
 	const h = gameStore.getHeight()
@@ -182,8 +227,13 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent): { r: number; c: numbe
 	return null
 }
 
-function handlePointerDown(e: MouseEvent | TouchEvent): void {
+function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	if (gameStore.isLocked || gameStore.isGameOver) return
+
+	// Предотвращаем скролл при взаимодействии с canvas
+	if (e instanceof PointerEvent || e instanceof MouseEvent) {
+		e.stopPropagation()
+	}
 
 	const pos = getPositionFromEvent(e)
 	if (pos) {
@@ -197,8 +247,13 @@ function handlePointerDown(e: MouseEvent | TouchEvent): void {
 	}
 }
 
-function handlePointerUp(e: MouseEvent | TouchEvent): void {
+function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 	if (!dragStart || gameStore.isLocked || gameStore.isGameOver) return
+
+	// Предотвращаем скролл при взаимодействии с canvas
+	if (e instanceof PointerEvent || e instanceof MouseEvent) {
+		e.stopPropagation()
+	}
 
 	const pos = getPositionFromEvent(e)
 	if (!pos) {
@@ -290,10 +345,18 @@ onMounted(async () => {
 	setTimeout(async () => {
 		if (!canvas.value) return
 
+		// Инициализируем canvas с правильными размерами
 		initCanvas()
+		
+		// Убеждаемся, что canvas имеет правильную ширину
+		await nextTick()
+		await new Promise((resolve) => requestAnimationFrame(resolve))
 
-		// Create renderer
-		const tileSize = canvas.value.width / WIDTH
+		// Create renderer с правильным tileSize (всегда ширина / 8)
+		const container = canvas.value.parentElement
+		const containerWidth = container?.getBoundingClientRect().width ?? canvas.value.width
+		const tileSize = Math.max(containerWidth, 320) / WIDTH // Минимум 320px для мобильных
+		
 		renderer = new GameRenderer({
 			canvas: canvas.value,
 			tileSize,
@@ -302,7 +365,7 @@ onMounted(async () => {
 		await renderer.init()
 
 		// Create game controller
-		gameController = new GameController(renderer)
+		gameController = new GameController(renderer, { onVesselExpanded: handleVesselExpanded })
 
 		// Set initial scroll position to top
 		momentumScrollRef.value?.scrollToTop()
@@ -311,10 +374,32 @@ onMounted(async () => {
 		await gameController.startGame()
 
 		// Setup input handlers
-		canvas.value.addEventListener('pointerdown', handlePointerDown)
-		canvas.value.addEventListener('pointerup', handlePointerUp)
-		canvas.value.addEventListener('touchstart', handlePointerDown, { passive: true })
-		canvas.value.addEventListener('touchend', handlePointerUp, { passive: true })
+		// Используем pointer events с preventDefault для предотвращения скролла
+		canvas.value.addEventListener('pointerdown', handlePointerDown, { passive: false })
+		canvas.value.addEventListener('pointerup', handlePointerUp, { passive: false })
+		
+		// Обработчик для pointermove
+		pointerMoveHandler = (e: PointerEvent) => {
+			// Предотвращаем скролл при движении по canvas
+			if (dragStart) {
+				e.stopPropagation()
+			}
+		}
+		canvas.value.addEventListener('pointermove', pointerMoveHandler, { passive: false })
+		
+		// Touch events для мобильных устройств
+		canvas.value.addEventListener('touchstart', handlePointerDown, { passive: false })
+		canvas.value.addEventListener('touchend', handlePointerUp, { passive: false })
+		
+		// Обработчик для touchmove
+		touchMoveHandler = (e: TouchEvent) => {
+			// Предотвращаем скролл при свайпе по canvas
+			if (dragStart) {
+				e.preventDefault()
+				e.stopPropagation()
+			}
+		}
+		canvas.value.addEventListener('touchmove', touchMoveHandler, { passive: false })
 
 		// Wait for canvas to render
 		await nextTick()
@@ -328,29 +413,113 @@ onMounted(async () => {
 		// Animate scroll to bottom
 		await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
 
-		// Handle resize
-		resizeHandler = () => {
-			initCanvas()
-			const newTileSize = canvas.value ? canvas.value.width / WIDTH : 0
-			renderer?.updateTileSize(newTileSize)
-			renderer?.renderGrid(gameStore.grid, 1)
-			momentumScrollRef.value?.updateBounds()
+		// Handle resize - функция для обновления размера с debounce
+		const handleResize = async () => {
+			if (!canvas.value) return
+			
+			// Debounce: отменяем предыдущий вызов, если он еще не выполнился
+			if (resizeTimeout) {
+				clearTimeout(resizeTimeout)
+			}
+			
+			resizeTimeout = setTimeout(async () => {
+				if (!canvas.value) return
+				
+				// Для мобильных устройств нужно дать время браузеру обновить размеры после изменения ориентации
+				// Используем requestAnimationFrame для получения актуальных размеров
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				
+				// Пересчитываем canvas с правильной шириной
+				initCanvas()
+				
+				// Всегда используем ширину canvas / WIDTH для размера плитки
+				const newTileSize = canvas.value.width / WIDTH
+				if (renderer && newTileSize > 0) {
+					renderer.updateTileSize(newTileSize)
+					renderer.resizeCanvas(canvas.value.width, canvas.value.height)
+					// Синхронизировать позиции после изменения размера
+					await renderer.syncGridPositions(gameStore.grid)
+				}
+				momentumScrollRef.value?.updateBounds()
+			}, 150)
 		}
+
+		// Обработчик для window resize
+		resizeHandler = handleResize
 		window.addEventListener('resize', resizeHandler, { passive: true })
+
+		// Обработчик для изменения ориентации (важно для мобильных)
+		orientationHandler = handleResize
+		window.addEventListener('orientationchange', orientationHandler, { passive: true })
+		
+		// Блокируем альбомный режим на мобильных устройствах
+		if (Capacitor.isNativePlatform()) {
+			// Блокируем ориентацию в портретном режиме
+			ScreenOrientation.lock({ orientation: 'portrait' }).catch((err) => {
+				console.warn('Failed to lock orientation:', err)
+			})
+			
+			// Слушаем изменения ориентации
+			ScreenOrientation.addListener('screenOrientationChange', () => {
+				handleResize()
+			}).then((listener) => {
+				orientationListener = listener
+			})
+		}
+		
+		// Также используем ResizeObserver для контейнера canvas (более надежно на мобильных)
+		const canvasContainer = canvas.value.parentElement
+		if (canvasContainer) {
+			resizeObserver = new ResizeObserver(() => {
+				handleResize()
+			})
+			resizeObserver.observe(canvasContainer)
+		}
 	}, 100)
 })
 
 onBeforeUnmount(() => {
+	// Разблокируем ориентацию при размонтировании
+	if (Capacitor.isNativePlatform()) {
+		ScreenOrientation.unlock().catch((err) => {
+			console.warn('Failed to unlock orientation:', err)
+		})
+	}
+	
 	if (resizeHandler) {
 		window.removeEventListener('resize', resizeHandler)
 		resizeHandler = null
+	}
+	if (orientationHandler) {
+		window.removeEventListener('orientationchange', orientationHandler)
+		orientationHandler = null
+	}
+	if (orientationListener) {
+		orientationListener.remove()
+		orientationListener = null
+	}
+	if (resizeObserver) {
+		resizeObserver.disconnect()
+		resizeObserver = null
+	}
+	if (resizeTimeout) {
+		clearTimeout(resizeTimeout)
+		resizeTimeout = null
 	}
 
 	if (canvas.value) {
 		canvas.value.removeEventListener('pointerdown', handlePointerDown)
 		canvas.value.removeEventListener('pointerup', handlePointerUp)
+		if (pointerMoveHandler) {
+			canvas.value.removeEventListener('pointermove', pointerMoveHandler)
+		}
 		canvas.value.removeEventListener('touchstart', handlePointerDown)
 		canvas.value.removeEventListener('touchend', handlePointerUp)
+		if (touchMoveHandler) {
+			canvas.value.removeEventListener('touchmove', touchMoveHandler)
+		}
 	}
 
 	gameController?.destroy()
@@ -412,7 +581,7 @@ function restart(): void {
 
 	&__canvas-container {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: center;
 		width: 100%;
 	}
@@ -493,8 +662,9 @@ function restart(): void {
 }
 
 .game-canvas {
-	width: 100%;
-	height: auto;
+	/* Размеры устанавливаются через JavaScript для точного контроля */
+	width: 100% !important;
+	height: auto !important;
 	max-width: 100%;
 	display: block;
 	background: rgba(0, 0, 0, 0.3);
@@ -503,6 +673,8 @@ function restart(): void {
 	image-rendering: crisp-edges;
 	touch-action: manipulation;
 	-webkit-tap-highlight-color: transparent;
+	/* Предотвращаем изменение размера при изменении ориентации */
+	box-sizing: border-box;
 }
 
 .game-overlay {

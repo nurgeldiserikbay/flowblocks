@@ -30,7 +30,7 @@ export function setCube(
 /** Добавить пустые ряды вниз сосуда (расширение для бесконечной игры) */
 export function expandGrid(grid: (Cube | null)[][], newHeight: number): void {
 	while (grid.length < newHeight) {
-		grid.push(Array(WIDTH).fill(null))
+		grid.unshift(Array(WIDTH).fill(null))
 	}
 }
 

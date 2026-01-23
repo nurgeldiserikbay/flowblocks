@@ -101,6 +101,8 @@ let pointerLastY = 0
 let pressTimer: number | null = null
 let dragActivated = false
 let didAutoScrollOnMount = false
+/** Чтобы при росте контента (напр. расширение сосуда) проскроллить к низу. */
+let lastContentScrollHeight = 0
 
 function buildOptions(): ElasticScrollOptions {
 	return {
@@ -147,6 +149,19 @@ function updateBounds() {
 	const minY = 0
 	const maxY = Math.max(0, content.scrollHeight - container.clientHeight)
 	scroller.setBounds(minY, maxY)
+}
+
+/** Реакция на изменение размера контента: обновить bounds и при росте — проскроллить к низу. */
+function onResize() {
+	const content = contentRef.value
+	if (!content || !scroller) return
+
+	const newHeight = content.scrollHeight
+	updateBounds()
+	if (lastContentScrollHeight > 0 && newHeight > lastContentScrollHeight) {
+		scrollToBottom()
+	}
+	lastContentScrollHeight = newHeight
 }
 
 function clearPressTimer() {
@@ -375,7 +390,8 @@ onMounted(() => {
 		detachWheel = attachWheel() ?? null
 
 		if (props.autoUpdateBounds && containerRef.value && contentRef.value) {
-			resizeObserver = new ResizeObserver(() => updateBounds())
+			lastContentScrollHeight = contentRef.value.scrollHeight
+			resizeObserver = new ResizeObserver(onResize)
 			resizeObserver.observe(containerRef.value)
 			resizeObserver.observe(contentRef.value)
 		}
@@ -457,11 +473,14 @@ watch(
 
 	&__content {
 		width: 100%;
-		min-height: 100%;
 		height: max-content;
+		min-height: 100%;
 		box-sizing: border-box;
 		will-change: transform;
 		transform: translate3d(0, 0, 0);
+		display: flex;
+		flex-direction: column;
+		justify-content: flex-end;
 	}
 }
 </style>

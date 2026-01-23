@@ -31,6 +31,7 @@ export class GameRenderer {
 	private cubePositions: Map<number, { r: number; c: number }> = new Map() // Map<cubeId, position>
 	private nextCubeId: number = 1
 	private selectedPosition: { r: number; c: number } | null = null
+	private gridHeight: number = 0 // Высота grid для расчета позиций снизу
 
 	constructor(options: GameRendererOptions) {
 		this.canvas = options.canvas
@@ -41,14 +42,16 @@ export class GameRenderer {
 		await loadBlockTextures()
 
 		this.app = new Application()
+		// Используем resolution = 1 и autoDensity = false для предсказуемых размеров
+		// Размеры canvas устанавливаются в GamePage.vue с учетом devicePixelRatio если нужно
 		await this.app.init({
 			canvas: this.canvas,
 			width: this.canvas.width,
 			height: this.canvas.height,
 			backgroundColor: 0x000000,
 			backgroundAlpha: 0,
-			resolution: window.devicePixelRatio || 1,
-			autoDensity: true,
+			resolution: 1, // Фиксированное разрешение для предсказуемых размеров
+			autoDensity: false, // Отключаем автоматическое масштабирование
 		})
 
 		this.gameContainer = new Container()
@@ -59,6 +62,8 @@ export class GameRenderer {
 		if (!this.gameContainer) return
 
 		this.nextCubeId = nextCubeId
+		// Сохраняем высоту grid для расчета позиций снизу
+		this.gridHeight = grid.length
 
 		// Clear existing containers
 		this.cubeContainers.forEach((cubeContainer) => {
@@ -86,6 +91,17 @@ export class GameRenderer {
 		}
 	}
 
+	/**
+	 * Рассчитать позицию Y для строки r, выровненную снизу сосуда
+	 * @param r - индекс строки в grid (0 = верх, gridHeight-1 = низ)
+	 * @param gridHeight - высота grid
+	 * @returns позиция Y в пикселях, выровненная снизу
+	 */
+	private calculateYFromBottom(r: number): number {
+		// Выравниваем снизу: строка 0 (верх) внизу, строка gridHeight-1 (низ) вверху
+		return (r) * this.tileSize
+	}
+
 	private createCubeSprite(cube: Cube, r: number, c: number): CubeContainer {
 		if (!this.gameContainer) {
 			throw new Error('Game container not initialized')
@@ -99,7 +115,7 @@ export class GameRenderer {
 		// Create container for cube
 		const container = new Container()
 		container.x = c * this.tileSize
-		container.y = r * this.tileSize
+		container.y = this.calculateYFromBottom(r)
 
 		// Create sprite
 		const sprite = new Sprite(texture)
@@ -251,9 +267,9 @@ export class GameRenderer {
 		if (!containerA || !containerB) return
 
 		const posAX = a.c * this.tileSize
-		const posAY = a.r * this.tileSize
+		const posAY = this.calculateYFromBottom(a.r)
 		const posBX = b.c * this.tileSize
-		const posBY = b.r * this.tileSize
+		const posBY = this.calculateYFromBottom(b.r)
 
 		// Update positions
 		this.cubePositions.set(cubeIdA, { r: b.r, c: b.c })
@@ -295,7 +311,7 @@ export class GameRenderer {
 		this.cubePositions.set(cubeId, { r: to.r, c: to.c })
 
 		const targetX = to.c * this.tileSize
-		const targetY = to.r * this.tileSize
+		const targetY = this.calculateYFromBottom(to.r)
 
 		await new Promise<void>((resolve) => {
 			gsap.to(cubeContainer.container, {
@@ -322,7 +338,7 @@ export class GameRenderer {
 			this.cubePositions.set(cubeId, { r: item.to.r, c: item.to.c })
 
 			const targetX = item.to.c * this.tileSize
-			const targetY = item.to.r * this.tileSize
+			const targetY = this.calculateYFromBottom(item.to.r)
 
 			return new Promise<void>((resolve) => {
 				gsap.to(cubeContainer.container, {
@@ -361,7 +377,7 @@ export class GameRenderer {
 			const avgC = cells.reduce((s, c) => s + c.c, 0) / cells.length
 			const avgR = cells.reduce((s, c) => s + c.r, 0) / cells.length
 			const cx = (avgC + 0.5) * this.tileSize
-			const cy = (avgR + 0.5) * this.tileSize
+			const cy = this.calculateYFromBottom(avgR) + this.tileSize / 2
 
 			const popup = new Container()
 			popup.x = cx
@@ -454,10 +470,14 @@ export class GameRenderer {
 			if (!pos) return Promise.resolve()
 
 			const targetRow = pos.r
-			const targetY = targetRow * this.tileSize
+			const targetY = this.calculateYFromBottom(targetRow)
 
 			if (cell.fromRow !== undefined && cell.fromRow < 0) {
-				const startY = cell.fromRow * this.tileSize
+				// Для спавна сверху: fromRow отрицательный (например, -1, -2)
+				// Рассчитываем позицию сверху canvas: отрицательные значения означают строки выше видимой области
+				// Позиция сверху = (gridHeight - 1 + |fromRow|) * tileSize, но это будет выше canvas
+				// Для визуального эффекта падения сверху используем отрицательную позицию
+				const startY = -Math.abs(cell.fromRow) * this.tileSize
 				cubeContainer.container.y = startY
 				cubeContainer.container.alpha = 1
 				cubeContainer.container.scale.set(1)
@@ -508,13 +528,83 @@ export class GameRenderer {
 		return null
 	}
 
-	updateTileSize(newTileSize: number): void {
+	updateTileSize(newTileSize: number, forceUpdatePositions = false, gridHeight?: number): void {
+		const oldTileSize = this.tileSize
 		this.tileSize = newTileSize
+		
+		// Обновляем gridHeight если передан
+		if (gridHeight !== undefined) {
+			this.gridHeight = gridHeight
+		}
+
+		// Обновить позиции и размеры всех существующих спрайтов
+		if (oldTileSize !== newTileSize || forceUpdatePositions) {
+			this.cubeContainers.forEach((cubeContainer, cubeId) => {
+				const pos = this.cubePositions.get(cubeId)
+				if (pos) {
+					// Обновить позицию контейнера
+					cubeContainer.container.x = pos.c * this.tileSize
+					cubeContainer.container.y = this.calculateYFromBottom(pos.r)
+
+					// Обновить размер спрайта
+					const spriteSize = Math.max(1, this.tileSize - TILE_PADDING * 2)
+					cubeContainer.sprite.width = spriteSize
+					cubeContainer.sprite.height = spriteSize
+
+					// Обновить размер текста (если есть)
+					if (cubeContainer.text) {
+						cubeContainer.text.style.fontSize = Math.max(10, this.tileSize / 3)
+						cubeContainer.text.x = this.tileSize / 2
+						cubeContainer.text.y = this.tileSize / 2
+					}
+
+					// Обновить highlight (если есть)
+					if (cubeContainer.highlight) {
+						cubeContainer.highlight.clear()
+						cubeContainer.highlight.rect(TILE_PADDING, TILE_PADDING, spriteSize, spriteSize)
+						cubeContainer.highlight.stroke({ color: 0xffffff, width: 4, alpha: 1 })
+						cubeContainer.highlight.rect(TILE_PADDING + 2, TILE_PADDING + 2, spriteSize - 4, spriteSize - 4)
+						cubeContainer.highlight.stroke({ color: 0x000000, width: 2, alpha: 0.5 })
+					}
+				}
+			})
+		}
 	}
 
 	/** Переразмер канваса (Pixi) при расширении сосуда */
-	resizeCanvas(width: number, height: number): void {
-		this.app?.renderer?.resize(width, height)
+	resizeCanvas(width: number, height: number, gridHeight?: number): void {
+		if (!this.app?.renderer) return
+		
+		// Обновляем gridHeight если передан
+		if (gridHeight !== undefined) {
+			this.gridHeight = gridHeight
+		}
+		
+		// Обновляем внутренние размеры canvas (логические пиксели)
+		// С resolution = 1 и autoDensity = false размеры совпадают с CSS
+		this.canvas.width = width
+		this.canvas.height = height
+		// CSS размеры должны ТОЧНО совпадать с внутренними размерами
+		this.canvas.style.width = `${width}px`
+		this.canvas.style.height = `${height}px`
+		// Resize renderer с теми же размерами
+		this.app.renderer.resize(width, height)
+		
+		// При изменении размера canvas нужно пересчитать позиции всех блоков
+		// Это важно при расширении сосуда, когда высота canvas меняется
+		this.updateAllPositions()
+	}
+	
+	/** Принудительно обновить позиции всех существующих блоков */
+	private updateAllPositions(): void {
+		this.cubeContainers.forEach((cubeContainer, cubeId) => {
+			const pos = this.cubePositions.get(cubeId)
+			if (pos) {
+				// Пересчитать позицию контейнера с учетом текущего tileSize и выравнивания снизу
+				cubeContainer.container.x = pos.c * this.tileSize
+				cubeContainer.container.y = this.calculateYFromBottom(pos.r)
+			}
+		})
 	}
 
 	async showFullClearBonus(bonus: number): Promise<void> {
@@ -566,8 +656,11 @@ export class GameRenderer {
 		})
 	}
 
-	async syncGridPositions(grid: (Cube | null)[][]): Promise<void> {
+	async syncGridPositions(grid: (Cube | null)[][], forceUpdate = false): Promise<void> {
 		if (!this.gameContainer) return
+
+		// Обновляем высоту grid для расчета позиций снизу
+		this.gridHeight = grid.length
 
 		// Update positions of existing cubes and remove cubes that are no longer in grid
 		const cubesInGrid = new Set<number>()
@@ -582,11 +675,11 @@ export class GameRenderer {
 					const cubeContainer = this.cubeContainers.get(cube.id)
 					if (cubeContainer) {
 						const pos = this.cubePositions.get(cube.id)
-						if (!pos || pos.r !== r || pos.c !== c) {
+						if (forceUpdate || !pos || pos.r !== r || pos.c !== c) {
 							// Position changed - update it (but don't animate, just set)
 							this.cubePositions.set(cube.id, { r, c })
 							cubeContainer.container.x = c * this.tileSize
-							cubeContainer.container.y = r * this.tileSize
+							cubeContainer.container.y = this.calculateYFromBottom(r)
 						}
 					}
 					// Don't create missing cubes here - they should be created by renderGrid or spawn events

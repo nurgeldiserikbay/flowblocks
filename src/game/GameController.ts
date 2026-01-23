@@ -23,6 +23,11 @@ import type { GameEvent } from './logic/types'
 
 const COMBO_WINDOW_MS = 2500
 
+export interface GameControllerOptions {
+	/** Вызывается после расширения сосуда: переразмер канваса, скролл к низу. */
+	onVesselExpanded?: () => void | Promise<void>
+}
+
 export class GameController {
 	private renderer: GameRenderer | null = null
 	private store = useGameStore()
@@ -31,9 +36,11 @@ export class GameController {
 	private lastTickTime: number = 0
 	private comboLevel: number = 0
 	private comboTimer: ReturnType<typeof setTimeout> | null = null
+	private opts: GameControllerOptions
 
-	constructor(renderer: GameRenderer) {
+	constructor(renderer: GameRenderer, opts?: GameControllerOptions) {
 		this.renderer = renderer
+		this.opts = opts ?? {}
 	}
 
 	async startGame(): Promise<void> {
@@ -115,6 +122,8 @@ export class GameController {
 			if (newHeight > this.store.getHeight()) {
 				expandGrid(grid, newHeight)
 				this.store.setHeight(newHeight)
+				// Явный вызов: переразмер канваса и скролл к низу (watch может не успеть / не сработать)
+				await Promise.resolve(this.opts.onVesselExpanded?.())
 			}
 		}
 
@@ -144,42 +153,33 @@ export class GameController {
 
 		// Perform move
 		if (action === 'swap') {
+			// Запомнить, был ли у куба в to 0 ходов (до обмена)
+			const replacedHadNoMoves = (grid[to.r]?.[to.c]?.moves ?? 0) === 0
 			success = trySwap(grid, from, to)
 			if (success) {
-				// Decrease moves for both cubes
-				const cubeA = grid[from.r]?.[from.c]
-				const cubeB = grid[to.r]?.[to.c]
-				if (cubeA) {
-					cubeA.moves = Math.max(0, cubeA.moves - 1)
-					// Update moves display immediately
-					if (this.renderer) {
-						this.renderer.updateCubeMoves(cubeA.id, cubeA.moves)
-					}
+				// После swap: from = куб с которым меняли, to = куб которого двигали
+				const cubeReplaced = grid[from.r]?.[from.c] // бывший в to
+				const cubeMoved = grid[to.r]?.[to.c]       // бывший в from
+				// Двигаемый: -1 обычно; -2 если блок с которым меняли не имел ходов
+				if (cubeMoved) {
+					const delta = replacedHadNoMoves ? 2 : 1
+					cubeMoved.moves = Math.max(0, cubeMoved.moves - delta)
+					if (this.renderer) this.renderer.updateCubeMoves(cubeMoved.id, cubeMoved.moves)
 				}
-				if (cubeB) {
-					cubeB.moves = Math.max(0, cubeB.moves - 1)
-					// Update moves display immediately
-					if (this.renderer) {
-						this.renderer.updateCubeMoves(cubeB.id, cubeB.moves)
-					}
+				if (cubeReplaced) {
+					cubeReplaced.moves = Math.max(0, cubeReplaced.moves - 1)
+					if (this.renderer) this.renderer.updateCubeMoves(cubeReplaced.id, cubeReplaced.moves)
 				}
-				moveEvent = {
-					type: 'swap',
-					a: from,
-					b: to,
-				}
+				moveEvent = { type: 'swap', a: from, b: to }
 			}
 		} else if (action === 'slide') {
 			success = trySlide(grid, from, to)
 			if (success) {
 				const cube = grid[to.r]?.[to.c]
 				if (cube) {
-					// Decrease moves by 2 for slide
-					cube.moves = Math.max(0, cube.moves - 2)
-					// Update moves display immediately
-					if (this.renderer) {
-						this.renderer.updateCubeMoves(cube.id, cube.moves)
-					}
+					// Слайд: цель пустая, «блок с которым заменили» нет — минус 1 ход
+					cube.moves = Math.max(0, cube.moves - 1)
+					if (this.renderer) this.renderer.updateCubeMoves(cube.id, cube.moves)
 					moveEvent = {
 						type: 'move',
 						from,
