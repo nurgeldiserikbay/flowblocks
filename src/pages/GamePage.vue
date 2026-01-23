@@ -79,6 +79,7 @@ import { GameRenderer } from '@/game/render'
 import { GameController } from '@/game/GameController'
 import { useGameStore } from '@/shared/stores/gameStore'
 import { WIDTH } from '@/game/logic'
+import { AudioManager } from '@/game/audio/AudioManager'
 
 const router = useRouter()
 const gameStore = useGameStore()
@@ -169,22 +170,24 @@ function initCanvas(): void {
 	// Принудительно используем полную ширину контейнера для 8 кубиков
 	const containerRect = container.getBoundingClientRect()
 	const maxWidth = Math.max(containerRect.width, 320) // Минимум 320px для мобильных
-	const h = gameStore.getHeight()
+	// Используем фактическую высоту grid, а не gameStore.getHeight()
+	// Это важно, чтобы высота канваса всегда соответствовала фактической высоте grid
+	const h = gameStore.grid?.length ?? gameStore.getHeight()
 
 	// Всегда делим на WIDTH (8) для получения размера плитки
 	const tileSize = maxWidth / WIDTH
 	const canvasHeight = h * tileSize
 
-	// Устанавливаем внутренние размеры canvas (логические пиксели)
-	// С resolution = 1 и autoDensity = false размеры будут совпадать
-	canvas.value.width = maxWidth
-	canvas.value.height = canvasHeight
-	
-	// CSS размеры должны ТОЧНО совпадать с внутренними размерами
-	// Это гарантирует, что 8 плиток всегда будут отображаться правильно
+	// Устанавливаем CSS размеры (логические пиксели)
 	canvas.value.style.width = `${maxWidth}px`
 	canvas.value.style.height = `${canvasHeight}px`
 	canvas.value.style.display = 'block'
+	
+	// Устанавливаем внутренние размеры canvas (физические пиксели)
+	// С autoDensity: true PixiJS будет использовать эти размеры и автоматически масштабировать
+	const devicePixelRatio = window.devicePixelRatio || 1
+	canvas.value.width = maxWidth * devicePixelRatio
+	canvas.value.height = canvasHeight * devicePixelRatio
 }
 
 function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: number; c: number } | null {
@@ -217,19 +220,21 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 
 	// Используем внутренние размеры canvas для точного расчета
 	// Это важно для правильного преобразования координат
-	const canvasWidth = canvas.value.width
-	const canvasHeight = canvas.value.height
-	const tileSize = canvasWidth / WIDTH
+	const devicePixelRatio = window.devicePixelRatio || 1
+	const logicalWidth = canvas.value.width / devicePixelRatio
+	const logicalHeight = canvas.value.height / devicePixelRatio
+	const tileSize = logicalWidth / WIDTH
 	
 	// Преобразуем координаты с учетом масштаба между CSS и внутренними размерами
-	const scaleX = canvasWidth / rect.width
-	const scaleY = canvasHeight / rect.height
+	const scaleX = logicalWidth / rect.width
+	const scaleY = logicalHeight / rect.height
 	const canvasX = x * scaleX
 	const canvasY = y * scaleY
 	
 	const c = Math.floor(canvasX / tileSize)
 	const r = Math.floor(canvasY / tileSize)
-	const h = gameStore.getHeight()
+	// Используем фактическую высоту grid для проверки границ
+	const h = gameStore.grid?.length ?? gameStore.getHeight()
 
 	if (r >= 0 && r < h && c >= 0 && c < WIDTH) {
 		return { r, c }
@@ -240,6 +245,9 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 
 function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	if (gameStore.isLocked || gameStore.isGameOver) return
+
+	// Unlock audio context on first interaction (iOS/Android)
+	AudioManager.unlock()
 
 	// Предотвращаем скролл при взаимодействии с canvas
 	if (e instanceof PointerEvent) {
@@ -408,6 +416,9 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 
 onMounted(async () => {
 	setTimeout(async () => {
+		// Initialize AudioManager
+		await AudioManager.init()
+
 		if (!canvas.value) return
 
 		// Инициализируем canvas с правильными размерами
@@ -674,10 +685,16 @@ function restart(): void {
 	flex: 1;
 	display: flex;
 	flex-direction: column;
-	padding: 1rem 1rem 1rem 2rem;
+	padding: 1rem clamp(0.5rem, 2vw, 1rem) 1rem clamp(0.5rem, 2vw, 2rem);
+	padding-top: max(1rem, env(safe-area-inset-top, 0px));
 	gap: 1rem;
 	position: relative;
 	overflow: hidden;
+
+	@media (max-width: 640px) {
+		padding-left: clamp(0.5rem, 1.5vw, 0.75rem);
+		padding-right: clamp(0.5rem, 1.5vw, 0.75rem);
+	}
 
 	&__play-area {
 		display: flex;
@@ -788,8 +805,7 @@ function restart(): void {
 	max-width: 100%;
 	display: block;
 	background: rgba(0, 0, 0, 0.3);
-	image-rendering: pixelated;
-	image-rendering: -moz-crisp-edges;
+	image-rendering: -webkit-optimize-contrast;
 	image-rendering: crisp-edges;
 	touch-action: manipulation;
 	-webkit-tap-highlight-color: transparent;

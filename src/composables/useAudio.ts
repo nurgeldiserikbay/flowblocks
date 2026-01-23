@@ -1,11 +1,15 @@
 import { ref } from 'vue'
 
 export const audioList: { [key: string]: string } = {
-	again: '/assets/again.mp3',
-	start: '/assets/start.mp3',
-	tap: '/assets/tap.mp3',
-	tapError: '/assets/tap-error.mp3',
-	tapBest: '/assets/tap-best.mp3',
+	CLEAR: '/assets/audio/CLEAR.ogg',
+	COMBO_2: '/assets/audio/COMBO_2.ogg',
+	COMBO_3: '/assets/audio/COMBO_3.ogg',
+	COMBO_4: '/assets/audio/COMBO_4.ogg',
+	COMBO_5: '/assets/audio/COMBO_5.ogg',
+	GAME_OVER: '/assets/audio/GAME_OVER.mp3',
+	MATCH: '/assets/audio/MATCH.ogg',
+	MOVE: '/assets/audio/MOVE.ogg',
+	SPAWN: '/assets/audio/SPAWN.ogg',
 }
 
 const audioActive = ref(true)

@@ -163,17 +163,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAudioStore } from '@/shared/stores/audioStore'
-import { useAudio } from '@/composables/useAudio'
+import { AudioManager } from '@/game/audio/AudioManager'
 
 const audioStore = useAudioStore()
-const { playAudio } = useAudio()
 
 function toggleSound() {
 	audioStore.toggleMute()
-	playAudio('tap')
 }
+
+onMounted(async () => {
+	// Initialize AudioManager on start page
+	await AudioManager.init()
+	// Sync AudioManager with store state
+	AudioManager.setEnabled(audioStore.isEnabled)
+})
 
 // Pattern positions (pre-computed for consistency and visual balance)
 const PATTERN_POSITIONS = [

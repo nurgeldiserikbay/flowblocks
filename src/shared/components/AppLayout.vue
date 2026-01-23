@@ -29,6 +29,7 @@ import TopBar from './TopBar.vue'
 	background-attachment: fixed;
 	position: relative;
 	overflow: hidden;
+	padding-top: env(safe-area-inset-top, 0px);
 
 	&::before {
 		content: '';

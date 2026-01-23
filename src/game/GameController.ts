@@ -20,6 +20,7 @@ import {
 	WIDTH,
 } from './logic'
 import type { GameEvent } from './logic/types'
+import { AudioManager } from './audio/AudioManager'
 
 const COMBO_WINDOW_MS = 2500
 
@@ -46,6 +47,9 @@ export class GameController {
 	async startGame(): Promise<void> {
 		// Reset store
 		this.store.reset()
+
+		// Reset audio flags
+		AudioManager.resetOnceFlags()
 
 		// Create initial grid
 		const { grid, nextId } = createInitialGrid(this.store.getHeight(), 1)
@@ -107,6 +111,9 @@ export class GameController {
 		// Re-render grid first to create sprites for new cubes
 		await this.renderer?.renderGrid(grid, this.nextCubeId)
 
+		// Play spawn sound (once per wave)
+		AudioManager.playSpawn()
+
 		// Then animate spawn events (falling from above)
 		if (this.renderer && result.events.length > 0) {
 			await this.renderer.applyEvents(result.events)
@@ -133,6 +140,8 @@ export class GameController {
 		// Check game over
 		if (result.gameOver) {
 			this.store.setGameOver(true)
+			// Play game over sound
+			AudioManager.playGameOver()
 		}
 
 		this.store.setLocked(false)
@@ -196,6 +205,9 @@ export class GameController {
 			return
 		}
 
+		// Play move sound
+		AudioManager.playMove()
+
 		// Animate move first (this updates positions in renderer)
 		if (this.renderer) {
 			await this.renderer.applyEvents([moveEvent])
@@ -235,8 +247,16 @@ export class GameController {
 		this.store.setGrid(grid)
 
 		// Enrich remove events with baseScore/comboBonus and add score
+		// Play match/combo sounds based on chain index
+		let removeEventIndex = 0
 		for (const ev of resolveResult.events) {
 			if (ev.type !== 'remove') continue
+			removeEventIndex++
+			const chainIndex = removeEventIndex
+
+			// Play sound for this removal batch (one sound per batch)
+			AudioManager.playMatch(chainIndex)
+
 			const baseScore = calculateBaseRemovalScore(ev.cells)
 			let comboBonus = 0
 			if (this.comboTimer !== null) {
@@ -285,6 +305,8 @@ export class GameController {
 			const clearBonus = getVesselClearBonus(grid)
 			this.store.addScore(clearBonus)
 			await this.renderer?.showFullClearBonus(clearBonus)
+			// Play clear sound
+			AudioManager.playClear()
 		}
 
 		this.store.setLocked(false)

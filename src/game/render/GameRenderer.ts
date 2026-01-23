@@ -42,16 +42,21 @@ export class GameRenderer {
 		await loadBlockTextures()
 
 		this.app = new Application()
-		// Используем resolution = 1 и autoDensity = false для предсказуемых размеров
-		// Размеры canvas устанавливаются в GamePage.vue с учетом devicePixelRatio если нужно
+		// Используем devicePixelRatio для четкого рендеринга на мобильных устройствах
+		const devicePixelRatio = window.devicePixelRatio || 1
+		
+		// Получаем логические размеры из CSS стилей
+		const logicalWidth = parseInt(this.canvas.style.width) || this.canvas.width / devicePixelRatio
+		const logicalHeight = parseInt(this.canvas.style.height) || this.canvas.height / devicePixelRatio
+		
 		await this.app.init({
 			canvas: this.canvas,
-			width: this.canvas.width,
-			height: this.canvas.height,
+			width: logicalWidth,
+			height: logicalHeight,
 			backgroundColor: 0x000000,
 			backgroundAlpha: 0,
-			resolution: 1, // Фиксированное разрешение для предсказуемых размеров
-			autoDensity: false, // Отключаем автоматическое масштабирование
+			resolution: devicePixelRatio, // Используем devicePixelRatio для четкости
+			autoDensity: true, // Включаем автоматическое масштабирование для правильного отображения
 		})
 
 		this.gameContainer = new Container()
@@ -136,9 +141,11 @@ export class GameRenderer {
 					fontSize: Math.max(10, this.tileSize / 3),
 					fill: 0xffffff,
 					align: 'center',
+					fontWeight: 'bold',
 				}),
 			})
 			text.style.stroke = { color: 0x000000, width: 2 }
+			text.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
 			text.anchor.set(0.5)
 			text.x = this.tileSize / 2
 			text.y = this.tileSize / 2
@@ -180,9 +187,11 @@ export class GameRenderer {
 						fontSize: Math.max(10, this.tileSize / 3),
 						fill: 0xffffff,
 						align: 'center',
+						fontWeight: 'bold',
 					}),
 				})
 				cubeContainer.text.style.stroke = { color: 0x000000, width: 2 }
+				cubeContainer.text.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
 				cubeContainer.text.anchor.set(0.5)
 				cubeContainer.text.x = this.tileSize / 2
 				cubeContainer.text.y = this.tileSize / 2
@@ -395,6 +404,7 @@ export class GameRenderer {
 						fontWeight: 'bold',
 					}),
 				})
+				t.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
 				t.anchor.set(0.5)
 				t.x = 0
 				t.y = 0
@@ -413,6 +423,7 @@ export class GameRenderer {
 						fontWeight: 'bold',
 					}),
 				})
+				t.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
 				t.anchor.set(0.5)
 				t.x = 0
 				t.y = baseVal > 0 ? -22 : 0
@@ -554,6 +565,7 @@ export class GameRenderer {
 					// Обновить размер текста (если есть)
 					if (cubeContainer.text) {
 						cubeContainer.text.style.fontSize = Math.max(10, this.tileSize / 3)
+						cubeContainer.text.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
 						cubeContainer.text.x = this.tileSize / 2
 						cubeContainer.text.y = this.tileSize / 2
 					}
@@ -580,14 +592,16 @@ export class GameRenderer {
 			this.gridHeight = gridHeight
 		}
 		
-		// Обновляем внутренние размеры canvas (логические пиксели)
-		// С resolution = 1 и autoDensity = false размеры совпадают с CSS
-		this.canvas.width = width
-		this.canvas.height = height
-		// CSS размеры должны ТОЧНО совпадать с внутренними размерами
+		// Устанавливаем CSS размеры (логические пиксели)
 		this.canvas.style.width = `${width}px`
 		this.canvas.style.height = `${height}px`
-		// Resize renderer с теми же размерами
+		
+		// Устанавливаем внутренние размеры canvas (физические пиксели)
+		const devicePixelRatio = window.devicePixelRatio || 1
+		this.canvas.width = width * devicePixelRatio
+		this.canvas.height = height * devicePixelRatio
+		
+		// Resize renderer - передаем логические размеры, PixiJS использует их с resolution
 		this.app.renderer.resize(width, height)
 		
 		// При изменении размера canvas нужно пересчитать позиции всех блоков
@@ -624,6 +638,7 @@ export class GameRenderer {
 				fontWeight: 'bold',
 			}),
 		})
+		t.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
 		t.anchor.set(0.5)
 		t.x = 0
 		t.y = 0

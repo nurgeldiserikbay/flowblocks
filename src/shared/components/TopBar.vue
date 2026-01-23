@@ -39,14 +39,11 @@
 
 <script setup lang="ts">
 import { useAudioStore } from '@/shared/stores/audioStore'
-import { useAudio } from '@/composables/useAudio'
 
 const audioStore = useAudioStore()
-const { playAudio } = useAudio()
 
 function toggleSound() {
 	audioStore.toggleMute()
-	playAudio('tap')
 }
 </script>
 
