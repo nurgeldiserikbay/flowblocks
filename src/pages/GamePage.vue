@@ -11,7 +11,7 @@
 		<div class="game-page">
 			<div class="game-page__play-area">
 				<MomentumScroll
-					ref="momentumScrollRef"
+					ref="momentumScroll"
 					:drag-mult="1.55"
 					:wheel-mult="2.2"
 					:max-overscroll="80"
@@ -25,9 +25,32 @@
 					</div>
 				</MomentumScroll>
 
-				<div v-if="!gameStore.isGameOver" class="level-indicator" :title="`До верха: ${rowsToTop} ряд.`">
+				<div 
+					v-if="!gameStore.isGameOver" 
+					ref="levelIndicatorRef"
+					class="level-indicator" 
+					:title="`До верха: ${rowsToTop} ряд.`"
+					@pointerdown="handleLevelIndicatorPointerDown"
+					@pointermove="handleLevelIndicatorPointerMove"
+					@pointerup="handleLevelIndicatorPointerUp"
+					@pointercancel="handleLevelIndicatorPointerUp"
+					@click="handleLevelIndicatorClick"
+					@touchstart="handleLevelIndicatorTouchStart"
+					@touchmove="handleLevelIndicatorTouchMove"
+					@touchend="handleLevelIndicatorTouchEnd"
+					@touchcancel="handleLevelIndicatorTouchEnd"
+				>
 					<div class="level-indicator__label">{{ rowsToTop }}</div>
-					<div class="level-indicator__bar">
+					<div 
+						class="level-indicator__bar"
+						@pointerdown.stop="handleLevelIndicatorBarPointerDown"
+						@pointermove.stop="handleLevelIndicatorBarPointerMove"
+						@pointerup.stop="handleLevelIndicatorBarPointerUp"
+						@pointercancel.stop="handleLevelIndicatorBarPointerUp"
+						@touchstart.stop="handleLevelIndicatorBarTouchStart"
+						@touchmove.stop="handleLevelIndicatorBarTouchMove"
+						@touchend.stop="handleLevelIndicatorBarTouchEnd"
+					>
 						<div
 							class="level-indicator__fill"
 							:style="{
@@ -86,7 +109,563 @@ const gameStore = useGameStore()
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
 const momentumScrollRef = useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
+const levelIndicatorRef = useTemplateRef<HTMLElement>('levelIndicator')
 const isExitDialogOpen = ref(false)
+
+// Состояние для обработки событий на level-indicator
+let levelIndicatorPointerId: number | null = null
+let levelIndicatorTouchId: number | null = null
+let levelIndicatorStartY = 0
+let levelIndicatorLastY = 0
+let levelIndicatorStartClientY = 0
+let levelIndicatorHasMoved = false // Флаг для определения, было ли движение (чтобы отличить клик от свайпа)
+let levelIndicatorDragStarted = false // Флаг для отслеживания начала drag через ElasticScroll
+let levelIndicatorScrollRatio = 1 // Коэффициент масштабирования для преобразования движения мыши в скролл
+
+// Состояние для обработки событий на level-indicator__bar
+let levelIndicatorBarPointerId: number | null = null
+let levelIndicatorBarTouchId: number | null = null
+let levelIndicatorBarStartY = 0
+let levelIndicatorBarLastY = 0
+let levelIndicatorBarStartClientY = 0
+let levelIndicatorBarElement: HTMLElement | null = null
+let levelIndicatorBarHasMoved = false
+let levelIndicatorBarDragStarted = false // Флаг для отслеживания начала drag через ElasticScroll
+let levelIndicatorBarScrollRatio = 1 // Коэффициент масштабирования для преобразования движения мыши в скролл
+
+// Обработчики событий для level-indicator - drag-scrolling через весь индикатор
+function handleLevelIndicatorPointerDown(e: PointerEvent) {
+	if (e.button !== 0 && e.pointerType === 'mouse') return
+	
+	// Проверяем, что клик не на баре (бар обрабатывает свои события отдельно)
+	const target = e.target as HTMLElement
+	if (target.closest('.level-indicator__bar')) {
+		return // Бар обрабатывает свои события отдельно
+	}
+	
+	if (!levelIndicatorRef.value || !momentumScrollRef.value) return
+	
+	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
+	if (levelIndicatorDragStarted && momentumScrollRef.value) {
+		momentumScrollRef.value.endDrag()
+	}
+	
+	const indicatorElement = levelIndicatorRef.value
+	
+	// Захватываем pointer для отслеживания движения даже вне элемента
+	indicatorElement.setPointerCapture(e.pointerId)
+	
+	levelIndicatorPointerId = e.pointerId
+	levelIndicatorStartY = e.clientY
+	levelIndicatorLastY = e.clientY
+	levelIndicatorStartClientY = e.clientY
+	levelIndicatorHasMoved = false
+	levelIndicatorDragStarted = false
+	
+	// Вычисляем коэффициент масштабирования для преобразования движения мыши в скролл
+	const scrollState = momentumScrollRef.value.getScrollState()
+	const maxScroll = scrollState?.maxY ?? 0
+	const indicatorHeight = indicatorElement.getBoundingClientRect().height
+	
+	if (indicatorHeight > 0 && maxScroll > 0) {
+		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения мыши
+		levelIndicatorScrollRatio = maxScroll / indicatorHeight
+	} else {
+		levelIndicatorScrollRatio = 1
+	}
+	
+	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
+}
+
+function handleLevelIndicatorPointerMove(e: PointerEvent) {
+	if (!momentumScrollRef.value || !levelIndicatorRef.value || levelIndicatorPointerId !== e.pointerId) return
+	
+	// Всегда обновляем lastY для правильного расчета дельты
+	const deltaY = levelIndicatorLastY - e.clientY
+	levelIndicatorLastY = e.clientY
+	
+	const moved = Math.abs(e.clientY - levelIndicatorStartY)
+	if (moved > 3) {
+		// Если движение больше 3px, это drag - выполняем скролл
+		levelIndicatorHasMoved = true
+		e.preventDefault()
+		e.stopPropagation()
+		
+		// Начинаем drag через ElasticScroll при первом движении
+		if (!levelIndicatorDragStarted) {
+			levelIndicatorDragStarted = true
+			momentumScrollRef.value.updateBounds()
+			momentumScrollRef.value.startDrag(performance.now())
+		}
+		
+		// Преобразуем дельту движения мыши в дельту скролла
+		const scrollDelta = deltaY * levelIndicatorScrollRatio
+		
+		// Используем метод drag для плавного скролла с инерцией
+		momentumScrollRef.value.drag(scrollDelta, performance.now())
+	}
+}
+
+function handleLevelIndicatorPointerUp(e: PointerEvent) {
+	if (!levelIndicatorRef.value || levelIndicatorPointerId !== e.pointerId) return
+	
+	// Освобождаем захват pointer
+	if (levelIndicatorRef.value.hasPointerCapture(e.pointerId)) {
+		levelIndicatorRef.value.releasePointerCapture(e.pointerId)
+	}
+	
+	// Сохраняем значения в локальные переменные перед nextTick
+	const indicatorElement = levelIndicatorRef.value
+	const startClientY = levelIndicatorStartClientY
+	const hasMoved = levelIndicatorHasMoved
+	const dragStarted = levelIndicatorDragStarted
+	
+	// Завершаем drag через ElasticScroll, если он был начат
+	if (dragStarted && momentumScrollRef.value) {
+		momentumScrollRef.value.endDrag()
+	}
+	
+	// Очищаем состояние сразу
+	levelIndicatorPointerId = null
+	levelIndicatorHasMoved = false
+	levelIndicatorDragStarted = false
+	
+	// Если движения не было, это клик - выполняем скролл
+	if (!hasMoved) {
+		e.preventDefault()
+		e.stopPropagation()
+		
+		// Используем nextTick для гарантии, что ref инициализирован
+		nextTick(() => {
+			if (!momentumScrollRef.value) {
+				console.warn('momentumScrollRef is still null after nextTick')
+				return
+			}
+			
+			// Обновляем границы скролла перед вычислением позиции
+			momentumScrollRef.value.updateBounds()
+			
+			// Получаем позицию клика относительно индикатора
+			const rect = indicatorElement.getBoundingClientRect()
+			const clickY = startClientY - rect.top
+			const indicatorHeight = rect.height
+			
+			// Вычисляем процент от верха индикатора (0 = верх, 1 = низ)
+			const clickPercent = Math.max(0, Math.min(1, clickY / indicatorHeight))
+			
+			// Получаем состояние скролла
+			const scrollState = momentumScrollRef.value.getScrollState()
+			const maxScroll = scrollState?.maxY ?? 0
+			
+			// Вычисляем целевую позицию скролла на основе процента клика
+			const targetScroll = clickPercent * maxScroll
+			
+			// Выполняем плавный скролл с анимацией
+			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
+		})
+	}
+}
+
+// Обработчик клика на level-indicator для скролла
+function handleLevelIndicatorClick(e: MouseEvent) {
+	if (!momentumScrollRef.value || !levelIndicatorRef.value) return
+	if (levelIndicatorHasMoved) return // Если было движение, это не клик
+	
+	e.preventDefault()
+	e.stopPropagation()
+	
+	// При клике на level-indicator__bar скроллим к низу сосуда,
+	// чтобы пользователь мог увидеть место, где появляются новые блоки
+	momentumScrollRef.value.scrollToBottomAnimated(1.0, 2000)
+}
+
+// Обработчики pointer событий для level-indicator__bar
+function handleLevelIndicatorBarPointerDown(e: PointerEvent) {
+	if (e.button !== 0 && e.pointerType === 'mouse') return
+	
+	const barElement = e.currentTarget as HTMLElement
+	
+	if (!momentumScrollRef.value) return
+	
+	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
+	if (levelIndicatorBarDragStarted && momentumScrollRef.value) {
+		momentumScrollRef.value.endDrag()
+	}
+	
+	// Захватываем pointer для отслеживания движения даже вне элемента
+	barElement.setPointerCapture(e.pointerId)
+	
+	levelIndicatorBarPointerId = e.pointerId
+	levelIndicatorBarStartY = e.clientY
+	levelIndicatorBarLastY = e.clientY
+	levelIndicatorBarStartClientY = e.clientY
+	levelIndicatorBarElement = barElement
+	levelIndicatorBarHasMoved = false
+	levelIndicatorBarDragStarted = false
+	
+	// Вычисляем коэффициент масштабирования для преобразования движения мыши в скролл
+	const scrollState = momentumScrollRef.value.getScrollState()
+	const maxScroll = scrollState?.maxY ?? 0
+	const barHeight = barElement.getBoundingClientRect().height
+	
+	if (barHeight > 0 && maxScroll > 0) {
+		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения мыши
+		levelIndicatorBarScrollRatio = maxScroll / barHeight
+	} else {
+		levelIndicatorBarScrollRatio = 1
+	}
+	
+	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
+}
+
+function handleLevelIndicatorBarPointerMove(e: PointerEvent) {
+	if (!momentumScrollRef.value || !levelIndicatorBarPointerId || levelIndicatorBarPointerId !== e.pointerId || !levelIndicatorBarElement) return
+	
+	// Всегда обновляем lastY для правильного расчета дельты
+	const deltaY = levelIndicatorBarLastY - e.clientY
+	levelIndicatorBarLastY = e.clientY
+	
+	const moved = Math.abs(e.clientY - levelIndicatorBarStartY)
+	if (moved > 3) {
+		// Если движение больше 3px, это drag - выполняем скролл
+		levelIndicatorBarHasMoved = true
+		e.preventDefault()
+		e.stopPropagation()
+		
+		// Начинаем drag через ElasticScroll при первом движении
+		if (!levelIndicatorBarDragStarted) {
+			levelIndicatorBarDragStarted = true
+			momentumScrollRef.value.updateBounds()
+			momentumScrollRef.value.startDrag(performance.now())
+		}
+		
+		// Преобразуем дельту движения мыши в дельту скролла
+		const scrollDelta = deltaY * levelIndicatorBarScrollRatio
+		
+		// Используем метод drag для плавного скролла с инерцией
+		momentumScrollRef.value.drag(scrollDelta, performance.now())
+	}
+}
+
+function handleLevelIndicatorBarPointerUp(e: PointerEvent) {
+	if (levelIndicatorBarPointerId !== e.pointerId || !levelIndicatorBarElement) return
+	
+	// Освобождаем захват pointer
+	if (levelIndicatorBarElement.hasPointerCapture(e.pointerId)) {
+		levelIndicatorBarElement.releasePointerCapture(e.pointerId)
+	}
+	
+	// Сохраняем значения в локальные переменные перед nextTick
+	const barElement = levelIndicatorBarElement
+	const startClientY = levelIndicatorBarStartClientY
+	const hasMoved = levelIndicatorBarHasMoved
+	const dragStarted = levelIndicatorBarDragStarted
+	
+	// Завершаем drag через ElasticScroll, если он был начат
+	if (dragStarted && momentumScrollRef.value) {
+		momentumScrollRef.value.endDrag()
+	}
+	
+	// Очищаем состояние сразу
+	levelIndicatorBarPointerId = null
+	levelIndicatorBarElement = null
+	levelIndicatorBarHasMoved = false
+	levelIndicatorBarDragStarted = false
+	
+	// Если движения не было, это клик - выполняем скролл
+	if (!hasMoved) {
+		e.preventDefault()
+		e.stopPropagation()
+		
+		// Используем nextTick для гарантии, что ref инициализирован
+		nextTick(() => {
+			if (!momentumScrollRef.value) {
+				console.warn('momentumScrollRef is still null after nextTick')
+				return
+			}
+			
+			// Обновляем границы скролла перед вычислением позиции
+			momentumScrollRef.value.updateBounds()
+			
+			// Получаем позицию клика относительно бара (используем сохраненные координаты из pointerdown)
+			const rect = barElement.getBoundingClientRect()
+			const clickY = startClientY - rect.top
+			const barHeight = rect.height
+			
+			// Вычисляем процент от верха бара (0 = верх, 1 = низ)
+			const clickPercent = Math.max(0, Math.min(1, clickY / barHeight))
+			
+			// Получаем состояние скролла
+			const scrollState = momentumScrollRef.value.getScrollState()
+			const maxScroll = scrollState?.maxY ?? 0
+			
+			// Вычисляем целевую позицию скролла на основе процента клика
+			const targetScroll = clickPercent * maxScroll
+			
+			// Выполняем плавный скролл с анимацией
+			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
+		})
+	}
+}
+
+// Обработчики touch событий для level-indicator__bar
+function handleLevelIndicatorBarTouchStart(e: TouchEvent) {
+	if (!momentumScrollRef.value) return
+	
+	const touch = e.touches[0]
+	if (!touch) return
+	
+	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
+	if (levelIndicatorBarDragStarted && momentumScrollRef.value) {
+		momentumScrollRef.value.endDrag()
+	}
+	
+	const barElement = e.currentTarget as HTMLElement
+	
+	levelIndicatorBarTouchId = touch.identifier
+	levelIndicatorBarStartY = touch.clientY
+	levelIndicatorBarLastY = touch.clientY
+	levelIndicatorBarElement = barElement
+	levelIndicatorBarHasMoved = false
+	levelIndicatorBarDragStarted = false
+	
+	// Вычисляем коэффициент масштабирования для преобразования движения касания в скролл
+	const scrollState = momentumScrollRef.value.getScrollState()
+	const maxScroll = scrollState?.maxY ?? 0
+	const barHeight = barElement.getBoundingClientRect().height
+	
+	if (barHeight > 0 && maxScroll > 0) {
+		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения касания
+		levelIndicatorBarScrollRatio = maxScroll / barHeight
+	} else {
+		levelIndicatorBarScrollRatio = 1
+	}
+}
+
+function handleLevelIndicatorBarTouchMove(e: TouchEvent) {
+	if (!momentumScrollRef.value || !levelIndicatorBarTouchId || !levelIndicatorBarElement) return
+	
+	const touch = Array.from(e.touches).find(t => t.identifier === levelIndicatorBarTouchId)
+	if (!touch) return
+	
+	// Всегда обновляем lastY для правильного расчета дельты
+	const deltaY = levelIndicatorBarLastY - touch.clientY
+	levelIndicatorBarLastY = touch.clientY
+	
+	const moved = Math.abs(touch.clientY - levelIndicatorBarStartY)
+	if (moved > 3) {
+		// Если движение больше 3px, это drag - выполняем скролл
+		levelIndicatorBarHasMoved = true
+		e.preventDefault()
+		e.stopPropagation()
+		
+		// Начинаем drag через ElasticScroll при первом движении
+		if (!levelIndicatorBarDragStarted) {
+			levelIndicatorBarDragStarted = true
+			momentumScrollRef.value.updateBounds()
+			momentumScrollRef.value.startDrag(performance.now())
+		}
+		
+		// Преобразуем дельту движения касания в дельту скролла
+		const scrollDelta = deltaY * levelIndicatorBarScrollRatio
+		
+		// Используем метод drag для плавного скролла с инерцией
+		momentumScrollRef.value.drag(scrollDelta, performance.now())
+	}
+}
+
+function handleLevelIndicatorBarTouchEnd(e: TouchEvent) {
+	if (!levelIndicatorBarElement) return
+	
+	const touch = e.changedTouches[0]
+	if (!touch || touch.identifier !== levelIndicatorBarTouchId) return
+	
+	const moved = Math.abs(touch.clientY - levelIndicatorBarStartY)
+	
+	// Сохраняем значения в локальные переменные перед nextTick
+	const barElement = levelIndicatorBarElement
+	const startY = levelIndicatorBarStartY
+	const hasMoved = levelIndicatorBarHasMoved
+	const dragStarted = levelIndicatorBarDragStarted
+	
+	// Завершаем drag через ElasticScroll, если он был начат
+	if (dragStarted && momentumScrollRef.value) {
+		momentumScrollRef.value.endDrag()
+	}
+	
+	// Очищаем состояние сразу
+	levelIndicatorBarTouchId = null
+	levelIndicatorBarElement = null
+	levelIndicatorBarHasMoved = false
+	levelIndicatorBarDragStarted = false
+	
+	// Если движения не было, это клик - вычисляем позицию скролла
+	if (!hasMoved && moved <= 10) {
+		e.preventDefault()
+		e.stopPropagation()
+		
+		// Используем nextTick для гарантии, что ref инициализирован
+		nextTick(() => {
+			if (!momentumScrollRef.value) {
+				console.warn('momentumScrollRef is still null after nextTick')
+				return
+			}
+			
+			// Обновляем границы скролла перед вычислением позиции
+			momentumScrollRef.value.updateBounds()
+			
+			// Получаем позицию касания относительно бара (используем сохраненные координаты из touchstart)
+			const rect = barElement.getBoundingClientRect()
+			const touchY = startY - rect.top
+			const barHeight = rect.height
+			
+			// Вычисляем процент от верха бара (0 = верх, 1 = низ)
+			const touchPercent = Math.max(0, Math.min(1, touchY / barHeight))
+			
+			// Получаем состояние скролла
+			const scrollState = momentumScrollRef.value.getScrollState()
+			const maxScroll = scrollState?.maxY ?? 0
+			
+			// Вычисляем целевую позицию скролла на основе процента касания
+			const targetScroll = touchPercent * maxScroll
+			
+			// Выполняем плавный скролл с анимацией
+			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
+		})
+	}
+}
+
+function handleLevelIndicatorTouchStart(e: TouchEvent) {
+	// Проверяем, что касание не на баре (бар обрабатывает свои события отдельно)
+	const target = e.target as HTMLElement
+	if (target.closest('.level-indicator__bar')) {
+		return // Бар обрабатывает свои события отдельно
+	}
+	
+	if (!levelIndicatorRef.value || !momentumScrollRef.value) return
+	
+	const touch = e.touches[0]
+	if (!touch) return
+	
+	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
+	if (levelIndicatorDragStarted && momentumScrollRef.value) {
+		momentumScrollRef.value.endDrag()
+	}
+	
+	const indicatorElement = levelIndicatorRef.value
+	
+	levelIndicatorTouchId = touch.identifier
+	levelIndicatorStartY = touch.clientY
+	levelIndicatorLastY = touch.clientY
+	levelIndicatorHasMoved = false
+	levelIndicatorDragStarted = false
+	
+	// Вычисляем коэффициент масштабирования для преобразования движения касания в скролл
+	const scrollState = momentumScrollRef.value.getScrollState()
+	const maxScroll = scrollState?.maxY ?? 0
+	const indicatorHeight = indicatorElement.getBoundingClientRect().height
+	
+	if (indicatorHeight > 0 && maxScroll > 0) {
+		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения касания
+		levelIndicatorScrollRatio = maxScroll / indicatorHeight
+	} else {
+		levelIndicatorScrollRatio = 1
+	}
+	
+	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
+}
+
+function handleLevelIndicatorTouchMove(e: TouchEvent) {
+	if (!momentumScrollRef.value || !levelIndicatorRef.value) return
+	
+	const touch = Array.from(e.touches).find(t => t.identifier === levelIndicatorTouchId)
+	if (!touch) return
+	
+	// Всегда обновляем lastY для правильного расчета дельты
+	const deltaY = levelIndicatorLastY - touch.clientY
+	levelIndicatorLastY = touch.clientY
+	
+	const moved = Math.abs(touch.clientY - levelIndicatorStartY)
+	if (moved > 3) {
+		// Если движение больше 3px, это drag - выполняем скролл
+		levelIndicatorHasMoved = true
+		e.preventDefault()
+		e.stopPropagation()
+		
+		// Начинаем drag через ElasticScroll при первом движении
+		if (!levelIndicatorDragStarted) {
+			levelIndicatorDragStarted = true
+			momentumScrollRef.value.updateBounds()
+			momentumScrollRef.value.startDrag(performance.now())
+		}
+		
+		// Преобразуем дельту движения касания в дельту скролла
+		const scrollDelta = deltaY * levelIndicatorScrollRatio
+		
+		// Используем метод drag для плавного скролла с инерцией
+		momentumScrollRef.value.drag(scrollDelta, performance.now())
+	}
+}
+
+function handleLevelIndicatorTouchEnd(e: TouchEvent) {
+	if (!levelIndicatorRef.value) return
+	
+	const touch = e.changedTouches[0]
+	if (!touch || touch.identifier !== levelIndicatorTouchId) return
+	
+	const moved = Math.abs(touch.clientY - levelIndicatorStartY)
+	
+	// Сохраняем значения в локальные переменные перед nextTick
+	const indicatorElement = levelIndicatorRef.value
+	const startY = levelIndicatorStartY
+	const hasMoved = levelIndicatorHasMoved
+	const dragStarted = levelIndicatorDragStarted
+	
+	// Завершаем drag через ElasticScroll, если он был начат
+	if (dragStarted && momentumScrollRef.value) {
+		momentumScrollRef.value.endDrag()
+	}
+	
+	// Очищаем состояние сразу
+	levelIndicatorTouchId = null
+	levelIndicatorHasMoved = false
+	levelIndicatorDragStarted = false
+	
+	// Если движения не было, это клик - вычисляем позицию скролла
+	if (!hasMoved && moved <= 10) {
+		e.preventDefault()
+		e.stopPropagation()
+		
+		// Используем nextTick для гарантии, что ref инициализирован
+		nextTick(() => {
+			if (!momentumScrollRef.value) {
+				console.warn('momentumScrollRef is still null after nextTick')
+				return
+			}
+			
+			// Обновляем границы скролла перед вычислением позиции
+			momentumScrollRef.value.updateBounds()
+			
+			// Получаем позицию касания относительно индикатора
+			const rect = indicatorElement.getBoundingClientRect()
+			const touchY = startY - rect.top
+			const indicatorHeight = rect.height
+			
+			// Вычисляем процент от верха индикатора (0 = верх, 1 = низ)
+			const touchPercent = Math.max(0, Math.min(1, touchY / indicatorHeight))
+			
+			// Получаем состояние скролла
+			const scrollState = momentumScrollRef.value.getScrollState()
+			const maxScroll = scrollState?.maxY ?? 0
+			
+			// Вычисляем целевую позицию скролла на основе процента касания
+			const targetScroll = touchPercent * maxScroll
+			
+			// Выполняем плавный скролл с анимацией
+			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
+		})
+	}
+}
 
 let gameController: GameController | null = null
 let renderer: GameRenderer | null = null
@@ -793,6 +1372,12 @@ function restart(): void {
 	width: 1.25rem;
 	flex-shrink: 0;
 	gap: 0.25rem;
+	// Позволяем скроллить через индикатор
+	cursor: grab;
+	
+	&:active {
+		cursor: grabbing;
+	}
 
 	&__label {
 		font-size: 0.7rem;
