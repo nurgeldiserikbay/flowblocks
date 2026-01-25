@@ -39,22 +39,22 @@ const SOUND_CONFIGS: Record<SoundId, SoundConfig> = {
 	combo2: {
 		path: audioList.COMBO_2,
 		category: 'combo',
-		throttleMs: 90,
+		throttleMs: 0, // Убираем throttle для звуков комбо, чтобы они не блокировались при каскадных исчезновениях
 	},
 	combo3: {
 		path: audioList.COMBO_3,
 		category: 'combo',
-		throttleMs: 90,
+		throttleMs: 0,
 	},
 	combo4: {
 		path: audioList.COMBO_4,
 		category: 'combo',
-		throttleMs: 90,
+		throttleMs: 0,
 	},
 	combo5: {
 		path: audioList.COMBO_5,
 		category: 'combo',
-		throttleMs: 90,
+		throttleMs: 0,
 	},
 	spawn: {
 		path: audioList.SPAWN,
@@ -172,7 +172,7 @@ class AudioManagerClass {
 	 */
 	private play(
 		id: SoundId,
-		options?: { volume?: number; speed?: number; once?: boolean }
+		options?: { volume?: number; speed?: number; once?: boolean; skipThrottle?: boolean }
 	): void {
 		if (!this.initialized || !this.enabled) return
 
@@ -184,15 +184,18 @@ class AudioManagerClass {
 			return
 		}
 
-		// Проверка throttle
+		// Проверка throttle (пропускаем для каскадных исчезновений)
 		const throttleMs = config.throttleMs ?? 0
-		if (throttleMs > 0) {
+		if (throttleMs > 0 && !options?.skipThrottle) {
 			const lastPlay = this.throttleTimers.get(id) ?? 0
 			const now = Date.now()
 			if (now - lastPlay < throttleMs) {
+				// Отладочный лог для проверки блокировки throttle
+				if (id === 'match' || id.startsWith('combo')) {
+					console.log(`Sound ${id} blocked by throttle: ${now - lastPlay}ms < ${throttleMs}ms`)
+				}
 				return
 			}
-			this.throttleTimers.set(id, now)
 		}
 
 		// Проверка once-per-state для clear и gameover
@@ -214,10 +217,31 @@ class AudioManagerClass {
 		}
 
 		try {
-			sound.play(id, {
+			// Воспроизводим звук с опцией singleInstance: false
+			// чтобы каждый звук воспроизводился отдельно, даже параллельно
+			const soundInstance = sound.play(id, {
 				volume: finalVolume,
 				speed,
+				loop: false,
+				singleInstance: false, // Позволяем воспроизводить несколько экземпляров одновременно
 			})
+			
+			// Проверяем результат воспроизведения
+			if (!soundInstance) {
+				console.warn(`Failed to get sound instance for ${id}`)
+				return
+			}
+
+			// Отладочный лог для проверки воспроизведения звуков
+			if (id === 'match' || id.startsWith('combo')) {
+				console.log(`Playing sound: ${id}, skipThrottle: ${options?.skipThrottle}, volume: ${finalVolume}, speed: ${speed}`)
+			}
+
+			// Устанавливаем throttle timer ПОСЛЕ успешного воспроизведения
+			// НЕ устанавливаем timer если skipThrottle = true, чтобы не блокировать каскадные звуки
+			if (throttleMs > 0 && !options?.skipThrottle) {
+				this.throttleTimers.set(id, Date.now())
+			}
 
 			// Устанавливаем флаги для once звуков
 			if (options?.once) {
@@ -226,6 +250,11 @@ class AudioManagerClass {
 			}
 		} catch (error) {
 			console.warn(`Failed to play sound ${id}:`, error)
+			// Если звук комбо не воспроизвелся, пытаемся использовать match как fallback
+			if (id.startsWith('combo') && sound.exists('match')) {
+				console.log(`Falling back to match sound for ${id}`)
+				this.play('match', { ...options, speed: options?.speed ?? 1.1 })
+			}
 		}
 	}
 
@@ -246,18 +275,33 @@ class AudioManagerClass {
 
 	/**
 	 * Воспроизведение звука матча/комбо
+	 * skipThrottle: true для каскадных исчезновений, чтобы звуки не блокировались throttle
 	 */
-	playMatch(chainIndex: number): void {
+	playMatch(chainIndex: number, skipThrottle: boolean = false): void {
 		if (chainIndex === 1) {
-			this.play('match')
-		} else if (chainIndex === 2) {
-			this.play('combo2')
-		} else if (chainIndex === 3) {
-			this.play('combo3')
-		} else if (chainIndex === 4) {
-			this.play('combo4')
+			this.play('match', { skipThrottle })
 		} else {
-			this.play('combo5')
+			// Для каскадных исчезновений пытаемся воспроизвести звук комбо
+			// Если звук комбо не загружен, используем звук 'match' с увеличенной высотой тона
+			let comboId: SoundId = 'match'
+			let speed: number | undefined = undefined
+			
+			if (chainIndex === 2) {
+				comboId = sound.exists('combo2') ? 'combo2' : 'match'
+				if (comboId === 'match') speed = 1.1
+			} else if (chainIndex === 3) {
+				comboId = sound.exists('combo3') ? 'combo3' : 'match'
+				if (comboId === 'match') speed = 1.15
+			} else if (chainIndex === 4) {
+				comboId = sound.exists('combo4') ? 'combo4' : 'match'
+				if (comboId === 'match') speed = 1.2
+			} else {
+				comboId = sound.exists('combo5') ? 'combo5' : 'match'
+				if (comboId === 'match') speed = 1.25
+			}
+			
+			// Воспроизводим звук сразу, без задержек - пусть звучат параллельно если нужно
+			this.play(comboId, { skipThrottle, speed })
 		}
 	}
 

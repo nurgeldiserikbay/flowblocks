@@ -74,6 +74,24 @@ export function getBlockTexture(colorIndex: number): Texture | null {
 }
 
 /**
+ * Проверить, загружены ли все текстуры и готовы ли они к использованию
+ */
+export function areTexturesLoaded(): boolean {
+	if (!textureCache || textureCache.size === 0) {
+		return false
+	}
+	
+	// Проверяем, что все текстуры валидны
+	for (const texture of textureCache.values()) {
+		if (!texture || !texture.valid) {
+			return false
+		}
+	}
+	
+	return true
+}
+
+/**
  * Очистить кэш текстур
  */
 export function clearBlockTextures(): void {

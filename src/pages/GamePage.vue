@@ -97,6 +97,11 @@
 					</button>
 				</div>
 			</div>
+
+			<div v-if="isGenerating" class="generation-loading">
+				<div class="generation-loading__spinner"></div>
+				<div class="generation-loading__text">Генерация игры...</div>
+			</div>
 		</div>
 	</AppLayout>
 </template>
@@ -114,6 +119,7 @@ import { GameController } from '@/game/GameController'
 import { useGameStore } from '@/shared/stores/gameStore'
 import { WIDTH } from '@/game/logic'
 import { AudioManager } from '@/game/audio/AudioManager'
+import { areTexturesLoaded } from '@/game/blockTextures'
 
 const router = useRouter()
 const gameStore = useGameStore()
@@ -123,6 +129,7 @@ const momentumScrollRef = useTemplateRef<InstanceType<typeof MomentumScroll>>('m
 const levelIndicatorRef = useTemplateRef<HTMLElement>('levelIndicator')
 const playAreaRef = useTemplateRef<HTMLElement>('playArea')
 const isExitDialogOpen = ref(false)
+const isGenerating = ref(true)
 
 // Состояние для обработки событий на level-indicator
 let levelIndicatorPointerId: number | null = null
@@ -1457,7 +1464,7 @@ onMounted(async () => {
 		// Set initial scroll position to top
 		momentumScrollRef.value?.scrollToTop()
 
-		// Start game
+		// Start game (generation happens here)
 		await gameController.startGame()
 
 		// Setup input handlers
@@ -1600,11 +1607,40 @@ onMounted(async () => {
 		}
 		canvas.value.addEventListener('touchmove', touchMoveHandler, { passive: false })
 
-		// Wait for canvas to render
-		await nextTick()
+		// renderGrid уже завершился в startGame(), теперь проверяем готовность
+		// Сначала убеждаемся, что все текстуры загружены
+		if (!areTexturesLoaded()) {
+			// Если текстуры еще не загружены, ждем их загрузки
+			let attempts = 0
+			while (!areTexturesLoaded() && attempts < 20) {
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				attempts++
+			}
+		}
+
+		// Sync grid positions to ensure tiles are rendered
+		await renderer.syncGridPositions(gameStore.grid)
+
+		// Принудительно отрисовываем кадр, чтобы плитки появились на canvas
+		renderer.forceRender()
+
+		// Ждем кадр для отрисовки и проверяем готовность всех плиток
 		await new Promise((resolve) => requestAnimationFrame(resolve))
+		
+		// Ждем, пока все плитки будут готовы (максимум 10 кадров)
+		let attempts = 0
+		while (!renderer.areTilesReady() && attempts < 10) {
+			renderer.forceRender()
+			await new Promise((resolve) => requestAnimationFrame(resolve))
+			attempts++
+		}
+
+		// Еще один кадр для гарантии видимости
+		renderer.forceRender()
 		await new Promise((resolve) => requestAnimationFrame(resolve))
-		await new Promise((resolve) => requestAnimationFrame(resolve))
+
+		// Hide loading after all tiles are rendered and visible
+		isGenerating.value = false
 
 		// Update scroll bounds
 		momentumScrollRef.value?.updateBounds()
@@ -1747,7 +1783,7 @@ function handleExit(): void {
 	router.push('/')
 }
 
-function restart(): void {
+async function restart(): Promise<void> {
 	selectedForSwap = null
 	dragStart = null
 	dragStartClient = null
@@ -1758,7 +1794,48 @@ function restart(): void {
 	renderer?.setSelectedPosition(null, null)
 	if (gameController) {
 		gameController.stop()
-		gameController.startGame()
+		isGenerating.value = true
+		await gameController.startGame()
+		
+		if (!renderer) {
+			isGenerating.value = false
+			return
+		}
+
+		// renderGrid уже завершился в startGame(), теперь проверяем готовность
+		// Сначала убеждаемся, что все текстуры загружены
+		if (!areTexturesLoaded()) {
+			// Если текстуры еще не загружены, ждем их загрузки
+			let attempts = 0
+			while (!areTexturesLoaded() && attempts < 20) {
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				attempts++
+			}
+		}
+
+		// Sync grid positions to ensure tiles are rendered
+		await renderer.syncGridPositions(gameStore.grid)
+
+		// Принудительно отрисовываем кадр, чтобы плитки появились на canvas
+		renderer.forceRender()
+
+		// Ждем кадр для отрисовки и проверяем готовность всех плиток
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+		
+		// Ждем, пока все плитки будут готовы (максимум 10 кадров)
+		let attempts = 0
+		while (!renderer.areTilesReady() && attempts < 10) {
+			renderer.forceRender()
+			await new Promise((resolve) => requestAnimationFrame(resolve))
+			attempts++
+		}
+
+		// Еще один кадр для гарантии видимости
+		renderer.forceRender()
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+
+		// Hide loading after all tiles are rendered and visible
+		isGenerating.value = false
 	}
 }
 </script>
@@ -1873,7 +1950,7 @@ function restart(): void {
 	justify-content: space-between;
 	align-items: center;
 	width: 100%;
-	gap: 1rem;
+	gap: 5px;
 	/* Убираем flex-wrap, чтобы элементы не переносились на новую строку */
 	flex-wrap: nowrap;
 	/* Оптимизация для предотвращения пересчета layout при изменении размеров canvas */
@@ -1881,6 +1958,14 @@ function restart(): void {
 	contain: layout style;
 	/* Минимальная ширина для предотвращения сжатия */
 	min-width: 0;
+
+	@media (max-width: 360px) {
+		gap: 3px;
+	}
+
+	@media (max-width: 320px) {
+		gap: 2px;
+	}
 
 	&__time,
 	&__score,
@@ -1908,6 +1993,18 @@ function restart(): void {
 		will-change: transform;
 		/* Изоляция от изменений layout родителя */
 		contain: layout style paint;
+
+		@media (max-width: 360px) {
+			font-size: clamp(0.75rem, 2.5vw, 0.875rem);
+			padding: 0.4rem 0.6rem;
+			border-radius: 8px;
+		}
+
+		@media (max-width: 320px) {
+			font-size: clamp(0.7rem, 2vw, 0.8rem);
+			padding: 0.35rem 0.5rem;
+			border-radius: 6px;
+		}
 	}
 }
 
@@ -1917,7 +2014,7 @@ function restart(): void {
 	height: auto !important;
 	max-width: 100%;
 	display: block;
-	background: rgba(0, 0, 0, 0.3);
+	background: transparent;
 	image-rendering: -webkit-optimize-contrast;
 	image-rendering: crisp-edges;
 	touch-action: manipulation;
@@ -2107,6 +2204,55 @@ function restart(): void {
 	&__icon {
 		font-size: 1.45rem;
 		line-height: 1;
+	}
+}
+
+.generation-loading {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.75);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 1.5rem;
+	z-index: 100;
+	animation: generation-loading-fade 0.3s ease-out;
+
+	&__spinner {
+		width: 60px;
+		height: 60px;
+		border: 6px solid rgba(255, 255, 255, 0.3);
+		border-top-color: rgba(196, 181, 253, 0.9);
+		border-radius: 50%;
+		animation: generation-loading-spin 1s linear infinite;
+	}
+
+	&__text {
+		font-size: 1.1rem;
+		font-weight: 600;
+		color: rgba(255, 255, 255, 0.9);
+		text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+	}
+}
+
+@keyframes generation-loading-fade {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes generation-loading-spin {
+	to {
+		transform: rotate(360deg);
 	}
 }
 </style>

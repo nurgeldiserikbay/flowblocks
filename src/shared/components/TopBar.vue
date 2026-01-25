@@ -67,6 +67,16 @@ function toggleSound() {
 		padding: 0.75rem 1rem;
 	}
 
+	@media (max-width: 360px) {
+		padding: 0.5rem 0.75rem;
+		gap: 0.75rem;
+	}
+
+	@media (max-width: 320px) {
+		padding: 0.5rem 0.5rem;
+		gap: 0.5rem;
+	}
+
 	&__left {
 		display: flex;
 		align-items: center;
@@ -75,6 +85,14 @@ function toggleSound() {
 		min-width: 0;
 		/* Предотвращаем изменение размеров при изменении layout дочерних элементов */
 		contain: layout style;
+
+		@media (max-width: 360px) {
+			gap: 0.5rem;
+		}
+
+		@media (max-width: 320px) {
+			gap: 0.4rem;
+		}
 	}
 
 	&__sound {
@@ -116,6 +134,18 @@ function toggleSound() {
 			width: 40px;
 			height: 40px;
 		}
+
+		@media (max-width: 360px) {
+			width: 36px;
+			height: 36px;
+			border-radius: 10px;
+		}
+
+		@media (max-width: 320px) {
+			width: 32px;
+			height: 32px;
+			border-radius: 8px;
+		}
 	}
 
 	&__sound-icon {
@@ -129,6 +159,16 @@ function toggleSound() {
 		@media (max-width: 640px) {
 			width: 20px;
 			height: 20px;
+		}
+
+		@media (max-width: 360px) {
+			width: 18px;
+			height: 18px;
+		}
+
+		@media (max-width: 320px) {
+			width: 16px;
+			height: 16px;
 		}
 	}
 }

@@ -743,6 +743,56 @@ export class GameRenderer {
 		}
 	}
 
+	/**
+	 * Проверить, что все плитки готовы и отрисованы
+	 * Проверяет, что сетка построена, все текстуры загружены и все спрайты созданы
+	 */
+	areTilesReady(): boolean {
+		if (!this.gameContainer || !this.app) {
+			return false
+		}
+		
+		// Проверяем, что есть хотя бы одна плитка
+		if (this.cubeContainers.size === 0) {
+			return false
+		}
+		
+		// Проверяем, что ВСЕ спрайты имеют валидные текстуры и добавлены в контейнер
+		for (const cubeContainer of this.cubeContainers.values()) {
+			// Проверяем наличие спрайта
+			if (!cubeContainer.sprite) {
+				return false
+			}
+			
+			// Проверяем наличие текстуры
+			if (!cubeContainer.sprite.texture) {
+				return false
+			}
+			
+			// Проверяем, что текстура валидна (загружена и готова)
+			if (!cubeContainer.sprite.texture.valid) {
+				return false
+			}
+			
+			// Проверяем, что контейнер добавлен в gameContainer
+			if (!cubeContainer.container.parent || cubeContainer.container.parent !== this.gameContainer) {
+				return false
+			}
+		}
+		
+		// Все плитки готовы
+		return true
+	}
+
+	/**
+	 * Принудительно отрисовать кадр
+	 */
+	forceRender(): void {
+		if (this.app) {
+			this.app.render()
+		}
+	}
+
 	destroy(): void {
 		this.cubeContainers.forEach((cubeContainer) => {
 			if (cubeContainer.container.parent) {

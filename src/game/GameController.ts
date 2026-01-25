@@ -57,7 +57,7 @@ export class GameController {
 		this.store.setGrid(grid)
 
 		// Render initial grid
-		await this.renderer.renderGrid(grid, this.nextCubeId)
+		await this.renderer?.renderGrid(grid, this.nextCubeId)
 
 		// Start timer
 		this.startTimer()
@@ -255,7 +255,10 @@ export class GameController {
 			const chainIndex = removeEventIndex
 
 			// Play sound for this removal batch (one sound per batch)
-			AudioManager.playMatch(chainIndex)
+			// Каждое аудио воспроизводится отдельно, даже если они будут звучать параллельно
+			// Для каскадных исчезновений пропускаем throttle, чтобы звуки не блокировались
+			const isCascade = chainIndex > 1
+			AudioManager.playMatch(chainIndex, isCascade)
 
 			const baseScore = calculateBaseRemovalScore(ev.cells)
 			let comboBonus = 0
