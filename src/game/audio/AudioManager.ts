@@ -276,32 +276,40 @@ class AudioManagerClass {
 	/**
 	 * Воспроизведение звука матча/комбо
 	 * skipThrottle: true для каскадных исчезновений, чтобы звуки не блокировались throttle
+	 * 
+	 * Логика звуков:
+	 * - chainIndex 1: MATCH (первое исчезновение от действия игрока)
+	 * - chainIndex 2-4: MATCH с уменьшенной громкостью (первые три каскадных)
+	 * - chainIndex 5-8: COMBO_2, COMBO_3, COMBO_4, COMBO_5 (последующие каскадные)
+	 * - chainIndex 9+: COMBO_5 (максимальный комбо)
 	 */
 	playMatch(chainIndex: number, skipThrottle: boolean = false): void {
 		if (chainIndex === 1) {
+			// Первое исчезновение от действия игрока
 			this.play('match', { skipThrottle })
+		} else if (chainIndex >= 2 && chainIndex <= 4) {
+			// Первые три каскадных исчезновения - слабый MATCH
+			// Используем уменьшенную громкость (0.6 от обычной)
+			this.play('match', { skipThrottle, volume: 0.6 })
 		} else {
-			// Для каскадных исчезновений пытаемся воспроизвести звук комбо
-			// Если звук комбо не загружен, используем звук 'match' с увеличенной высотой тона
-			let comboId: SoundId = 'match'
-			let speed: number | undefined = undefined
+			// Последующие каскадные исчезновения - COMBO звуки
+			let comboId: SoundId = 'combo5'
 			
-			if (chainIndex === 2) {
+			if (chainIndex === 5) {
 				comboId = sound.exists('combo2') ? 'combo2' : 'match'
-				if (comboId === 'match') speed = 1.1
-			} else if (chainIndex === 3) {
+			} else if (chainIndex === 6) {
 				comboId = sound.exists('combo3') ? 'combo3' : 'match'
-				if (comboId === 'match') speed = 1.15
-			} else if (chainIndex === 4) {
+			} else if (chainIndex === 7) {
 				comboId = sound.exists('combo4') ? 'combo4' : 'match'
-				if (comboId === 'match') speed = 1.2
-			} else {
+			} else if (chainIndex === 8) {
 				comboId = sound.exists('combo5') ? 'combo5' : 'match'
-				if (comboId === 'match') speed = 1.25
+			} else {
+				// chainIndex >= 9 - максимальный комбо
+				comboId = sound.exists('combo5') ? 'combo5' : 'match'
 			}
 			
 			// Воспроизводим звук сразу, без задержек - пусть звучат параллельно если нужно
-			this.play(comboId, { skipThrottle, speed })
+			this.play(comboId, { skipThrottle })
 		}
 	}
 

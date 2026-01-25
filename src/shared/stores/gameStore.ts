@@ -32,6 +32,13 @@ export const useGameStore = defineStore('game', () => {
 	const height = ref(BASE_HEIGHT)
 	const isLocked = ref(false)
 	const isGameOver = ref(false)
+	
+	// Состояния готовности для правильного старта игры
+	const isAssetsReady = ref(false)
+	const isSceneReady = ref(false)
+	const isTilesAdded = ref(false)
+	const isFirstFrameRendered = ref(false)
+	const isGameStarted = ref(false)
 
 	function getHeight(): number {
 		return height.value
@@ -50,6 +57,32 @@ export const useGameStore = defineStore('game', () => {
 		height.value = BASE_HEIGHT
 		isLocked.value = false
 		isGameOver.value = false
+		// Сбрасываем состояния готовности
+		isAssetsReady.value = false
+		isSceneReady.value = false
+		isTilesAdded.value = false
+		isFirstFrameRendered.value = false
+		isGameStarted.value = false
+	}
+	
+	function setAssetsReady(ready: boolean) {
+		isAssetsReady.value = ready
+	}
+	
+	function setSceneReady(ready: boolean) {
+		isSceneReady.value = ready
+	}
+	
+	function setTilesAdded(added: boolean) {
+		isTilesAdded.value = added
+	}
+	
+	function setFirstFrameRendered(rendered: boolean) {
+		isFirstFrameRendered.value = rendered
+	}
+	
+	function setGameStarted(started: boolean) {
+		isGameStarted.value = started
 	}
 
 	function setGrid(newGrid: (Cube | null)[][]) {
@@ -90,6 +123,12 @@ export const useGameStore = defineStore('game', () => {
 		height,
 		isLocked,
 		isGameOver,
+		// Readiness states
+		isAssetsReady,
+		isSceneReady,
+		isTilesAdded,
+		isFirstFrameRendered,
+		isGameStarted,
 		// Constants
 		WIDTH,
 		BASE_HEIGHT,
@@ -105,6 +144,11 @@ export const useGameStore = defineStore('game', () => {
 		getHeight,
 		setLocked,
 		setGameOver,
+		setAssetsReady,
+		setSceneReady,
+		setTilesAdded,
+		setFirstFrameRendered,
+		setGameStarted,
 		getWaveDuration,
 		getSpawnRowsForLevel,
 		getHeightForLevel,

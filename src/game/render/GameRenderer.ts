@@ -5,8 +5,9 @@
 import { Application, Container, Sprite, Text, TextStyle, Graphics } from 'pixi.js'
 import { gsap } from 'gsap'
 import type { GameEvent, Cube } from '../logic/types'
-import { getBlockTexture } from '../blockTextures'
+import { getBlockTexture, waitForTexturesReady } from '../blockTextures'
 import { WIDTH } from '../logic/grid'
+import { AudioManager } from '../audio/AudioManager'
 
 const TILE_PADDING = 2
 
@@ -102,8 +103,8 @@ export class GameRenderer {
 		this.forceRender()
 	}
 
-	async renderGrid(grid: (Cube | null)[][], nextCubeId: number = 1): Promise<void> {
-		if (!this.gameContainer) return
+	async renderGrid(grid: (Cube | null)[][], nextCubeId: number = 1, excludeCubeIds?: Set<number>): Promise<void> {
+		if (!this.gameContainer || !this.app) return
 
 		this.nextCubeId = nextCubeId
 		// Сохраняем высоту grid для расчета позиций снизу
@@ -119,11 +120,15 @@ export class GameRenderer {
 		this.cubeContainers.clear()
 		this.cubePositions.clear()
 
-		// Render all cubes
+		// Render all cubes, excluding new ones that will be created in animateSpawn
 		for (let r = 0; r < grid.length; r++) {
 			for (let c = 0; c < WIDTH; c++) {
 				const cube = grid[r]?.[c]
 				if (cube) {
+					// Пропускаем новые кубы - они будут созданы в animateSpawn
+					if (excludeCubeIds && excludeCubeIds.has(cube.id)) {
+						continue
+					}
 					this.createCubeSprite(cube, r, c)
 				}
 			}
@@ -134,8 +139,18 @@ export class GameRenderer {
 			this.setSelectedPosition(this.selectedPosition.r, this.selectedPosition.c)
 		}
 
-		// Force render to ensure tiles appear immediately
-		this.forceRender()
+		// Ждем первого реального рендера через ticker
+		// Это гарантирует, что плитки действительно отрисованы на экране
+		await new Promise<void>((resolve) => {
+			if (!this.app) {
+				resolve()
+				return
+			}
+			// Используем addOnce для ожидания следующего кадра рендеринга
+			this.app.ticker.addOnce(() => {
+				resolve()
+			})
+		})
 	}
 
 	/**
@@ -149,7 +164,7 @@ export class GameRenderer {
 		return (r) * this.tileSize
 	}
 
-	private createCubeSprite(cube: Cube, r: number, c: number): CubeContainer {
+	private createCubeSprite(cube: Cube, r: number, c: number, initialAlpha: number = 1, initialScale: number = 1): CubeContainer {
 		if (!this.gameContainer) {
 			throw new Error('Game container not initialized')
 		}
@@ -161,11 +176,30 @@ export class GameRenderer {
 		}
 		
 		// КРИТИЧНО: Проверяем размеры текстуры (в PixiJS v8 нет texture.valid)
+		// Если текстура еще не готова, это может привести к проблемам с анимацией
 		if (texture.width <= 0 || texture.height <= 0) {
 			console.warn(`Texture for color ${cube.color} has invalid dimensions`, {
 				width: texture.width,
-				height: texture.height
+				height: texture.height,
+				textureSource: texture.source ? 'exists' : 'missing'
 			})
+			// Пытаемся получить информацию о внутреннем изображении
+			try {
+				const source = texture.source as any
+				if (source && source.resource) {
+					const img = source.resource.source || source.resource
+					if (img && img instanceof HTMLImageElement) {
+						console.warn(`Image element state:`, {
+							complete: img.complete,
+							naturalWidth: img.naturalWidth,
+							naturalHeight: img.naturalHeight,
+							src: img.src.substring(0, 50) + '...'
+						})
+					}
+				}
+			} catch (e) {
+				// Игнорируем ошибки доступа
+			}
 		}
 
 		// Create container for cube
@@ -173,10 +207,10 @@ export class GameRenderer {
 		container.x = c * this.tileSize
 		container.y = this.calculateYFromBottom(r)
 		
-		// КРИТИЧНО: Убеждаемся, что контейнер видим
+		// КРИТИЧНО: Устанавливаем начальные состояния (могут быть изменены для анимации)
 		container.visible = true
-		container.alpha = 1
-		container.scale.set(1)
+		container.alpha = initialAlpha
+		container.scale.set(initialScale)
 
 		// Create sprite
 		const sprite = new Sprite(texture)
@@ -331,6 +365,11 @@ export class GameRenderer {
 					await this.animateFall(event.items)
 					break
 				case 'remove':
+					// Воспроизводим звук во время анимации удаления
+					if (event.chainIndex !== undefined) {
+						const isCascade = event.chainIndex > 1
+						AudioManager.playMatch(event.chainIndex, isCascade)
+					}
 					await this.animateRemove(
 						event.cells,
 						event.baseScore,
@@ -557,9 +596,82 @@ export class GameRenderer {
 	}
 
 	private async animateSpawn(cells: Array<{ id: number; r: number; c: number; color: number; fromRow?: number; toRow?: number }>): Promise<void> {
+		if (!this.gameContainer) return
+
+		// КРИТИЧНО: Проверяем готовность текстур перед созданием спрайтов
+		// Это особенно важно при первой загрузке страницы
+		try {
+			await waitForTexturesReady()
+		} catch (error) {
+			console.error('Failed to wait for textures ready:', error)
+			// Продолжаем выполнение, но это может привести к проблемам с анимацией
+		}
+
+		// КРИТИЧНО: Проверяем готовность каждой текстуры перед созданием спрайтов
+		for (const cell of cells) {
+			const texture = getBlockTexture(cell.color)
+			if (!texture || texture.width <= 0 || texture.height <= 0) {
+				console.warn(`Texture not ready for color ${cell.color} before sprite creation, waiting...`)
+				// Ждем готовности текстуры для этого цвета
+				await waitForTexturesReady(2000)
+				// Проверяем еще раз после ожидания
+				const textureAfterWait = getBlockTexture(cell.color)
+				if (!textureAfterWait || textureAfterWait.width <= 0 || textureAfterWait.height <= 0) {
+					console.error(`Texture still not ready for color ${cell.color} after waiting`)
+				}
+			}
+		}
+
+		// КРИТИЧНО: Сначала создаем все спрайты синхронно
+		// Это гарантирует, что все спрайты добавлены в контейнер перед запуском анимации
+		for (const cell of cells) {
+			let cubeContainer = this.cubeContainers.get(cell.id)
+			
+			// Если спрайт еще не создан, создаем его сейчас с правильными начальными состояниями
+			if (!cubeContainer) {
+				// Создаем временный куб для создания спрайта
+				const tempCube: Cube = {
+					id: cell.id,
+					color: cell.color,
+					moves: 0, // moves будет обновлен позже через updateCubeMoves если нужно
+				}
+				// Создаем спрайт на целевой позиции из события (toRow или r)
+				// Это финальная позиция после gravity
+				const targetRow = cell.toRow !== undefined ? cell.toRow : cell.r
+				
+				// Определяем начальные состояния в зависимости от типа анимации
+				if (cell.fromRow !== undefined && cell.fromRow < 0) {
+					// Для падения сверху: создаем с alpha=1, scale=1 (будет анимироваться по Y)
+					cubeContainer = this.createCubeSprite(tempCube, targetRow, cell.c, 1, 1)
+				} else {
+					// Для появления на месте: создаем с alpha=0, scale=0 (будет анимироваться scale/alpha)
+					// Используем 0, но убедимся, что спрайт видим перед анимацией
+					cubeContainer = this.createCubeSprite(tempCube, targetRow, cell.c, 0, 0)
+				}
+				
+				// КРИТИЧНО: Проверяем, что спрайт создан и добавлен в контейнер
+				if (!cubeContainer || !cubeContainer.container.parent) {
+					console.error(`Failed to create sprite for cell ${cell.id} at row ${targetRow}, col ${cell.c}`)
+				} else {
+					// Проверяем готовность текстуры после создания спрайта
+					const createdTexture = cubeContainer.sprite.texture
+					if (!createdTexture || createdTexture.width <= 0 || createdTexture.height <= 0) {
+						console.error(`Sprite created but texture not ready for cell ${cell.id}, color ${cell.color}`, {
+							textureWidth: createdTexture?.width,
+							textureHeight: createdTexture?.height
+						})
+					}
+				}
+			}
+		}
+
+		// Теперь создаем промисы анимации для всех ячеек
 		const animations = cells.map((cell) => {
 			const cubeContainer = this.cubeContainers.get(cell.id)
-			if (!cubeContainer) return Promise.resolve() // removed in resolve
+			if (!cubeContainer) {
+				console.error(`Cube container not found for cell ${cell.id}`)
+				return Promise.resolve()
+			}
 
 			const pos = this.cubePositions.get(cell.id)
 			if (!pos) return Promise.resolve()
@@ -573,9 +685,10 @@ export class GameRenderer {
 				// Позиция сверху = (gridHeight - 1 + |fromRow|) * tileSize, но это будет выше canvas
 				// Для визуального эффекта падения сверху используем отрицательную позицию
 				const startY = -Math.abs(cell.fromRow) * this.tileSize
+				// КРИТИЧНО: Устанавливаем начальную позицию ПЕРЕД анимацией
 				cubeContainer.container.y = startY
-				cubeContainer.container.alpha = 1
-				cubeContainer.container.scale.set(1)
+				cubeContainer.container.visible = true
+				cubeContainer.sprite.visible = true
 				return new Promise<void>((resolve) => {
 					gsap.to(cubeContainer.container, {
 						y: targetY,
@@ -588,19 +701,97 @@ export class GameRenderer {
 					})
 				})
 			} else {
+				// Для появления на месте: спрайт уже создан с alpha=0, scale=0
+				// КРИТИЧНО: Убеждаемся, что контейнер видим перед анимацией
+				cubeContainer.container.visible = true
+				cubeContainer.sprite.visible = true
+				
+				// КРИТИЧНО: Проверяем, что текстура спрайта готова перед анимацией
+				// Это особенно важно при первой загрузке страницы
+				const spriteTexture = cubeContainer.sprite.texture
+				if (!spriteTexture || spriteTexture.width <= 0 || spriteTexture.height <= 0) {
+					console.error(`Sprite texture not ready for cube ${cell.id}, texture may not be decoded yet`, {
+						textureWidth: spriteTexture?.width,
+						textureHeight: spriteTexture?.height,
+						hasSource: !!spriteTexture?.source
+					})
+					// Если текстура не готова, пропускаем анимацию для этого спрайта
+					return Promise.resolve()
+				}
+				
+				// КРИТИЧНО: Убеждаемся, что начальные значения установлены правильно
+				// Используем 0 для начальных значений, но убедимся, что контейнер видим
 				cubeContainer.container.alpha = 0
 				cubeContainer.container.scale.set(0)
+				
+				// КРИТИЧНО: Небольшая задержка перед запуском анимации для гарантии,
+				// что браузер успел отрендерить спрайт с начальными состояниями
+				// Особенно важно при первой загрузке страницы
 				return new Promise<void>((resolve) => {
-					gsap.to(cubeContainer.container, {
-						alpha: 1,
-						scale: 1,
-						duration: 0.15,
-						ease: 'back.out',
-						onComplete: resolve,
+					// Принудительно рендерим кадр после создания спрайта
+					if (this.app) {
+						this.forceRender()
+					}
+					
+					// Используем requestAnimationFrame для синхронизации с браузером
+					requestAnimationFrame(() => {
+						// Еще один кадр для гарантии, что спрайт отрендерен
+						// Также ждем кадр PixiJS ticker для гарантии рендеринга
+						requestAnimationFrame(() => {
+							if (this.app && this.app.ticker) {
+								this.app.ticker.addOnce(() => {
+									// Еще один принудительный рендер перед запуском анимации
+									this.forceRender()
+									
+									// КРИТИЧНО: Проверяем, что контейнер все еще существует и видим
+									if (!cubeContainer.container.parent) {
+										console.error(`Container for cube ${cell.id} was removed before animation`)
+										resolve()
+										return
+									}
+									
+									// Анимируем от 0 до 1
+									gsap.to(cubeContainer.container, {
+										alpha: 1,
+										scale: 1,
+										duration: 0.15,
+										ease: 'back.out',
+										onComplete: () => {
+											// Убеждаемся, что финальные значения установлены
+											cubeContainer.container.alpha = 1
+											cubeContainer.container.scale.set(1)
+											resolve()
+										},
+									})
+								})
+							} else {
+								gsap.to(cubeContainer.container, {
+									alpha: 1,
+									scale: 1,
+									duration: 0.15,
+									ease: 'back.out',
+									onComplete: () => {
+										cubeContainer.container.alpha = 1
+										cubeContainer.container.scale.set(1)
+										resolve()
+									},
+								})
+							}
+						})
 					})
 				})
 			}
 		})
+		
+		// КРИТИЧНО: Принудительно рендерим кадр после создания всех спрайтов
+		// Это гарантирует, что все спрайты добавлены в сцену перед запуском анимации
+		if (this.app) {
+			this.forceRender()
+		}
+		
+		// Ждем один кадр перед запуском всех анимаций
+		await this.waitForNextFrame()
+		
 		await Promise.all(animations)
 	}
 
@@ -828,6 +1019,13 @@ export class GameRenderer {
 	}
 
 	/**
+	 * Проверить, инициализирован ли Pixi Application
+	 */
+	isInitialized(): boolean {
+		return this.app !== null && this.gameContainer !== null
+	}
+
+	/**
 	 * Проверить, что все плитки готовы и отрисованы
 	 * Проверяет, что сетка построена, все текстуры загружены и все спрайты созданы
 	 */
@@ -902,6 +1100,30 @@ export class GameRenderer {
 		} catch (error) {
 			console.error('Error during force render:', error)
 		}
+	}
+
+	/**
+	 * Ждать следующего кадра рендеринга PixiJS
+	 * Используется для синхронизации перед запуском анимаций
+	 */
+	async waitForNextFrame(): Promise<void> {
+		if (!this.app) {
+			return Promise.resolve()
+		}
+		
+		return new Promise<void>((resolve) => {
+			// Используем requestAnimationFrame для синхронизации с браузером
+			requestAnimationFrame(() => {
+				// И еще один кадр PixiJS ticker для гарантии
+				if (this.app && this.app.ticker) {
+					this.app.ticker.addOnce(() => {
+						resolve()
+					})
+				} else {
+					resolve()
+				}
+			})
+		})
 	}
 
 	/**

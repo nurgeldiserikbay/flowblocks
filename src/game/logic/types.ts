@@ -45,6 +45,7 @@ export type GameEvent =
 			}>
 			baseScore?: number
 			comboBonus?: number
+			chainIndex?: number // Индекс каскадного исчезновения (1 = первое, 2+ = каскадные)
 	  }
 	| {
 			type: 'spawn'
@@ -70,4 +71,5 @@ export type ResolveResult = {
 export type SpawnResult = {
 	events: GameEvent[]
 	gameOver: boolean
+	nextId: number
 }

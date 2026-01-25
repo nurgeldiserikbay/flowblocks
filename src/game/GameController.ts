@@ -21,7 +21,7 @@ import {
 } from './logic'
 import type { GameEvent } from './logic/types'
 import { AudioManager } from './audio/AudioManager'
-import { loadBlockTextures } from './blockTextures'
+import { loadBlockTextures, waitForTexturesReady } from './blockTextures'
 
 const COMBO_WINDOW_MS = 2500
 
@@ -50,6 +50,8 @@ export class GameController {
 	 */
 	async init(): Promise<void> {
 		await loadBlockTextures()
+		// Ассеты загружены
+		this.store.setAssetsReady(true)
 	}
 
 	async startGame(): Promise<void> {
@@ -59,16 +61,113 @@ export class GameController {
 		// Reset audio flags
 		AudioManager.resetOnceFlags()
 
+		// Сбрасываем состояния готовности
+		this.store.setAssetsReady(false)
+		this.store.setSceneReady(false)
+		this.store.setTilesAdded(false)
+		this.store.setFirstFrameRendered(false)
+		this.store.setGameStarted(false)
+
+		// КРИТИЧНО: Убеждаемся, что текстуры загружены перед проверкой готовности
+		// Это особенно важно при обновлении страницы, когда кэш может быть очищен
+		await loadBlockTextures()
+		this.store.setAssetsReady(true)
+
+		// КРИТИЧНО: Ждем, пока все текстуры будут готовы к использованию
+		// Это особенно важно при первой загрузке, когда изображения могут еще декодироваться
+		await waitForTexturesReady()
+
+		// Проверяем, что сцена готова (Pixi Application инициализирован)
+		if (!this.renderer || !this.renderer.isInitialized()) {
+			throw new Error('Renderer or Pixi Application not initialized')
+		}
+		this.store.setSceneReady(true)  
+
 		// Create initial grid
 		const { grid, nextId } = createInitialGrid(this.store.getHeight(), 1)
 		this.nextCubeId = nextId
 		this.store.setGrid(grid)
 
-		// Render initial grid
-		await this.renderer?.renderGrid(grid, this.nextCubeId)
+		// Собираем все начальные плитки для анимации появления
+		const initialCubes: Array<{ id: number; r: number; c: number; color: number }> = []
+		for (let r = 0; r < grid.length; r++) {
+			for (let c = 0; c < WIDTH; c++) {
+				const cube = grid[r]?.[c]
+				if (cube) {
+					initialCubes.push({
+						id: cube.id,
+						r,
+						c,
+						color: cube.color,
+					})
+				}
+			}
+		}
 
-		// Start timer
+		// Создаем событие spawn для начальных плиток (без fromRow, чтобы они появлялись на месте)
+		const initialSpawnEvent: GameEvent = {
+			type: 'spawn',
+			cells: initialCubes.map((cube) => ({
+				id: cube.id,
+				r: cube.r,
+				c: cube.c,
+				color: cube.color,
+				// Без fromRow - плитки будут появляться на месте с анимацией scale/alpha
+			})),
+		}
+
+		// Render initial grid БЕЗ создания спрайтов для начальных плиток
+		// Они будут созданы в animateSpawn с правильными начальными состояниями
+		const initialCubeIds = new Set(initialCubes.map((c) => c.id))
+		this.store.setTilesAdded(true)
+		await this.renderer?.renderGrid(grid, this.nextCubeId, initialCubeIds)
+
+		// КРИТИЧНО: Ждем дополнительный кадр перед запуском анимации
+		// Это гарантирует, что PixiJS успел отрендерить пустой grid и готов к созданию новых спрайтов
+		// Особенно важно при первой загрузке страницы, когда браузер еще инициализируется
+		if (this.renderer && initialCubes.length > 0) {
+			await this.renderer.waitForNextFrame()
+			
+			// КРИТИЧНО: Еще раз проверяем готовность текстур перед запуском анимации
+			// Это особенно важно при обновлении страницы, когда текстуры могут еще декодироваться
+			try {
+				await waitForTexturesReady(2000) // Короткое ожидание для финальной проверки
+			} catch (error) {
+				console.warn('Textures may not be fully ready, but continuing with animation:', error)
+			}
+		}
+
+		// Анимируем появление начальных плиток
+		if (this.renderer && initialCubes.length > 0) {
+			await this.renderer.applyEvents([initialSpawnEvent])
+			
+			// Обновляем moves для начальных плиток (они были созданы с moves=0)
+			for (const cube of initialCubes) {
+				const actualCube = grid[cube.r]?.[cube.c]
+				if (actualCube && actualCube.moves > 0) {
+					this.renderer.updateCubeMoves(actualCube.id, actualCube.moves)
+				}
+			}
+		}
+		
+		// После анимации первый кадр уже отрендерен
+		// Теперь можно запускать игру
+		this.onFirstFrameRendered()
+	}
+
+	/**
+	 * Вызывается после первого реального рендера плиток
+	 * Здесь запускаем таймер и разрешаем пользовательский ввод
+	 */
+	private onFirstFrameRendered(): void {
+		// Первый кадр отрендерен
+		this.store.setFirstFrameRendered(true)
+		
+		// Запускаем таймер
 		this.startTimer()
+		
+		// Игра запущена
+		this.store.setGameStarted(true)
 	}
 
 	private startTimer(): void {
@@ -116,15 +215,49 @@ export class GameController {
 		// Update grid (new cubes are already placed)
 		this.store.setGrid(grid)
 
-		// Re-render grid first to create sprites for new cubes
-		await this.renderer?.renderGrid(grid, this.nextCubeId)
+		// Собираем ID новых кубов из событий spawn, чтобы не создавать для них спрайты в renderGrid
+		// Они будут созданы в animateSpawn с правильными начальными состояниями
+		const newCubeIds = new Set<number>()
+		for (const event of result.events) {
+			if (event.type === 'spawn') {
+				for (const cell of event.cells) {
+					newCubeIds.add(cell.id)
+				}
+			}
+		}
+
+		// Re-render grid, исключая новые кубы (они будут созданы в animateSpawn)
+		await this.renderer?.renderGrid(grid, this.nextCubeId, newCubeIds.size > 0 ? newCubeIds : undefined)
 
 		// Play spawn sound (once per wave)
 		AudioManager.playSpawn()
 
 		// Then animate spawn events (falling from above)
+		// animateSpawn создаст спрайты для новых кубов с правильными начальными состояниями
 		if (this.renderer && result.events.length > 0) {
 			await this.renderer.applyEvents(result.events)
+			
+			// Обновляем moves для новых плиток (они были созданы с moves=0)
+			// Собираем ID новых кубов из событий spawn
+			const newCubeIds = new Set<number>()
+			for (const event of result.events) {
+				if (event.type === 'spawn') {
+					for (const cell of event.cells) {
+						newCubeIds.add(cell.id)
+					}
+				}
+			}
+			
+			// Находим кубы в grid по ID и обновляем их moves
+			// После гравитации позиции могут измениться, поэтому ищем по всему grid
+			for (let r = 0; r < grid.length; r++) {
+				for (let c = 0; c < WIDTH; c++) {
+					const cube = grid[r]?.[c]
+					if (cube && newCubeIds.has(cube.id) && cube.moves > 0) {
+						this.renderer.updateCubeMoves(cube.id, cube.moves)
+					}
+				}
+			}
 		}
 
 		this.store.setWaveIndex(newWaveIndex)
@@ -255,18 +388,12 @@ export class GameController {
 		this.store.setGrid(grid)
 
 		// Enrich remove events with baseScore/comboBonus and add score
-		// Play match/combo sounds based on chain index
+		// Store chainIndex in events for sound playback during animation
 		let removeEventIndex = 0
 		for (const ev of resolveResult.events) {
 			if (ev.type !== 'remove') continue
 			removeEventIndex++
 			const chainIndex = removeEventIndex
-
-			// Play sound for this removal batch (one sound per batch)
-			// Каждое аудио воспроизводится отдельно, даже если они будут звучать параллельно
-			// Для каскадных исчезновений пропускаем throttle, чтобы звуки не блокировались
-			const isCascade = chainIndex > 1
-			AudioManager.playMatch(chainIndex, isCascade)
 
 			const baseScore = calculateBaseRemovalScore(ev.cells)
 			let comboBonus = 0
@@ -283,6 +410,7 @@ export class GameController {
 			}, COMBO_WINDOW_MS)
 			ev.baseScore = baseScore
 			ev.comboBonus = comboBonus
+			ev.chainIndex = chainIndex // Сохраняем chainIndex для воспроизведения звука во время анимации
 			this.store.addScore(baseScore + comboBonus)
 		}
 

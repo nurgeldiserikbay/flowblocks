@@ -107,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ScreenOrientation } from '@capacitor/screen-orientation'
 import { Capacitor } from '@capacitor/core'
@@ -119,7 +119,7 @@ import { GameController } from '@/game/GameController'
 import { useGameStore } from '@/shared/stores/gameStore'
 import { WIDTH } from '@/game/logic'
 import { AudioManager } from '@/game/audio/AudioManager'
-import { areTexturesLoaded } from '@/game/blockTextures'
+import { waitForTexturesReady } from '@/game/blockTextures'
 
 const router = useRouter()
 const gameStore = useGameStore()
@@ -1420,136 +1420,109 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 }
 
 onMounted(async () => {
-	// Удаляем кэширование getBoundingClientRect, так как теперь всегда используем актуальные значения
-	// Это гарантирует правильную работу на мобильных устройствах
+	// Initialize AudioManager
+	await AudioManager.init()
+
+	if (!canvas.value) return
+
+	// КРИТИЧНО: Убеждаемся, что canvas в DOM и видим
+	if (!canvas.value.parentElement) {
+		console.error('Canvas is not in DOM')
+		return
+	}
 	
-	setTimeout(async () => {
-		// Initialize AudioManager
-		await AudioManager.init()
-
-		if (!canvas.value) return
-
-		// КРИТИЧНО: Убеждаемся, что canvas в DOM и видим
-		if (!canvas.value.parentElement) {
-			console.error('Canvas is not in DOM')
-			return
-		}
-		
-		// КРИТИЧНО: Проверяем, что контейнер не скрыт (display: none)
-		const container = canvas.value.parentElement
-		const containerStyle = window.getComputedStyle(container)
-		if (containerStyle.display === 'none' || containerStyle.visibility === 'hidden') {
-			console.warn('Canvas container is hidden, waiting for visibility...')
-			// Ждем, пока контейнер станет видимым
-			await new Promise((resolve) => {
-				const checkVisibility = () => {
-					const style = window.getComputedStyle(container)
-					if (style.display !== 'none' && style.visibility !== 'hidden') {
-						resolve(undefined)
-					} else {
-						requestAnimationFrame(checkVisibility)
-					}
+	// КРИТИЧНО: Проверяем, что контейнер не скрыт (display: none)
+	const container = canvas.value.parentElement
+	const containerStyle = window.getComputedStyle(container)
+	if (containerStyle.display === 'none' || containerStyle.visibility === 'hidden') {
+		console.warn('Canvas container is hidden, waiting for visibility...')
+		// Ждем, пока контейнер станет видимым
+		await new Promise((resolve) => {
+			const checkVisibility = () => {
+				const style = window.getComputedStyle(container)
+				if (style.display !== 'none' && style.visibility !== 'hidden') {
+					resolve(undefined)
+				} else {
+					requestAnimationFrame(checkVisibility)
 				}
-				checkVisibility()
-			})
-		}
-
-		// Инициализируем canvas с правильными размерами
-		initCanvas()
-		
-		// КРИТИЧНО: Убеждаемся, что canvas имеет правильную ширину
-		// Ждем несколько кадров для гарантии, что layout завершен
-		await nextTick()
-		await new Promise((resolve) => requestAnimationFrame(resolve))
-		await new Promise((resolve) => requestAnimationFrame(resolve))
-
-		// КРИТИЧНО: Проверяем размеры canvas перед инициализацией PixiJS
-		const containerRect = container.getBoundingClientRect()
-		if (containerRect.width === 0 || containerRect.height === 0) {
-			console.error('Canvas container has zero dimensions:', {
-				width: containerRect.width,
-				height: containerRect.height,
-				styleWidth: container.style.width,
-				styleHeight: container.style.height
-			})
-		}
-
-		// Create renderer с правильным tileSize (всегда ширина / 8)
-		// Используем кэшированное значение из initCanvas
-		const containerWidth = cachedContainerRect?.width ?? containerRect.width ?? canvas.value.width
-		const tileSize = Math.max(containerWidth, 320) / WIDTH // Минимум 320px для мобильных
-		
-		renderer = new GameRenderer({
-			canvas: canvas.value,
-			tileSize,
+			}
+			checkVisibility()
 		})
+	}
 
-		await renderer.init()
-		
-		// КРИТИЧНО: Диагностика после инициализации
-		if (renderer) {
-			renderer.debugRenderState()
-		}
-		
-		// После инициализации PixiJS нужно убедиться, что размеры canvas правильные
-		// Получаем актуальные размеры из CSS (они уже установлены в initCanvas)
-		const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
-		
-		const canvasWidth = parseInt(canvas.value.style.width) || containerWidth
-		const canvasHeight = parseInt(canvas.value.style.height) || (gridHeight * tileSize)
-		// Обновляем размеры через renderer, чтобы PixiJS правильно их обработал
-		renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
+	// Инициализируем canvas с правильными размерами
+	initCanvas()
+	
+	// Ждем один кадр для гарантии, что layout завершен
+	await nextTick()
+	await new Promise((resolve) => requestAnimationFrame(resolve))
 
-		// Create game controller
-		gameController = new GameController(renderer, { onVesselExpanded: handleVesselExpanded })
+	// КРИТИЧНО: Проверяем размеры canvas перед инициализацией PixiJS
+	const containerRect = container.getBoundingClientRect()
+	if (containerRect.width === 0 || containerRect.height === 0) {
+		console.error('Canvas container has zero dimensions:', {
+			width: containerRect.width,
+			height: containerRect.height,
+			styleWidth: container.style.width,
+			styleHeight: container.style.height
+		})
+	}
 
-		// Initialize controller (load textures)
-		await gameController.init()
+	// Create renderer с правильным tileSize (всегда ширина / 8)
+	// Используем кэшированное значение из initCanvas
+	const containerWidth = cachedContainerRect?.width ?? containerRect.width ?? canvas.value.width
+	const tileSize = Math.max(containerWidth, 320) / WIDTH // Минимум 320px для мобильных
+	
+	renderer = new GameRenderer({
+		canvas: canvas.value,
+		tileSize,
+	})
 
-		// Set initial scroll position to top
-		momentumScrollRef.value?.scrollToTop()
+	await renderer.init()
+	
+	// После инициализации PixiJS нужно убедиться, что размеры canvas правильные
+	// Получаем актуальные размеры из CSS (они уже установлены в initCanvas)
+	const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
+	
+	const canvasWidth = parseInt(canvas.value.style.width) || containerWidth
+	const canvasHeight = parseInt(canvas.value.style.height) || (gridHeight * tileSize)
+	// Обновляем размеры через renderer, чтобы PixiJS правильно их обработал
+	renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
 
-		// Start game (generation happens here)
-		await gameController.startGame()
+	// Create game controller
+	gameController = new GameController(renderer, { onVesselExpanded: handleVesselExpanded })
 
-		// Ensure textures are loaded and tiles are rendered
-		if (!areTexturesLoaded()) {
-			// If textures are not yet loaded, wait for them
-			let attempts = 0
-			while (!areTexturesLoaded() && attempts < 20) {
-				await new Promise((resolve) => setTimeout(resolve, 50))
-				attempts++
+	// Initialize controller (load textures) - устанавливает isAssetsReady = true
+	await gameController.init()
+
+	// Set initial scroll position to top
+	momentumScrollRef.value?.scrollToTop()
+
+	// Start game (generation happens here)
+	// startGame() теперь:
+	// 1. Устанавливает isAssetsReady, isSceneReady, isTilesAdded
+	// 2. Вызывает renderGrid(), который ждет первого рендера через app.ticker.addOnce()
+	// 3. После первого рендера вызывает onFirstFrameRendered(), который запускает таймер
+	await gameController.startGame()
+
+	// Ждем, пока первый кадр будет отрендерен (startGame уже ждет этого)
+	// Но для надежности проверим состояние из store
+	// После startGame() isFirstFrameRendered должен быть true
+	
+	// Скрываем loading только после того, как первый кадр отрендерен
+	// Это гарантирует, что плитки реально видны пользователю
+	if (gameStore.isFirstFrameRendered) {
+		isGenerating.value = false
+	} else {
+		// Если по какой-то причине состояние не установлено, ждем его
+		// Используем watch для реактивности
+		const stopWatcher = watch(() => gameStore.isFirstFrameRendered, (rendered) => {
+			if (rendered) {
+				isGenerating.value = false
+				stopWatcher()
 			}
-		}
-
-		// Sync grid positions to ensure tiles are rendered
-		if (renderer) {
-			await renderer.syncGridPositions(gameStore.grid)
-
-			// КРИТИЧНО: Принудительно рендерим несколько раз для гарантии отображения
-			renderer.forceRender()
-			await new Promise((resolve) => requestAnimationFrame(resolve))
-			renderer.forceRender()
-			await new Promise((resolve) => requestAnimationFrame(resolve))
-
-			// Wait for all tiles to be ready (max 10 frames)
-			let attempts = 0
-			while (!renderer.areTilesReady() && attempts < 10) {
-				renderer.forceRender()
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-				attempts++
-			}
-			
-			// КРИТИЧНО: Если плитки все еще не готовы, выводим диагностику
-			if (!renderer.areTilesReady()) {
-				console.error('Tiles are not ready after 10 attempts')
-				renderer.debugRenderState()
-			}
-
-			// One more frame to guarantee visibility
-			renderer.forceRender()
-			await new Promise((resolve) => requestAnimationFrame(resolve))
-		}
+		}, { immediate: true })
+	}
 
 		// Setup input handlers
 		// Используем pointer events с preventDefault для предотвращения скролла
@@ -1691,45 +1664,18 @@ onMounted(async () => {
 		}
 		canvas.value.addEventListener('touchmove', touchMoveHandler, { passive: false })
 
-		// renderGrid уже завершился в startGame(), теперь проверяем готовность
-		// Сначала убеждаемся, что все текстуры загружены
-		if (!areTexturesLoaded()) {
-			// Если текстуры еще не загружены, ждем их загрузки
-			let attempts = 0
-			while (!areTexturesLoaded() && attempts < 20) {
-				await new Promise((resolve) => setTimeout(resolve, 50))
-				attempts++
-			}
+		// КРИТИЧНО: Ждем, пока все текстуры будут полностью готовы перед запуском анимации скроллинга
+		// Это гарантирует, что анимация скроллинга запускается только после полной загрузки текстур
+		try {
+			await waitForTexturesReady()
+		} catch (error) {
+			console.warn('Failed to wait for textures ready before scroll animation:', error)
 		}
 
-		// Sync grid positions to ensure tiles are rendered
-		await renderer.syncGridPositions(gameStore.grid)
-
-		// Принудительно отрисовываем кадр, чтобы плитки появились на canvas
-		renderer.forceRender()
-
-		// Ждем кадр для отрисовки и проверяем готовность всех плиток
-		await new Promise((resolve) => requestAnimationFrame(resolve))
-		
-		// Ждем, пока все плитки будут готовы (максимум 10 кадров)
-		let attempts = 0
-		while (!renderer.areTilesReady() && attempts < 10) {
-			renderer.forceRender()
-			await new Promise((resolve) => requestAnimationFrame(resolve))
-			attempts++
-		}
-
-		// Еще один кадр для гарантии видимости
-		renderer.forceRender()
-		await new Promise((resolve) => requestAnimationFrame(resolve))
-
-		// Hide loading after all tiles are rendered and visible
-		isGenerating.value = false
-
-		// Update scroll bounds
+		// Update scroll bounds после того, как игра запущена
 		momentumScrollRef.value?.updateBounds()
 
-		// Animate scroll to bottom
+		// Animate scroll to bottom - теперь запускается только после готовности текстур
 		await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
 
 		// Handle resize - функция для обновления размера с debounce
@@ -1804,8 +1750,7 @@ onMounted(async () => {
 			})
 			resizeObserver.observe(canvasContainer)
 		}
-	}, 100)
-})
+	})
 
 onBeforeUnmount(() => {
 	// Очищаем таймеры play-area
@@ -1879,47 +1824,23 @@ async function restart(): Promise<void> {
 	if (gameController) {
 		gameController.stop()
 		isGenerating.value = true
+		
+		// startGame() теперь ждет первого рендера перед запуском таймера
 		await gameController.startGame()
 		
-		if (!renderer) {
+		// Скрываем loading только после того, как первый кадр отрендерен
+		// startGame() уже установил isFirstFrameRendered = true
+		if (gameStore.isFirstFrameRendered) {
 			isGenerating.value = false
-			return
+		} else {
+			// Если по какой-то причине состояние не установлено, ждем его
+			const stopWatcher = watch(() => gameStore.isFirstFrameRendered, (rendered) => {
+				if (rendered) {
+					isGenerating.value = false
+					stopWatcher()
+				}
+			}, { immediate: true })
 		}
-
-		// renderGrid уже завершился в startGame(), теперь проверяем готовность
-		// Сначала убеждаемся, что все текстуры загружены
-		if (!areTexturesLoaded()) {
-			// Если текстуры еще не загружены, ждем их загрузки
-			let attempts = 0
-			while (!areTexturesLoaded() && attempts < 20) {
-				await new Promise((resolve) => setTimeout(resolve, 50))
-				attempts++
-			}
-		}
-
-		// Sync grid positions to ensure tiles are rendered
-		await renderer.syncGridPositions(gameStore.grid)
-
-		// Принудительно отрисовываем кадр, чтобы плитки появились на canvas
-		renderer.forceRender()
-
-		// Ждем кадр для отрисовки и проверяем готовность всех плиток
-		await new Promise((resolve) => requestAnimationFrame(resolve))
-		
-		// Ждем, пока все плитки будут готовы (максимум 10 кадров)
-		let attempts = 0
-		while (!renderer.areTilesReady() && attempts < 10) {
-			renderer.forceRender()
-			await new Promise((resolve) => requestAnimationFrame(resolve))
-			attempts++
-		}
-
-		// Еще один кадр для гарантии видимости
-		renderer.forceRender()
-		await new Promise((resolve) => requestAnimationFrame(resolve))
-
-		// Hide loading after all tiles are rendered and visible
-		isGenerating.value = false
 	}
 }
 </script>
