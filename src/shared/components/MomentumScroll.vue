@@ -106,9 +106,11 @@ let touchLastY = 0
 let touchStartX = 0
 let touchLastX = 0
 let isTouchDown = false
+let touchStartTime = 0 // Время начала касания для определения быстрого/медленного движения
 
 let pressTimer: number | null = null
 let dragActivated = false
+let pointerStartTime = 0 // Время начала pointer события
 let didAutoScrollOnMount = false
 /** Чтобы при росте контента (напр. расширение сосуда) проскроллить к низу. */
 let lastContentScrollHeight = 0
@@ -300,6 +302,7 @@ function onPointerDown(e: PointerEvent) {
 	pointerId = e.pointerId
 	pointerStartY = e.clientY
 	pointerLastY = e.clientY
+	pointerStartTime = performance.now() // Запоминаем время начала pointer события
 
 	dragActivated = false
 	isPressing.value = true
@@ -325,16 +328,37 @@ function onPointerMove(e: PointerEvent) {
 	pointerLastY = e.clientY
 
 	const moved = Math.abs(e.clientY - pointerStartY)
+	
+	// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
+	const elapsedTime = performance.now() - pointerStartTime
+	const isFastSwipe = elapsedTime < props.pressDelay
 
 	// Если пользователь сдвинулся чуть-чуть — ждём long-press
 	if (!dragActivated) {
-		// если сильно потащил — можно активировать раньше, чем pressDelay
+		// если сильно потащил — проверяем, быстрое это движение или медленное
 		if (moved > props.pressMoveTolerance) {
-			// Теперь перехватываем событие, если пользователь начал скроллить
-			if (!container.hasPointerCapture(e.pointerId)) {
-				container.setPointerCapture(e.pointerId)
+			// Если движение быстрое - обрабатываем как быстрый скролл (wheel event)
+			if (isFastSwipe) {
+				clearPressTimer()
+				isPointerDown = false
+				pointerId = null
+				isPressing.value = false
+				if (container.hasPointerCapture(e.pointerId)) {
+					container.releasePointerCapture(e.pointerId)
+				}
+				// Обрабатываем как быстрый скролл через wheel event
+				e.preventDefault()
+				e.stopPropagation()
+				scroller?.onWheel(deltaY * props.wheelMult, 0, container.clientHeight)
+				return
+			} else {
+				// Медленное движение - активируем drag scrolling
+				// Теперь перехватываем событие, если пользователь начал скроллить
+				if (!container.hasPointerCapture(e.pointerId)) {
+					container.setPointerCapture(e.pointerId)
+				}
+				activateDrag()
 			}
-			activateDrag()
 		} else {
 			return
 		}
@@ -364,6 +388,7 @@ function onPointerUp(e: PointerEvent) {
 	const moved = Math.abs(e.clientY - pointerStartY)
 	isPointerDown = false
 	pointerId = null
+	pointerStartTime = 0
 
 	// Если drag так и не активировался и движения не было — это клик
 	// Позволяем событию клика пройти дальше к интерактивным элементам
@@ -421,6 +446,7 @@ function onTouchStart(e: TouchEvent) {
 	touchLastY = touch.clientY
 	touchStartX = touch.clientX
 	touchLastX = touch.clientX
+	touchStartTime = performance.now() // Запоминаем время начала касания
 
 	dragActivated = false
 	isPressing.value = true
@@ -462,6 +488,7 @@ function onTouchMove(e: TouchEvent) {
 		isTouchDown = false
 		touchId = null
 		isPressing.value = false
+		touchStartTime = 0
 		clearPressTimer()
 		return
 	}
@@ -479,20 +506,46 @@ function onTouchMove(e: TouchEvent) {
 	// Это позволяет игре обрабатывать горизонтальные свайпы
 	const isVerticalSwipe = movedY > movedX
 	const minSwipeDistance = 8 // Минимальное расстояние для активации скролла
+	
+	// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
+	const elapsedTime = performance.now() - touchStartTime
+	const isFastSwipe = elapsedTime < props.pressDelay
 
 	// Активируем скролл только при вертикальном свайпе
 	if (!dragActivated) {
 		if (isVerticalSwipe && movedY > minSwipeDistance) {
-			clearPressTimer()
-			activateDrag()
-			// После активации drag предотвращаем стандартное поведение
-			e.preventDefault()
-			e.stopPropagation()
+			// Если движение быстрое - обрабатываем как быстрый скролл (wheel event)
+			if (isFastSwipe) {
+				clearPressTimer()
+				// Обрабатываем как быстрый скролл через wheel event
+				// Используем текущий deltaY для мгновенного скролла
+				e.preventDefault()
+				e.stopPropagation()
+				// Используем wheel mult для быстрого скролла
+				scroller?.onWheel(deltaY * props.wheelMult, 0, container.clientHeight)
+				// Обновляем touchLastY после обработки
+				touchLastY = touch.clientY
+				touchLastX = touch.clientX
+				// Сбрасываем состояние для следующего движения
+				isTouchDown = false
+				touchId = null
+				isPressing.value = false
+				touchStartTime = 0
+				return
+			} else {
+				// Медленное движение - активируем drag scrolling
+				clearPressTimer()
+				activateDrag()
+				// После активации drag предотвращаем стандартное поведение
+				e.preventDefault()
+				e.stopPropagation()
+			}
 		} else if (movedX > minSwipeDistance && !isVerticalSwipe) {
 			// Горизонтальный свайп - отменяем обработку скролла, позволяем игре обработать
 			isTouchDown = false
 			touchId = null
 			isPressing.value = false
+			touchStartTime = 0
 			clearPressTimer()
 			return
 		} else {
@@ -527,6 +580,7 @@ function onTouchEnd(e: TouchEvent) {
 	touchId = null
 	touchStartX = 0
 	touchLastX = 0
+	touchStartTime = 0
 
 	// Если drag так и не активировался и движения не было — это клик
 	if (!dragActivated && totalMoved <= props.clickThreshold) {
@@ -775,6 +829,12 @@ onBeforeUnmount(() => {
 	touchId = null
 	touchStartX = 0
 	touchLastX = 0
+	touchStartTime = 0
+	
+	// Сброс pointer состояния
+	isPointerDown = false
+	pointerId = null
+	pointerStartTime = 0
 	
 	if (boundsUpdateTimer !== null) {
 		clearTimeout(boundsUpdateTimer)

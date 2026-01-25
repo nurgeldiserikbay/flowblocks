@@ -64,6 +64,8 @@ import TopBar from './TopBar.vue'
 		position: relative;
 		overflow: hidden;
 		z-index: 1;
+		min-height: 0; // Важно для flex-контейнеров, чтобы они правильно ограничивали высоту
+		padding-bottom: env(safe-area-inset-bottom, 0px); // Учитываем нижнюю safe-area
 	}
 }
 </style>
