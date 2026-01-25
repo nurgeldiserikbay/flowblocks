@@ -107,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ScreenOrientation } from '@capacitor/screen-orientation'
 import { Capacitor } from '@capacitor/core'
@@ -1187,6 +1187,11 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 }
 
 function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
+	// КРИТИЧНО: Блокируем ввод до тех пор, пока игра не запущена
+	if (!gameStore.isGameStarted) {
+		console.log('[GamePage] handlePointerDown: input blocked, game not started yet')
+		return
+	}
 	if (gameStore.isLocked || gameStore.isGameOver) return
 
 	// Защита от двойной обработки событий на мобильных устройствах
@@ -1489,8 +1494,24 @@ onMounted(async () => {
 	// Обновляем размеры через renderer, чтобы PixiJS правильно их обработал
 	renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
 
-	// Create game controller
-	gameController = new GameController(renderer, { onVesselExpanded: handleVesselExpanded })
+	// Create game controller с callback'ами для boot-цепочки
+	gameController = new GameController(renderer, {
+		onVesselExpanded: handleVesselExpanded,
+		onHideLoading: () => {
+			// Callback для скрытия loading overlay
+			isGenerating.value = false
+		},
+		onStartScrollAnimation: async () => {
+			// Callback для запуска анимации скроллинга
+			// Текстуры уже прогреты в warmUpTextures(), поэтому не ждем здесь
+			
+			// Update scroll bounds после того, как игра запущена
+			momentumScrollRef.value?.updateBounds()
+
+			// Animate scroll to bottom
+			await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
+		}
+	})
 
 	// Initialize controller (load textures) - устанавливает isAssetsReady = true
 	await gameController.init()
@@ -1502,27 +1523,12 @@ onMounted(async () => {
 	// startGame() теперь:
 	// 1. Устанавливает isAssetsReady, isSceneReady, isTilesAdded
 	// 2. Вызывает renderGrid(), который ждет первого рендера через app.ticker.addOnce()
-	// 3. После первого рендера вызывает onFirstFrameRendered(), который запускает таймер
+	// 3. После первого рендера вызывает onFirstFrameRendered(), который устанавливает isFirstFrameRendered = true
 	await gameController.startGame()
 
-	// Ждем, пока первый кадр будет отрендерен (startGame уже ждет этого)
-	// Но для надежности проверим состояние из store
-	// После startGame() isFirstFrameRendered должен быть true
-	
-	// Скрываем loading только после того, как первый кадр отрендерен
-	// Это гарантирует, что плитки реально видны пользователю
-	if (gameStore.isFirstFrameRendered) {
-		isGenerating.value = false
-	} else {
-		// Если по какой-то причине состояние не установлено, ждем его
-		// Используем watch для реактивности
-		const stopWatcher = watch(() => gameStore.isFirstFrameRendered, (rendered) => {
-			if (rendered) {
-				isGenerating.value = false
-				stopWatcher()
-			}
-		}, { immediate: true })
-	}
+		// КРИТИЧНО: Запускаем единую boot-цепочку после того, как плитки готовы
+		// Порядок: tiles visible -> hide loader -> start scroll -> start timer
+		await gameController.bootGame()
 
 		// Setup input handlers
 		// Используем pointer events с preventDefault для предотвращения скролла
@@ -1664,19 +1670,7 @@ onMounted(async () => {
 		}
 		canvas.value.addEventListener('touchmove', touchMoveHandler, { passive: false })
 
-		// КРИТИЧНО: Ждем, пока все текстуры будут полностью готовы перед запуском анимации скроллинга
-		// Это гарантирует, что анимация скроллинга запускается только после полной загрузки текстур
-		try {
-			await waitForTexturesReady()
-		} catch (error) {
-			console.warn('Failed to wait for textures ready before scroll animation:', error)
-		}
-
-		// Update scroll bounds после того, как игра запущена
-		momentumScrollRef.value?.updateBounds()
-
-		// Animate scroll to bottom - теперь запускается только после готовности текстур
-		await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
+		// Скролл теперь запускается через bootGame() в правильном порядке
 
 		// Handle resize - функция для обновления размера с debounce
 		const handleResize = async () => {
@@ -1825,22 +1819,9 @@ async function restart(): Promise<void> {
 		gameController.stop()
 		isGenerating.value = true
 		
-		// startGame() теперь ждет первого рендера перед запуском таймера
+		// Запускаем игру и boot-цепочку в правильном порядке
 		await gameController.startGame()
-		
-		// Скрываем loading только после того, как первый кадр отрендерен
-		// startGame() уже установил isFirstFrameRendered = true
-		if (gameStore.isFirstFrameRendered) {
-			isGenerating.value = false
-		} else {
-			// Если по какой-то причине состояние не установлено, ждем его
-			const stopWatcher = watch(() => gameStore.isFirstFrameRendered, (rendered) => {
-				if (rendered) {
-					isGenerating.value = false
-					stopWatcher()
-				}
-			}, { immediate: true })
-		}
+		await gameController.bootGame()
 	}
 }
 </script>

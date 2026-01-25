@@ -117,6 +117,7 @@ export function areTexturesLoaded(): boolean {
  * Дождаться, пока все текстуры будут готовы к использованию
  * Проверяет, что текстуры загружены и имеют валидные размеры
  * Также проверяет декодирование изображений через HTMLImageElement
+ * КРИТИЧНО: Использует предзагруженные текстуры из кэша, если они доступны
  */
 export async function waitForTexturesReady(maxWaitMs: number = 10000): Promise<void> {
 	// Если текстуры еще не загружены, ждем их загрузки
@@ -132,6 +133,36 @@ export async function waitForTexturesReady(maxWaitMs: number = 10000): Promise<v
 
 	if (!textureCache || textureCache.size === 0) {
 		throw new Error('Textures not loaded after waiting')
+	}
+
+	// КРИТИЧНО: Если текстуры уже загружены и имеют валидные размеры,
+	// проверяем их готовность сразу без ожидания
+	let allReadyImmediately = true
+	for (const texture of textureCache.values()) {
+		if (!texture || texture.width <= 0 || texture.height <= 0) {
+			allReadyImmediately = false
+			break
+		}
+		// Проверяем через внутренний source
+		try {
+			const source = texture.source as any
+			if (source && source.resource) {
+				const img = source.resource.source || source.resource
+				if (img && img instanceof HTMLImageElement) {
+					if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) {
+						allReadyImmediately = false
+						break
+					}
+				}
+			}
+		} catch (e) {
+			// Игнорируем ошибки доступа
+		}
+	}
+
+	// Если все текстуры уже готовы, возвращаемся сразу
+	if (allReadyImmediately) {
+		return
 	}
 
 	const startTime = Date.now()
@@ -235,20 +266,16 @@ export async function waitForTexturesReady(maxWaitMs: number = 10000): Promise<v
 				continue
 			}
 			
-			// Дополнительная задержка для гарантии, что браузер полностью декодировал изображения
+			// КРИТИЧНО: Дополнительная задержка для гарантии, что браузер полностью декодировал изображения
+			// На холодном старте браузеру нужно больше времени для декодирования
 			// Ждем несколько кадров для полной готовности
-			await new Promise(resolve => requestAnimationFrame(resolve))
-			await new Promise(resolve => requestAnimationFrame(resolve))
+			for (let i = 0; i < 3; i++) {
+				await new Promise(resolve => requestAnimationFrame(resolve))
+			}
 			
-			// Финальная проверка перед возвратом
-			console.log('All textures are ready:', {
-				count: textureCache.size,
-				textures: Array.from(textureCache.entries()).map(([color, tex]) => ({
-					color,
-					width: tex?.width,
-					height: tex?.height
-				}))
-			})
+			// Дополнительная небольшая задержка для гарантии декодирования на медленных устройствах
+			// Особенно важно на мобильных устройствах и холодном старте
+			await new Promise(resolve => setTimeout(resolve, 50))
 			
 			return
 		}
@@ -256,9 +283,6 @@ export async function waitForTexturesReady(maxWaitMs: number = 10000): Promise<v
 		// Ждем следующий кадр перед повторной проверкой
 		await new Promise(resolve => requestAnimationFrame(resolve))
 	}
-	
-	// Если не удалось дождаться готовности, выводим предупреждение
-	console.warn('Some textures may not be ready after waiting', maxWaitMs, 'ms')
 	
 	// Проверяем, какие текстуры не готовы для отладки
 	for (const [colorIndex, texture] of textureCache.entries()) {

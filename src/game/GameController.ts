@@ -28,6 +28,10 @@ const COMBO_WINDOW_MS = 2500
 export interface GameControllerOptions {
 	/** Вызывается после расширения сосуда: переразмер канваса, скролл к низу. */
 	onVesselExpanded?: () => void | Promise<void>
+	/** Вызывается для скрытия loading overlay. Должен быть вызван после первого кадра с плитками. */
+	onHideLoading?: () => void
+	/** Вызывается для запуска анимации скроллинга. Должен вернуть Promise, который резолвится после завершения анимации. */
+	onStartScrollAnimation?: () => Promise<void>
 }
 
 export class GameController {
@@ -47,9 +51,17 @@ export class GameController {
 
 	/**
 	 * Инициализация контроллера - загрузка текстур блоков
+	 * КРИТИЧНО: Если текстуры уже предзагружены (например, на StartPage),
+	 * они будут использованы из кэша без повторной загрузки
 	 */
 	async init(): Promise<void> {
+		// Загружаем текстуры (если уже предзагружены, вернется кэш)
 		await loadBlockTextures()
+		
+		// КРИТИЧНО: Убеждаемся, что текстуры полностью готовы к использованию
+		// Это особенно важно, если они были предзагружены, но еще не декодированы
+		await waitForTexturesReady(5000)
+		
 		// Ассеты загружены
 		this.store.setAssetsReady(true)
 	}
@@ -64,6 +76,7 @@ export class GameController {
 		// Сбрасываем состояния готовности
 		this.store.setAssetsReady(false)
 		this.store.setSceneReady(false)
+		this.store.setTexturesWarmed(false)
 		this.store.setTilesAdded(false)
 		this.store.setFirstFrameRendered(false)
 		this.store.setGameStarted(false)
@@ -72,16 +85,31 @@ export class GameController {
 		// Это особенно важно при обновлении страницы, когда кэш может быть очищен
 		await loadBlockTextures()
 		this.store.setAssetsReady(true)
+		this.store.setDiagnostic('assetsLoaded', performance.now())
 
-		// КРИТИЧНО: Ждем, пока все текстуры будут готовы к использованию
-		// Это особенно важно при первой загрузке, когда изображения могут еще декодироваться
 		await waitForTexturesReady()
 
 		// Проверяем, что сцена готова (Pixi Application инициализирован)
 		if (!this.renderer || !this.renderer.isInitialized()) {
 			throw new Error('Renderer or Pixi Application not initialized')
 		}
-		this.store.setSceneReady(true)  
+		this.store.setSceneReady(true)
+		this.store.setDiagnostic('pixiInit', performance.now())
+
+		// КРИТИЧНО: Прогреваем текстуры - создаем тестовые спрайты и рендерим их
+		// Это заставляет GPU загрузить текстуры в память и подготовить их к быстрому отображению
+		// Loading overlay будет показываться во время прогрева
+		if (this.renderer) {
+			try {
+				await this.renderer.warmUpTextures()
+				this.store.setTexturesWarmed(true)
+				this.store.setDiagnostic('texturesWarmed', performance.now())
+			} catch (error) {
+				console.warn('[GameController] startGame: texture warm-up failed', error)
+				// Продолжаем выполнение - текстуры все равно будут работать, но могут быть медленнее
+				this.store.setTexturesWarmed(true) // Помечаем как прогретые даже при ошибке
+			}
+		}  
 
 		// Create initial grid
 		const { grid, nextId } = createInitialGrid(this.store.getHeight(), 1)
@@ -120,6 +148,7 @@ export class GameController {
 		// Они будут созданы в animateSpawn с правильными начальными состояниями
 		const initialCubeIds = new Set(initialCubes.map((c) => c.id))
 		this.store.setTilesAdded(true)
+		this.store.setDiagnostic('tilesAdded', performance.now())
 		await this.renderer?.renderGrid(grid, this.nextCubeId, initialCubeIds)
 
 		// КРИТИЧНО: Ждем дополнительный кадр перед запуском анимации
@@ -127,14 +156,6 @@ export class GameController {
 		// Особенно важно при первой загрузке страницы, когда браузер еще инициализируется
 		if (this.renderer && initialCubes.length > 0) {
 			await this.renderer.waitForNextFrame()
-			
-			// КРИТИЧНО: Еще раз проверяем готовность текстур перед запуском анимации
-			// Это особенно важно при обновлении страницы, когда текстуры могут еще декодироваться
-			try {
-				await waitForTexturesReady(2000) // Короткое ожидание для финальной проверки
-			} catch (error) {
-				console.warn('Textures may not be fully ready, but continuing with animation:', error)
-			}
 		}
 
 		// Анимируем появление начальных плиток
@@ -150,24 +171,105 @@ export class GameController {
 			}
 		}
 		
-		// После анимации первый кадр уже отрендерен
-		// Теперь можно запускать игру
-		this.onFirstFrameRendered()
+		// КРИТИЧНО: Ждем, пока плитки реально видны на экране ПОСЛЕ завершения анимации
+		// Это гарантирует, что первый кадр с видимыми плитками уже отрендерен
+		// Только после этого можно скрывать loading overlay и запускать таймер
+		if (this.renderer) {
+			try {
+				// Ждем видимости плиток (детерминированное ожидание первого видимого кадра)
+				// КРИТИЧНО: Вызывается ПОСЛЕ завершения анимации spawn
+				await this.renderer.waitForTilesVisible()
+				
+				// После реального рендера первого кадра с видимыми плитками
+				// Устанавливаем флаг готовности
+				this.onFirstFrameRendered()
+			} catch (error) {
+				console.error('[GameController] startGame: failed to wait for tiles visible', error)
+				// Продолжаем выполнение, но это может привести к проблемам с отображением
+				// Устанавливаем флаг в любом случае, чтобы не заблокировать игру
+				this.onFirstFrameRendered()
+			}
+		} else {
+			// Если renderer отсутствует, все равно устанавливаем флаг
+			this.onFirstFrameRendered()
+		}
+	}
+
+	/**
+	 * Единая boot-цепочка для детерминированного запуска игры
+	 * Правильный порядок:
+	 * 1) Плитки реально появляются на экране (первый кадр рендера с плитками)
+	 * 2) Лоадинг исчезает
+	 * 3) Запускается анимация скроллинга (auto-scroll / scrollToBottomAnimated)
+	 * 4) Стартует таймер обратного отсчёта (wave timer)
+	 * 
+	 * КРИТИЧНО: startGame() должен быть вызван ДО этой функции
+	 */
+	async bootGame(): Promise<void> {
+		// 1. Проверяем, что плитки готовы (startGame уже должен был это сделать)
+		if (!this.store.isFirstFrameRendered) {
+			// Ждем готовности
+			let attempts = 0
+			while (!this.store.isFirstFrameRendered && attempts < 50) {
+				await new Promise(resolve => setTimeout(resolve, 100))
+				attempts++
+			}
+			if (!this.store.isFirstFrameRendered) {
+				throw new Error('First frame not rendered after waiting')
+			}
+		}
+
+		// Ждем несколько дополнительных кадров рендера
+		if (this.renderer && this.renderer.isInitialized()) {
+			// Используем renderer для ожидания дополнительных кадров
+			for (let i = 0; i < 2; i++) {
+				await this.renderer.waitForNextFrame()
+			}
+		} else {
+			// Fallback: ждем через requestAnimationFrame
+			for (let i = 0; i < 2; i++) {
+				await new Promise(resolve => requestAnimationFrame(resolve))
+			}
+		}
+
+		// 2. Скрытие loader теперь происходит внутри logDiagnostics() при условии firstFrameRendered
+		// Это гарантирует, что loader скрывается только после того, как плитки реально видны
+
+		// 3. Запускаем анимацию скроллинга
+		if (this.opts.onStartScrollAnimation) {
+			try {
+				this.store.setDiagnostic('scrollStarted', performance.now())
+				await this.opts.onStartScrollAnimation()
+			} catch (error) {
+				console.error('[GameController] bootGame: scroll animation failed', error)
+				// Продолжаем выполнение даже если скролл не удался
+			}
+		} else {
+			console.warn('[GameController] bootGame: onStartScrollAnimation callback not provided')
+		}
+
+		// 4. Запускаем таймер обратного отсчёта
+		this.store.setDiagnostic('timerStarted', performance.now())
+		this.startTimer()
+		
+		// Логируем диагностику после завершения boot-цепочки
+		// КРИТИЧНО: Скрытие loader происходит внутри logDiagnostics() при условии firstFrameRendered
+		this.store.logDiagnostics(this.opts.onHideLoading)
+
+		// Игра запущена
+		this.store.setGameStarted(true)
 	}
 
 	/**
 	 * Вызывается после первого реального рендера плиток
-	 * Здесь запускаем таймер и разрешаем пользовательский ввод
+	 * КРИТИЧНО: Вызывается только после waitForTilesVisible()
+	 * Устанавливает флаг готовности, но НЕ запускает таймер
+	 * Таймер запускается позже в bootGame() после скролла
 	 */
 	private onFirstFrameRendered(): void {
 		// Первый кадр отрендерен
 		this.store.setFirstFrameRendered(true)
-		
-		// Запускаем таймер
-		this.startTimer()
-		
-		// Игра запущена
-		this.store.setGameStarted(true)
+		this.store.setDiagnostic('firstFrameRendered', performance.now())
 	}
 
 	private startTimer(): void {
@@ -451,15 +553,6 @@ export class GameController {
 		this.store.setLocked(false)
 	}
 
-	private async applyEvents(events: GameEvent[]): Promise<void> {
-		if (!this.renderer) return
-
-		// Apply animations
-		await this.renderer.applyEvents(events)
-
-		// Sync positions after events (don't recreate all sprites)
-		await this.renderer.syncGridPositions(this.store.grid)
-	}
 
 	stop(): void {
 		if (this.timerInterval) {

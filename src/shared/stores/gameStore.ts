@@ -36,9 +36,22 @@ export const useGameStore = defineStore('game', () => {
 	// Состояния готовности для правильного старта игры
 	const isAssetsReady = ref(false)
 	const isSceneReady = ref(false)
+	const isTexturesWarmed = ref(false)
 	const isTilesAdded = ref(false)
 	const isFirstFrameRendered = ref(false)
 	const isGameStarted = ref(false)
+	
+	// Диагностические метки времени для отслеживания задержек
+	const diagnostics = ref<{
+		assetsLoaded?: number
+		texturesWarmed?: number
+		pixiInit?: number
+		tilesAdded?: number
+		firstFrameRendered?: number
+		loaderHidden?: number
+		scrollStarted?: number
+		timerStarted?: number
+	}>({})
 
 	function getHeight(): number {
 		return height.value
@@ -60,9 +73,11 @@ export const useGameStore = defineStore('game', () => {
 		// Сбрасываем состояния готовности
 		isAssetsReady.value = false
 		isSceneReady.value = false
+		isTexturesWarmed.value = false
 		isTilesAdded.value = false
 		isFirstFrameRendered.value = false
 		isGameStarted.value = false
+		diagnostics.value = {}
 	}
 	
 	function setAssetsReady(ready: boolean) {
@@ -83,6 +98,60 @@ export const useGameStore = defineStore('game', () => {
 	
 	function setGameStarted(started: boolean) {
 		isGameStarted.value = started
+	}
+	
+	function setTexturesWarmed(warmed: boolean) {
+		isTexturesWarmed.value = warmed
+	}
+	
+	function setDiagnostic(key: keyof typeof diagnostics.value, timestamp: number) {
+		diagnostics.value[key] = timestamp
+	}
+	
+	function logDiagnostics(onHideLoading?: () => void) {
+		const d = diagnostics.value
+		const baseTime = d.assetsLoaded || 0
+		
+		if (!baseTime) {
+			console.warn('[GameStore] Diagnostics: assetsLoaded timestamp not found')
+			return
+		}
+		
+		const formatTime = (timestamp?: number): string => {
+			if (!timestamp) return 'N/A'
+			const diff = timestamp - baseTime
+			return `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}ms`
+		}
+		
+		console.log('[GameStore] Diagnostics (relative to assetsLoaded):', {
+			assetsLoaded: '0.00ms (base)',
+			texturesWarmed: formatTime(d.texturesWarmed),
+			pixiInit: formatTime(d.pixiInit),
+			tilesAdded: formatTime(d.tilesAdded),
+			firstFrameRendered: formatTime(d.firstFrameRendered),
+			loaderHidden: formatTime(d.loaderHidden),
+			scrollStarted: formatTime(d.scrollStarted),
+			timerStarted: formatTime(d.timerStarted),
+		})
+		
+		// Дополнительная информация о критических интервалах
+		// КРИТИЧНО: Скрываем loader только внутри этого условия
+		if (d.firstFrameRendered && !d.loaderHidden) {
+			// Плитки видны, но loader еще не скрыт - скрываем его сейчас
+			if (onHideLoading) {
+				setDiagnostic('loaderHidden', performance.now())
+				onHideLoading()
+			} else {
+				console.warn('[GameStore] Critical: firstFrameRendered is set but loaderHidden is not - onHideLoading callback not provided!')
+			}
+		}
+		
+		if (d.firstFrameRendered && d.loaderHidden) {
+			const tilesToLoader = d.loaderHidden - d.firstFrameRendered
+			console.log('[GameStore] Critical interval:', {
+				'tiles visible → loader hidden': `${tilesToLoader.toFixed(2)}ms`,
+			})
+		}
 	}
 
 	function setGrid(newGrid: (Cube | null)[][]) {
@@ -126,9 +195,11 @@ export const useGameStore = defineStore('game', () => {
 		// Readiness states
 		isAssetsReady,
 		isSceneReady,
+		isTexturesWarmed,
 		isTilesAdded,
 		isFirstFrameRendered,
 		isGameStarted,
+		diagnostics,
 		// Constants
 		WIDTH,
 		BASE_HEIGHT,
@@ -149,6 +220,9 @@ export const useGameStore = defineStore('game', () => {
 		setTilesAdded,
 		setFirstFrameRendered,
 		setGameStarted,
+		setTexturesWarmed,
+		setDiagnostic,
+		logDiagnostics,
 		getWaveDuration,
 		getSpawnRowsForLevel,
 		getHeightForLevel,

@@ -166,6 +166,7 @@
 import { computed, onMounted } from 'vue'
 import { useAudioStore } from '@/shared/stores/audioStore'
 import { AudioManager } from '@/game/audio/AudioManager'
+import { loadBlockTextures, waitForTexturesReady } from '@/game/blockTextures'
 
 const audioStore = useAudioStore()
 
@@ -176,6 +177,17 @@ function toggleSound() {
 onMounted(async () => {
 	// Initialize AudioManager on start page
 	await AudioManager.init()
+	
+	try {
+		await loadBlockTextures()
+		
+		// Ждем, пока текстуры полностью готовы (декодированы браузером)
+		await waitForTexturesReady(10000)
+	} catch (error) {
+		console.warn('[StartPage] onMounted: failed to preload textures, will load on game start', error)
+		// Продолжаем выполнение - текстуры загрузятся при старте игры
+	}
+	
 	// Sync AudioManager with store state
 	AudioManager.setEnabled(audioStore.isEnabled)
 })

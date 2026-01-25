@@ -7,6 +7,7 @@ import { SplashScreen } from '@capacitor/splash-screen'
 import { Fullscreen } from '@boengli/capacitor-fullscreen'
 
 import Admob from '@/utils/admob'
+import { loadBlockTextures } from '@/game/blockTextures'
 
 onMounted(async () => {
 	if (Capacitor.getPlatform() === 'android') Admob.initialize()

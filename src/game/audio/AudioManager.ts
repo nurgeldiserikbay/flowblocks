@@ -190,10 +190,6 @@ class AudioManagerClass {
 			const lastPlay = this.throttleTimers.get(id) ?? 0
 			const now = Date.now()
 			if (now - lastPlay < throttleMs) {
-				// Отладочный лог для проверки блокировки throttle
-				if (id === 'match' || id.startsWith('combo')) {
-					console.log(`Sound ${id} blocked by throttle: ${now - lastPlay}ms < ${throttleMs}ms`)
-				}
 				return
 			}
 		}
@@ -228,13 +224,7 @@ class AudioManagerClass {
 			
 			// Проверяем результат воспроизведения
 			if (!soundInstance) {
-				console.warn(`Failed to get sound instance for ${id}`)
 				return
-			}
-
-			// Отладочный лог для проверки воспроизведения звуков
-			if (id === 'match' || id.startsWith('combo')) {
-				console.log(`Playing sound: ${id}, skipThrottle: ${options?.skipThrottle}, volume: ${finalVolume}, speed: ${speed}`)
 			}
 
 			// Устанавливаем throttle timer ПОСЛЕ успешного воспроизведения

@@ -5,7 +5,7 @@
 import { Application, Container, Sprite, Text, TextStyle, Graphics } from 'pixi.js'
 import { gsap } from 'gsap'
 import type { GameEvent, Cube } from '../logic/types'
-import { getBlockTexture, waitForTexturesReady } from '../blockTextures'
+import { getBlockTexture } from '../blockTextures'
 import { WIDTH } from '../logic/grid'
 import { AudioManager } from '../audio/AudioManager'
 
@@ -101,6 +101,91 @@ export class GameRenderer {
 		
 		// КРИТИЧНО: Принудительно рендерим первый кадр для проверки
 		this.forceRender()
+	}
+
+	/**
+	 * КРИТИЧНО: Прогрев текстур - создание тестовых спрайтов и рендеринг для подготовки GPU
+	 * Это гарантирует, что все текстуры загружены в GPU память и готовы к быстрому отображению
+	 * Вызывается после загрузки текстур, но до создания реальных спрайтов игры
+	 */
+	async warmUpTextures(): Promise<void> {
+		if (!this.app || !this.gameContainer) {
+			console.warn('warmUpTextures: app or gameContainer not initialized')
+			return
+		}
+
+		const warmUpStartTime = performance.now()
+		console.log('[GameRenderer] warmUpTextures: starting texture warm-up')
+
+		// Создаем временный контейнер для тестовых спрайтов (вне видимой области)
+		const warmUpContainer = new Container()
+		warmUpContainer.visible = false // Скрываем, чтобы не было видно на экране
+		warmUpContainer.alpha = 0 // Дополнительно делаем невидимым
+		this.app.stage.addChild(warmUpContainer)
+
+		const testSprites: Sprite[] = []
+		const spriteSize = Math.max(1, this.tileSize - TILE_PADDING * 2)
+
+		// Создаем тестовые спрайты для всех текстур
+		// Это заставит GPU загрузить текстуры в память
+		for (let colorIndex = 0; colorIndex < 8; colorIndex++) {
+			const texture = getBlockTexture(colorIndex)
+			if (texture && texture.width > 0 && texture.height > 0) {
+				const sprite = new Sprite(texture)
+				sprite.width = spriteSize
+				sprite.height = spriteSize
+				sprite.x = colorIndex * spriteSize // Размещаем в ряд вне экрана
+				sprite.y = 0
+				sprite.visible = true
+				sprite.alpha = 1
+				warmUpContainer.addChild(sprite)
+				testSprites.push(sprite)
+			} else {
+				console.warn(`[GameRenderer] warmUpTextures: texture ${colorIndex} not ready`)
+			}
+		}
+
+		if (testSprites.length === 0) {
+			console.warn('[GameRenderer] warmUpTextures: no sprites created')
+			warmUpContainer.destroy({ children: true })
+			return
+		}
+
+		console.log(`[GameRenderer] warmUpTextures: created ${testSprites.length} test sprites`)
+
+		// КРИТИЧНО: Рендерим несколько кадров для прогрева GPU
+		// Это гарантирует, что текстуры загружены в GPU память
+		for (let i = 0; i < 3; i++) {
+			// Принудительно рендерим кадр
+			this.forceRender()
+			
+			// Ждем следующий кадр ticker для гарантии рендера
+			await new Promise<void>((resolve) => {
+				if (!this.app || !this.app.ticker) {
+					resolve()
+					return
+				}
+				this.app.ticker.addOnce(() => {
+					resolve()
+				})
+			})
+		}
+
+		// Удаляем тестовые спрайты
+		testSprites.forEach(sprite => {
+			if (sprite.parent) {
+				sprite.parent.removeChild(sprite)
+			}
+			sprite.destroy()
+		})
+
+		if (warmUpContainer.parent) {
+			warmUpContainer.parent.removeChild(warmUpContainer)
+		}
+		warmUpContainer.destroy({ children: true })
+
+		const warmUpDuration = performance.now() - warmUpStartTime
+		console.log(`[GameRenderer] warmUpTextures: completed in ${warmUpDuration.toFixed(2)}ms`)
 	}
 
 	async renderGrid(grid: (Cube | null)[][], nextCubeId: number = 1, excludeCubeIds?: Set<number>): Promise<void> {
@@ -598,29 +683,7 @@ export class GameRenderer {
 	private async animateSpawn(cells: Array<{ id: number; r: number; c: number; color: number; fromRow?: number; toRow?: number }>): Promise<void> {
 		if (!this.gameContainer) return
 
-		// КРИТИЧНО: Проверяем готовность текстур перед созданием спрайтов
-		// Это особенно важно при первой загрузке страницы
-		try {
-			await waitForTexturesReady()
-		} catch (error) {
-			console.error('Failed to wait for textures ready:', error)
-			// Продолжаем выполнение, но это может привести к проблемам с анимацией
-		}
-
-		// КРИТИЧНО: Проверяем готовность каждой текстуры перед созданием спрайтов
-		for (const cell of cells) {
-			const texture = getBlockTexture(cell.color)
-			if (!texture || texture.width <= 0 || texture.height <= 0) {
-				console.warn(`Texture not ready for color ${cell.color} before sprite creation, waiting...`)
-				// Ждем готовности текстуры для этого цвета
-				await waitForTexturesReady(2000)
-				// Проверяем еще раз после ожидания
-				const textureAfterWait = getBlockTexture(cell.color)
-				if (!textureAfterWait || textureAfterWait.width <= 0 || textureAfterWait.height <= 0) {
-					console.error(`Texture still not ready for color ${cell.color} after waiting`)
-				}
-			}
-		}
+		// Текстуры уже должны быть прогреты в warmUpTextures(), поэтому не ждем здесь
 
 		// КРИТИЧНО: Сначала создаем все спрайты синхронно
 		// Это гарантирует, что все спрайты добавлены в контейнер перед запуском анимации
@@ -706,104 +769,34 @@ export class GameRenderer {
 				cubeContainer.container.visible = true
 				cubeContainer.sprite.visible = true
 				
-				// КРИТИЧНО: Проверяем, что текстура спрайта готова перед анимацией
-				// Это особенно важно при первой загрузке страницы
-				const spriteTexture = cubeContainer.sprite.texture
-				if (!spriteTexture || spriteTexture.width <= 0 || spriteTexture.height <= 0) {
-					console.error(`Sprite texture not ready for cube ${cell.id}, texture may not be decoded yet`, {
-						textureWidth: spriteTexture?.width,
-						textureHeight: spriteTexture?.height,
-						hasSource: !!spriteTexture?.source
-					})
-					// Если текстура не готова, пропускаем анимацию для этого спрайта
-					return Promise.resolve()
-				}
-				
-				// КРИТИЧНО: Убеждаемся, что начальные значения установлены правильно
-				// Используем 0 для начальных значений, но убедимся, что контейнер видим
+				// Убеждаемся, что начальные значения установлены правильно
 				cubeContainer.container.alpha = 0
 				cubeContainer.container.scale.set(0)
 				
-				// КРИТИЧНО: Небольшая задержка перед запуском анимации для гарантии,
-				// что браузер успел отрендерить спрайт с начальными состояниями
-				// Особенно важно при первой загрузке страницы
+				// Анимируем от 0 до 1 (текстуры уже прогреты в warmUpTextures)
 				return new Promise<void>((resolve) => {
-					// Принудительно рендерим кадр после создания спрайта
-					if (this.app) {
-						this.forceRender()
-					}
-					
-					// Используем requestAnimationFrame для синхронизации с браузером
-					requestAnimationFrame(() => {
-						// Еще один кадр для гарантии, что спрайт отрендерен
-						// Также ждем кадр PixiJS ticker для гарантии рендеринга
-						requestAnimationFrame(() => {
-							if (this.app && this.app.ticker) {
-								this.app.ticker.addOnce(() => {
-									// Еще один принудительный рендер перед запуском анимации
-									this.forceRender()
-									
-									// КРИТИЧНО: Проверяем, что контейнер все еще существует и видим
-									if (!cubeContainer.container.parent) {
-										console.error(`Container for cube ${cell.id} was removed before animation`)
-										resolve()
-										return
-									}
-									
-									// Анимируем от 0 до 1
-									gsap.to(cubeContainer.container, {
-										alpha: 1,
-										scale: 1,
-										duration: 0.15,
-										ease: 'back.out',
-										onComplete: () => {
-											// Убеждаемся, что финальные значения установлены
-											cubeContainer.container.alpha = 1
-											cubeContainer.container.scale.set(1)
-											resolve()
-										},
-									})
-								})
-							} else {
-								gsap.to(cubeContainer.container, {
-									alpha: 1,
-									scale: 1,
-									duration: 0.15,
-									ease: 'back.out',
-									onComplete: () => {
-										cubeContainer.container.alpha = 1
-										cubeContainer.container.scale.set(1)
-										resolve()
-									},
-								})
-							}
-						})
+					gsap.to(cubeContainer.container, {
+						alpha: 1,
+						scale: 1,
+						duration: 0.15,
+						ease: 'back.out',
+						onComplete: () => {
+							// Убеждаемся, что финальные значения установлены
+							cubeContainer.container.alpha = 1
+							cubeContainer.container.scale.set(1)
+							resolve()
+						},
 					})
 				})
 			}
 		})
 		
-		// КРИТИЧНО: Принудительно рендерим кадр после создания всех спрайтов
-		// Это гарантирует, что все спрайты добавлены в сцену перед запуском анимации
-		if (this.app) {
-			this.forceRender()
-		}
-		
-		// Ждем один кадр перед запуском всех анимаций
+		// Ждем один кадр перед запуском всех анимаций для синхронизации
 		await this.waitForNextFrame()
 		
 		await Promise.all(animations)
 	}
 
-	private findSpriteAt(r: number, c: number): Sprite | null {
-		// Find cube ID at this position
-		for (const [cubeId, pos] of this.cubePositions.entries()) {
-			if (pos.r === r && pos.c === c) {
-				return this.cubeContainers.get(cubeId)?.sprite || null
-			}
-		}
-		return null
-	}
 
 	private findCubeIdAt(r: number, c: number): number | null {
 		for (const [cubeId, pos] of this.cubePositions.entries()) {
@@ -1127,6 +1120,216 @@ export class GameRenderer {
 	}
 
 	/**
+	 * КРИТИЧНО: Ждать, пока плитки реально видны на экране
+	 * Проверяет готовность текстур, наличие спрайтов в дереве и ждет реального рендера
+	 * Используется для строгой синхронизации перед скрытием loading overlay
+	 * ДЕТЕРМИНИРОВАННЫЙ ПОДХОД: ждет строго первый видимый кадр без лишних задержек
+	 */
+	async waitForTilesVisible(): Promise<void> {
+		const startTime = performance.now()
+		console.log('[GameRenderer] waitForTilesVisible: starting')
+		
+		if (!this.app || !this.gameContainer) {
+			console.warn('waitForTilesVisible: app or gameContainer not initialized')
+			return
+		}
+
+		// 1. Проверяем, что renderer инициализирован и имеет валидные размеры
+		if (!this.app.renderer || this.app.renderer.width <= 0 || this.app.renderer.height <= 0) {
+			console.warn('waitForTilesVisible: renderer has invalid dimensions', {
+				width: this.app.renderer?.width,
+				height: this.app.renderer?.height
+			})
+			throw new Error('Renderer not ready')
+		}
+
+		// 2. Проверяем, что ticker запущен
+		if (!this.app.ticker.started) {
+			console.warn('waitForTilesVisible: ticker not started, starting manually')
+			this.app.ticker.start()
+		}
+
+		// 3. Проверяем, что canvas в DOM и имеет валидные размеры
+		if (!document.body.contains(this.canvas)) {
+			console.warn('waitForTilesVisible: canvas not in DOM')
+			throw new Error('Canvas not in DOM')
+		}
+
+		const canvasRect = this.canvas.getBoundingClientRect()
+		if (canvasRect.width <= 0 || canvasRect.height <= 0) {
+			console.warn('waitForTilesVisible: canvas has zero dimensions', {
+				width: canvasRect.width,
+				height: canvasRect.height
+			})
+			throw new Error('Canvas has zero dimensions')
+		}
+
+		// 4. Проверяем, что есть плитки
+		if (this.cubeContainers.size === 0) {
+			console.warn('waitForTilesVisible: no tiles created')
+			throw new Error('No tiles created')
+		}
+
+		// 5. Проверяем готовность всех текстур (быстрая проверка)
+		const { waitForTexturesReady } = await import('../blockTextures')
+		try {
+			await waitForTexturesReady(2000) // Короткий таймаут для проверки
+		} catch (error) {
+			console.warn('waitForTilesVisible: textures not ready', error)
+			// Продолжаем, но это может привести к проблемам
+		}
+
+		// 6. Проверяем, что все спрайты имеют валидные текстуры и добавлены в дерево
+		for (const [cubeId, cubeContainer] of this.cubeContainers.entries()) {
+			if (!cubeContainer.sprite || !cubeContainer.sprite.texture) {
+				console.warn(`[GameRenderer] waitForTilesVisible: sprite or texture missing for cube ${cubeId}`)
+				throw new Error(`Sprite or texture missing for cube ${cubeId}`)
+			}
+
+			if (cubeContainer.sprite.texture.width <= 0 || cubeContainer.sprite.texture.height <= 0) {
+				console.warn(`[GameRenderer] waitForTilesVisible: texture has invalid dimensions for cube ${cubeId}`, {
+					width: cubeContainer.sprite.texture.width,
+					height: cubeContainer.sprite.texture.height
+				})
+				throw new Error(`Texture has invalid dimensions for cube ${cubeId}`)
+			}
+
+			if (!cubeContainer.container.parent || cubeContainer.container.parent !== this.gameContainer) {
+				console.warn(`[GameRenderer] waitForTilesVisible: container not in gameContainer for cube ${cubeId}`)
+				throw new Error(`Container not in gameContainer for cube ${cubeId}`)
+			}
+		}
+
+		// 7. КРИТИЧНО: Проверяем, что плитки реально видны и анимация завершена
+		// Для плиток, появляющихся на месте (alpha/scale анимация), проверяем что alpha === 1 и scale === 1
+		// Это гарантирует, что анимация spawn полностью завершена и плитки отображаются
+		let tilesVisible = false
+		let attempts = 0
+		const maxAttempts = 30 // Увеличиваем количество попыток для холодного старта
+		const visibilityCheckStartTime = performance.now()
+		const VISIBILITY_THRESHOLD = 0.95 // Порог для alpha и scale (почти 1.0, чтобы учесть погрешности)
+		
+		while (!tilesVisible && attempts < maxAttempts) {
+			tilesVisible = true
+			let invisibleCount = 0
+			let animatingCount = 0
+			
+			// Проверяем все плитки на видимость
+			for (const [, cubeContainer] of this.cubeContainers.entries()) {
+				// Проверяем, что контейнер видим
+				if (!cubeContainer.container.visible) {
+					tilesVisible = false
+					invisibleCount++
+					continue
+				}
+				
+				// Проверяем alpha (должен быть >= threshold для полной видимости)
+				if (cubeContainer.container.alpha < VISIBILITY_THRESHOLD) {
+					tilesVisible = false
+					animatingCount++
+					continue
+				}
+				
+				// Проверяем scale (должен быть >= threshold для полной видимости)
+				if (cubeContainer.container.scale.x < VISIBILITY_THRESHOLD || cubeContainer.container.scale.y < VISIBILITY_THRESHOLD) {
+					tilesVisible = false
+					animatingCount++
+					continue
+				}
+				
+				// Проверяем спрайт
+				if (!cubeContainer.sprite.visible || cubeContainer.sprite.alpha < VISIBILITY_THRESHOLD) {
+					tilesVisible = false
+					invisibleCount++
+					continue
+				}
+			}
+			
+			if (!tilesVisible) {
+				attempts++
+				if (attempts % 5 === 0) {
+					console.log(`[GameRenderer] waitForTilesVisible: waiting for tiles visibility (attempt ${attempts}/${maxAttempts}, ${invisibleCount} invisible, ${animatingCount} animating)`)
+				}
+				// Ждем кадр перед следующей проверкой
+				await new Promise<void>((resolve) => {
+					if (!this.app || !this.app.ticker) {
+						resolve()
+						return
+					}
+					requestAnimationFrame(() => {
+						this.app!.ticker.addOnce(() => {
+							this.forceRender()
+							resolve()
+						})
+					})
+				})
+			}
+		}
+		
+		const visibilityCheckDuration = performance.now() - visibilityCheckStartTime
+		if (tilesVisible) {
+			console.log(`[GameRenderer] waitForTilesVisible: tiles became fully visible after ${visibilityCheckDuration.toFixed(2)}ms (${attempts} attempts)`)
+		} else {
+			console.warn(`[GameRenderer] waitForTilesVisible: tiles not fully visible after ${visibilityCheckDuration.toFixed(2)}ms (${attempts} attempts)`)
+		}
+		
+		// 8. КРИТИЧНО: Детерминированное ожидание первого видимого кадра на экране
+		// Используем строгую последовательность: requestAnimationFrame -> ticker -> forceRender -> ticker
+		// Это гарантирует, что браузер реально отрендерил плитки на экране
+		await new Promise<void>((resolve) => {
+			if (!this.app || !this.app.renderer || !this.app.ticker) {
+				resolve()
+				return
+			}
+
+			// Синхронизируем с браузером через requestAnimationFrame
+			requestAnimationFrame(() => {
+				// Ждем кадр ticker для гарантии рендера
+				this.app!.ticker.addOnce(() => {
+					// Принудительно рендерим кадр
+					this.forceRender()
+					// Ждем еще один кадр ticker после принудительного рендера
+					// Это гарантирует, что GPU реально отрисовал кадр
+					this.app!.ticker.addOnce(() => {
+						// Финальная проверка bounds
+						const bounds = this.gameContainer!.getBounds()
+						if (bounds.width > 0 && bounds.height > 0) {
+							// Bounds валидны - плитки видны
+							resolve()
+						} else {
+							// Если bounds нулевые, ждем еще один кадр
+							this.app!.ticker.addOnce(() => {
+								this.forceRender()
+								resolve()
+							})
+						}
+					})
+				})
+			})
+		})
+		
+		// 9. КРИТИЧНО: Дополнительные кадры для гарантии реального отображения на экране
+		// На холодном старте браузеру может потребоваться больше времени для реального рендеринга
+		for (let i = 0; i < 2; i++) {
+			await new Promise<void>((resolve) => {
+				if (!this.app || !this.app.ticker) {
+					resolve()
+					return
+				}
+				requestAnimationFrame(() => {
+					this.app!.ticker.addOnce(() => {
+						this.forceRender()
+						resolve()
+					})
+				})
+			})
+		}
+
+		const duration = performance.now() - startTime
+		console.log(`[GameRenderer] waitForTilesVisible: completed in ${duration.toFixed(2)}ms`)
+	}
+
+	/**
 	 * Диагностический метод для проверки состояния рендерера
 	 * Используется для отладки проблем с отображением
 	 */
@@ -1136,70 +1339,9 @@ export class GameRenderer {
 			return
 		}
 		
-		console.group('PixiJS Render State Debug')
-		
-		// Application state
-		console.log('Application:', {
-			initialized: !!this.app.renderer,
-			tickerStarted: this.app.ticker.started,
-			tickerSpeed: this.app.ticker.speed
-		})
-		
-		// Renderer state
-		if (this.app.renderer) {
-			console.log('Renderer:', {
-				width: this.app.renderer.width,
-				height: this.app.renderer.height,
-				resolution: this.app.renderer.resolution,
-				type: this.app.renderer.type
-			})
-		} else {
-			console.error('Renderer is null')
-		}
-		
-		// Canvas state
-		console.log('Canvas:', {
-			width: this.canvas.width,
-			height: this.canvas.height,
-			styleWidth: this.canvas.style.width,
-			styleHeight: this.canvas.style.height,
-			clientWidth: this.canvas.clientWidth,
-			clientHeight: this.canvas.clientHeight,
-			offsetWidth: this.canvas.offsetWidth,
-			offsetHeight: this.canvas.offsetHeight,
-			inDOM: document.body.contains(this.canvas)
-		})
-		
-		// Stage state
-		if (this.app.stage) {
-		console.log('Stage:', {
-			children: this.app.stage.children.length,
-			visible: this.app.stage.visible,
-			alpha: this.app.stage.alpha
-		})
-		}
-		
-		// Game container state
-		if (this.gameContainer) {
-		console.log('GameContainer:', {
-			children: this.gameContainer.children.length,
-			visible: this.gameContainer.visible,
-			alpha: this.gameContainer.alpha,
-			parent: this.gameContainer.parent ? 'exists' : 'null'
-		})
-		} else {
-			console.error('GameContainer is null')
-		}
-		
-		// Cube containers state
-		console.log('Cube Containers:', {
-			count: this.cubeContainers.size,
-			positions: this.cubePositions.size
-		})
-		
 		// Sample first 3 containers for detailed info
 		let sampleCount = 0
-		for (const [cubeId, cubeContainer] of this.cubeContainers.entries()) {
+		for (const [, cubeContainer] of this.cubeContainers.entries()) {
 			if (sampleCount >= 3) break
 			
 			// Вычисляем мировую видимость вручную
@@ -1218,22 +1360,7 @@ export class GameRenderer {
 				spriteWorldVisible = spriteWorldVisible && spriteParent.visible
 				spriteParent = spriteParent.parent
 			}
-			
-			console.log(`Cube ${cubeId}:`, {
-				position: this.cubePositions.get(cubeId),
-				containerVisible: cubeContainer.container.visible,
-				containerWorldVisible: containerWorldVisible,
-				containerAlpha: cubeContainer.container.alpha,
-				containerWorldAlpha: containerWorldAlpha,
-				spriteVisible: cubeContainer.sprite.visible,
-				spriteWorldVisible: spriteWorldVisible,
-				spriteTexture: cubeContainer.sprite.texture ? {
-					width: cubeContainer.sprite.texture.width,
-					height: cubeContainer.sprite.texture.height
-				} : 'null',
-				parent: cubeContainer.container.parent ? 'exists' : 'null',
-				bounds: cubeContainer.container.getBounds()
-			})
+
 			sampleCount++
 		}
 		
