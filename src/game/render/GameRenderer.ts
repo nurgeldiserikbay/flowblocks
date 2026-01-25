@@ -43,9 +43,21 @@ export class GameRenderer {
 		// Используем devicePixelRatio для четкого рендеринга на мобильных устройствах
 		const devicePixelRatio = window.devicePixelRatio || 1
 		
-		// Получаем логические размеры из CSS стилей
-		const logicalWidth = parseInt(this.canvas.style.width) || this.canvas.width / devicePixelRatio
-		const logicalHeight = parseInt(this.canvas.style.height) || this.canvas.height / devicePixelRatio
+		// КРИТИЧНО: Получаем логические размеры из CSS стилей или getBoundingClientRect
+		// Если CSS размеры не установлены, используем размеры из DOM
+		let logicalWidth = parseInt(this.canvas.style.width)
+		let logicalHeight = parseInt(this.canvas.style.height)
+		
+		// Если размеры не установлены в CSS, получаем из DOM
+		if (!logicalWidth || !logicalHeight) {
+			const rect = this.canvas.getBoundingClientRect()
+			logicalWidth = logicalWidth || rect.width || 320
+			logicalHeight = logicalHeight || rect.height || 400
+		}
+		
+		// Минимальные размеры для предотвращения ошибок инициализации
+		logicalWidth = Math.max(logicalWidth, 320)
+		logicalHeight = Math.max(logicalHeight, 400)
 		
 		await this.app.init({
 			canvas: this.canvas,
@@ -57,8 +69,37 @@ export class GameRenderer {
 			autoDensity: true, // Включаем автоматическое масштабирование для правильного отображения
 		})
 
+		// КРИТИЧНО: Проверяем, что renderer инициализирован корректно
+		if (!this.app.renderer) {
+			throw new Error('PixiJS renderer failed to initialize')
+		}
+		
+		// КРИТИЧНО: Проверяем размеры renderer
+		if (this.app.renderer.width <= 0 || this.app.renderer.height <= 0) {
+			console.warn('PixiJS renderer has invalid dimensions:', {
+				width: this.app.renderer.width,
+				height: this.app.renderer.height,
+				canvasWidth: logicalWidth,
+				canvasHeight: logicalHeight
+			})
+		}
+		
+		// КРИТИЧНО: Проверяем, что ticker запущен (по умолчанию должен быть запущен)
+		if (!this.app.ticker.started) {
+			console.warn('PixiJS ticker is not started, starting manually')
+			this.app.ticker.start()
+		}
+
 		this.gameContainer = new Container()
 		this.app.stage.addChild(this.gameContainer)
+		
+		// КРИТИЧНО: Убеждаемся, что gameContainer добавлен в stage
+		if (!this.gameContainer.parent || this.gameContainer.parent !== this.app.stage) {
+			throw new Error('Failed to add gameContainer to stage')
+		}
+		
+		// КРИТИЧНО: Принудительно рендерим первый кадр для проверки
+		this.forceRender()
 	}
 
 	async renderGrid(grid: (Cube | null)[][], nextCubeId: number = 1): Promise<void> {
@@ -92,6 +133,9 @@ export class GameRenderer {
 		if (this.selectedPosition) {
 			this.setSelectedPosition(this.selectedPosition.r, this.selectedPosition.c)
 		}
+
+		// Force render to ensure tiles appear immediately
+		this.forceRender()
 	}
 
 	/**
@@ -111,23 +155,55 @@ export class GameRenderer {
 		}
 
 		const texture = getBlockTexture(cube.color)
+
 		if (!texture) {
 			throw new Error(`Texture not found for color ${cube.color}`)
+		}
+		
+		// КРИТИЧНО: Проверяем размеры текстуры (в PixiJS v8 нет texture.valid)
+		if (texture.width <= 0 || texture.height <= 0) {
+			console.warn(`Texture for color ${cube.color} has invalid dimensions`, {
+				width: texture.width,
+				height: texture.height
+			})
 		}
 
 		// Create container for cube
 		const container = new Container()
 		container.x = c * this.tileSize
 		container.y = this.calculateYFromBottom(r)
+		
+		// КРИТИЧНО: Убеждаемся, что контейнер видим
+		container.visible = true
+		container.alpha = 1
+		container.scale.set(1)
 
 		// Create sprite
 		const sprite = new Sprite(texture)
 		const spriteSize = Math.max(1, this.tileSize - TILE_PADDING * 2)
+		
+		// КРИТИЧНО: Убеждаемся, что спрайт видим
+		sprite.visible = true
+		sprite.alpha = 1
+		
+		// КРИТИЧНО: В PixiJS v8 установка width/height автоматически изменяет scale
+		// НЕ устанавливаем scale.set(1) ПОСЛЕ width/height, так как это сбросит размеры!
+		// Устанавливаем размеры напрямую через width/height
 		sprite.width = spriteSize
 		sprite.height = spriteSize
 		sprite.x = TILE_PADDING
 		sprite.y = TILE_PADDING
+		
 		container.addChild(sprite)
+		
+		// Проверяем, что спрайт добавлен в контейнер (только для отладки)
+		if (!sprite.parent || sprite.parent !== container) {
+			console.error('Failed to add sprite to container', {
+				cubeId: cube.id,
+				hasParent: !!sprite.parent,
+				parentMatches: sprite.parent === container
+			})
+		}
 
 		// Create text for moves
 		let text: Text | null = null
@@ -158,8 +234,18 @@ export class GameRenderer {
 		highlight.stroke({ color: 0x000000, width: 2, alpha: 0.5 })
 		highlight.visible = false
 		container.addChild(highlight)
-
 		this.gameContainer.addChild(container)
+
+		// Проверяем, что контейнер добавлен в gameContainer (только для отладки)
+		if (!container.parent || container.parent !== this.gameContainer) {
+			console.error('Failed to add container to gameContainer', {
+				cubeId: cube.id,
+				position: { r, c },
+				hasParent: !!container.parent,
+				parentMatches: container.parent === this.gameContainer
+			})
+		}
+		
 		this.cubeContainers.set(cube.id, { container, sprite, text, highlight })
 		this.cubePositions.set(cube.id, { r, c })
 
@@ -747,28 +833,51 @@ export class GameRenderer {
 	 */
 	areTilesReady(): boolean {
 		if (!this.gameContainer || !this.app) {
+			console.warn('areTilesReady: gameContainer or app is not initialized')
 			return false
 		}
 		
 		// Проверяем, что есть хотя бы одна плитка
 		if (this.cubeContainers.size === 0) {
+			console.warn('areTilesReady: no cube containers')
 			return false
 		}
 		
 		// Проверяем, что ВСЕ спрайты имеют валидные текстуры и добавлены в контейнер
-		for (const cubeContainer of this.cubeContainers.values()) {
+		for (const [cubeId, cubeContainer] of this.cubeContainers.entries()) {
 			// Проверяем наличие спрайта
 			if (!cubeContainer.sprite) {
+				console.warn(`areTilesReady: sprite missing for cube ${cubeId}`)
 				return false
 			}
 			
 			// Проверяем наличие текстуры
 			if (!cubeContainer.sprite.texture) {
+				console.warn(`areTilesReady: texture missing for cube ${cubeId}`)
+				return false
+			}
+			
+			// КРИТИЧНО: Проверяем размеры текстуры (в PixiJS v8 нет texture.valid)
+			if (cubeContainer.sprite.texture.width <= 0 || cubeContainer.sprite.texture.height <= 0) {
+				console.warn(`areTilesReady: texture has invalid dimensions for cube ${cubeId}`)
 				return false
 			}
 			
 			// Проверяем, что контейнер добавлен в gameContainer
 			if (!cubeContainer.container.parent || cubeContainer.container.parent !== this.gameContainer) {
+				console.warn(`areTilesReady: container not in gameContainer for cube ${cubeId}`)
+				return false
+			}
+			
+			// Проверяем базовые свойства видимости (только visible, alpha может быть 0 для анимаций)
+			if (!cubeContainer.container.visible) {
+				console.warn(`areTilesReady: container not visible for cube ${cubeId}`)
+				return false
+			}
+			
+			// Проверяем, что спрайт видим
+			if (!cubeContainer.sprite.visible) {
+				console.warn(`areTilesReady: sprite not visible for cube ${cubeId}`)
 				return false
 			}
 		}
@@ -779,11 +888,134 @@ export class GameRenderer {
 
 	/**
 	 * Принудительно отрисовать кадр
+	 * КРИТИЧНО: Используем правильный метод рендеринга для PixiJS v8
 	 */
 	forceRender(): void {
-		if (this.app) {
-			this.app.render()
+		if (!this.app || !this.app.renderer || !this.app.stage) {
+			return
 		}
+		
+		// КРИТИЧНО: В PixiJS v8 нужно явно указать stage для рендеринга
+		// app.render() может не работать правильно, используем renderer.render(stage)
+		try {
+			this.app.renderer.render(this.app.stage)
+		} catch (error) {
+			console.error('Error during force render:', error)
+		}
+	}
+
+	/**
+	 * Диагностический метод для проверки состояния рендерера
+	 * Используется для отладки проблем с отображением
+	 */
+	debugRenderState(): void {
+		if (!this.app) {
+			console.error('DEBUG: app is null')
+			return
+		}
+		
+		console.group('PixiJS Render State Debug')
+		
+		// Application state
+		console.log('Application:', {
+			initialized: !!this.app.renderer,
+			tickerStarted: this.app.ticker.started,
+			tickerSpeed: this.app.ticker.speed
+		})
+		
+		// Renderer state
+		if (this.app.renderer) {
+			console.log('Renderer:', {
+				width: this.app.renderer.width,
+				height: this.app.renderer.height,
+				resolution: this.app.renderer.resolution,
+				type: this.app.renderer.type
+			})
+		} else {
+			console.error('Renderer is null')
+		}
+		
+		// Canvas state
+		console.log('Canvas:', {
+			width: this.canvas.width,
+			height: this.canvas.height,
+			styleWidth: this.canvas.style.width,
+			styleHeight: this.canvas.style.height,
+			clientWidth: this.canvas.clientWidth,
+			clientHeight: this.canvas.clientHeight,
+			offsetWidth: this.canvas.offsetWidth,
+			offsetHeight: this.canvas.offsetHeight,
+			inDOM: document.body.contains(this.canvas)
+		})
+		
+		// Stage state
+		if (this.app.stage) {
+		console.log('Stage:', {
+			children: this.app.stage.children.length,
+			visible: this.app.stage.visible,
+			alpha: this.app.stage.alpha
+		})
+		}
+		
+		// Game container state
+		if (this.gameContainer) {
+		console.log('GameContainer:', {
+			children: this.gameContainer.children.length,
+			visible: this.gameContainer.visible,
+			alpha: this.gameContainer.alpha,
+			parent: this.gameContainer.parent ? 'exists' : 'null'
+		})
+		} else {
+			console.error('GameContainer is null')
+		}
+		
+		// Cube containers state
+		console.log('Cube Containers:', {
+			count: this.cubeContainers.size,
+			positions: this.cubePositions.size
+		})
+		
+		// Sample first 3 containers for detailed info
+		let sampleCount = 0
+		for (const [cubeId, cubeContainer] of this.cubeContainers.entries()) {
+			if (sampleCount >= 3) break
+			
+			// Вычисляем мировую видимость вручную
+			let containerWorldVisible = cubeContainer.container.visible
+			let containerWorldAlpha = cubeContainer.container.alpha
+			let parent: Container | null = cubeContainer.container.parent
+			while (parent && containerWorldVisible) {
+				containerWorldVisible = containerWorldVisible && parent.visible
+				containerWorldAlpha *= parent.alpha
+				parent = parent.parent
+			}
+			
+			let spriteWorldVisible = cubeContainer.sprite.visible
+			let spriteParent: Container | null = cubeContainer.sprite.parent
+			while (spriteParent && spriteWorldVisible) {
+				spriteWorldVisible = spriteWorldVisible && spriteParent.visible
+				spriteParent = spriteParent.parent
+			}
+			
+			console.log(`Cube ${cubeId}:`, {
+				position: this.cubePositions.get(cubeId),
+				containerVisible: cubeContainer.container.visible,
+				containerWorldVisible: containerWorldVisible,
+				containerAlpha: cubeContainer.container.alpha,
+				containerWorldAlpha: containerWorldAlpha,
+				spriteVisible: cubeContainer.sprite.visible,
+				spriteWorldVisible: spriteWorldVisible,
+				spriteTexture: cubeContainer.sprite.texture ? {
+					width: cubeContainer.sprite.texture.width,
+					height: cubeContainer.sprite.texture.height
+				} : 'null',
+				parent: cubeContainer.container.parent ? 'exists' : 'null',
+				bounds: cubeContainer.container.getBounds()
+			})
+			sampleCount++
+		}
+		
+		console.groupEnd()
 	}
 
 	destroy(): void {

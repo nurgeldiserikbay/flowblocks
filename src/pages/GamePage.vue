@@ -1429,17 +1429,54 @@ onMounted(async () => {
 
 		if (!canvas.value) return
 
+		// КРИТИЧНО: Убеждаемся, что canvas в DOM и видим
+		if (!canvas.value.parentElement) {
+			console.error('Canvas is not in DOM')
+			return
+		}
+		
+		// КРИТИЧНО: Проверяем, что контейнер не скрыт (display: none)
+		const container = canvas.value.parentElement
+		const containerStyle = window.getComputedStyle(container)
+		if (containerStyle.display === 'none' || containerStyle.visibility === 'hidden') {
+			console.warn('Canvas container is hidden, waiting for visibility...')
+			// Ждем, пока контейнер станет видимым
+			await new Promise((resolve) => {
+				const checkVisibility = () => {
+					const style = window.getComputedStyle(container)
+					if (style.display !== 'none' && style.visibility !== 'hidden') {
+						resolve(undefined)
+					} else {
+						requestAnimationFrame(checkVisibility)
+					}
+				}
+				checkVisibility()
+			})
+		}
+
 		// Инициализируем canvas с правильными размерами
 		initCanvas()
 		
-		// Убеждаемся, что canvas имеет правильную ширину
+		// КРИТИЧНО: Убеждаемся, что canvas имеет правильную ширину
+		// Ждем несколько кадров для гарантии, что layout завершен
 		await nextTick()
 		await new Promise((resolve) => requestAnimationFrame(resolve))
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+
+		// КРИТИЧНО: Проверяем размеры canvas перед инициализацией PixiJS
+		const containerRect = container.getBoundingClientRect()
+		if (containerRect.width === 0 || containerRect.height === 0) {
+			console.error('Canvas container has zero dimensions:', {
+				width: containerRect.width,
+				height: containerRect.height,
+				styleWidth: container.style.width,
+				styleHeight: container.style.height
+			})
+		}
 
 		// Create renderer с правильным tileSize (всегда ширина / 8)
-		const container = canvas.value.parentElement
 		// Используем кэшированное значение из initCanvas
-		const containerWidth = cachedContainerRect?.width ?? container?.getBoundingClientRect().width ?? canvas.value.width
+		const containerWidth = cachedContainerRect?.width ?? containerRect.width ?? canvas.value.width
 		const tileSize = Math.max(containerWidth, 320) / WIDTH // Минимум 320px для мобильных
 		
 		renderer = new GameRenderer({
@@ -1448,6 +1485,11 @@ onMounted(async () => {
 		})
 
 		await renderer.init()
+		
+		// КРИТИЧНО: Диагностика после инициализации
+		if (renderer) {
+			renderer.debugRenderState()
+		}
 		
 		// После инициализации PixiJS нужно убедиться, что размеры canvas правильные
 		// Получаем актуальные размеры из CSS (они уже установлены в initCanvas)
@@ -1469,6 +1511,45 @@ onMounted(async () => {
 
 		// Start game (generation happens here)
 		await gameController.startGame()
+
+		// Ensure textures are loaded and tiles are rendered
+		if (!areTexturesLoaded()) {
+			// If textures are not yet loaded, wait for them
+			let attempts = 0
+			while (!areTexturesLoaded() && attempts < 20) {
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				attempts++
+			}
+		}
+
+		// Sync grid positions to ensure tiles are rendered
+		if (renderer) {
+			await renderer.syncGridPositions(gameStore.grid)
+
+			// КРИТИЧНО: Принудительно рендерим несколько раз для гарантии отображения
+			renderer.forceRender()
+			await new Promise((resolve) => requestAnimationFrame(resolve))
+			renderer.forceRender()
+			await new Promise((resolve) => requestAnimationFrame(resolve))
+
+			// Wait for all tiles to be ready (max 10 frames)
+			let attempts = 0
+			while (!renderer.areTilesReady() && attempts < 10) {
+				renderer.forceRender()
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+				attempts++
+			}
+			
+			// КРИТИЧНО: Если плитки все еще не готовы, выводим диагностику
+			if (!renderer.areTilesReady()) {
+				console.error('Tiles are not ready after 10 attempts')
+				renderer.debugRenderState()
+			}
+
+			// One more frame to guarantee visibility
+			renderer.forceRender()
+			await new Promise((resolve) => requestAnimationFrame(resolve))
+		}
 
 		// Setup input handlers
 		// Используем pointer events с preventDefault для предотвращения скролла

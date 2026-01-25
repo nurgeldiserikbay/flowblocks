@@ -5,14 +5,14 @@
 import { Assets, Texture } from 'pixi.js'
 
 // Импорт изображений для Vite
-import redImg from '@/assets/img/red.png'
-import blueImg from '@/assets/img/blue.png'
-import greenImg from '@/assets/img/green.png'
-import yellowImg from '@/assets/img/yellow.png'
-import orangeImg from '@/assets/img/orange.png'
-import pinkImg from '@/assets/img/pink.png'
-import violetImg from '@/assets/img/violet.png'
-import bluelightImg from '@/assets/img/bluelight.png'
+import redImg from '@/assets/img/red.webp'
+import blueImg from '@/assets/img/blue.webp'
+import greenImg from '@/assets/img/green.webp'
+import yellowImg from '@/assets/img/yellow.webp'
+import orangeImg from '@/assets/img/orange.webp'
+import pinkImg from '@/assets/img/pink.webp'
+import violetImg from '@/assets/img/violet.webp'
+import bluelightImg from '@/assets/img/bluelight.webp'
 
 // Маппинг цветов на импортированные изображения
 const COLOR_TO_IMAGE: string[] = [
