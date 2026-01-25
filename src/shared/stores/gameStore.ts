@@ -6,7 +6,7 @@ const BASE_HEIGHT = 30
 const BASE_WAVE_DURATION = 30
 const MIN_WAVE_DURATION = 10
 const WAVE_DURATION_DECREASE = 1.5
-const NUM_COLORS = 6
+const NUM_COLORS = 8
 
 /** Длительность волны в секундах: с ростом уровня уменьшается (мин. MIN_WAVE_DURATION) */
 export function getWaveDuration(level: number): number {

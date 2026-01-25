@@ -2,29 +2,14 @@
  * Загрузка и управление текстурами блоков
  */
 
-import { Assets, Texture } from 'pixi.js'
+import { Assets, Texture, Rectangle } from 'pixi.js'
 
-// Импорт изображений для Vite
-import redImg from '@/assets/img/red.webp'
-import blueImg from '@/assets/img/blue.webp'
-import greenImg from '@/assets/img/green.webp'
-import yellowImg from '@/assets/img/yellow.webp'
-import orangeImg from '@/assets/img/orange.webp'
-import pinkImg from '@/assets/img/pink.webp'
-import violetImg from '@/assets/img/violet.webp'
-import bluelightImg from '@/assets/img/bluelight.webp'
+// Импорт sprite sheet для Vite
+import spritesheetImg from '@/assets/img/spritesheet.webp'
 
-// Маппинг цветов на импортированные изображения
-const COLOR_TO_IMAGE: string[] = [
-	redImg, // 0 - красный
-	blueImg, // 1 - синий
-	greenImg, // 2 - зеленый
-	yellowImg, // 3 - желтый
-	orangeImg, // 4 - оранжевый
-	pinkImg, // 5 - розовый
-	violetImg, // 6 - фиолетовый
-	bluelightImg, // 7 - светло-голубой
-]
+// Константы для sprite sheet
+const TILE_SIZE = 30
+const FRAME_COUNT = 8
 
 // Кэш загруженных текстур
 let textureCache: Map<number, Texture> | null = null
@@ -48,28 +33,24 @@ export async function loadBlockTextures(): Promise<Map<number, Texture>> {
 	// Начать загрузку
 	loadPromise = (async () => {
 		try {
-			// Создать bundle для параллельной загрузки всех текстур
-			const bundleName = 'blockTextures'
-			const assetsToLoad: Record<string, string> = {}
+			// Загрузить sprite sheet через Assets
+			const loadedTexture = await Assets.load(spritesheetImg) as Texture
+			
+			// Получить source из загруженной текстуры (в PixiJS v8 это TextureSource)
+			const source = loadedTexture.source
 
-			for (let i = 0; i < COLOR_TO_IMAGE.length; i++) {
-				const imagePath = COLOR_TO_IMAGE[i]
-				assetsToLoad[`block_${i}`] = imagePath
-			}
+			// Создать массив текстур для каждого кадра (0..7)
+			const tileTextures: Texture[] = Array.from({ length: FRAME_COUNT }, (_, i) =>
+				new Texture({
+					source,
+					frame: new Rectangle(i * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE)
+				})
+			)
 
-			// Добавить bundle и загрузить все текстуры параллельно
-			// addBundle безопасно вызывать повторно - если bundle уже существует, он будет обновлен
-			Assets.addBundle(bundleName, assetsToLoad)
-			const loadedTextures = await Assets.loadBundle(bundleName)
-
-			// Создать кэш текстур напрямую из результата загрузки
+			// Создать кэш текстур
 			textureCache = new Map()
-			for (let i = 0; i < COLOR_TO_IMAGE.length; i++) {
-				const textureKey = `block_${i}`
-				const texture = loadedTextures[textureKey] as Texture
-				if (texture) {
-					textureCache.set(i, texture)
-				}
+			for (let i = 0; i < FRAME_COUNT; i++) {
+				textureCache.set(i, tileTextures[i])
 			}
 
 			return textureCache
@@ -91,7 +72,7 @@ export function getBlockTexture(colorIndex: number): Texture | null {
 	}
 
 	// Используем модуло для циклического использования текстур
-	const index = colorIndex % COLOR_TO_IMAGE.length
+	const index = colorIndex % FRAME_COUNT
 	return textureCache.get(index) || null
 }
 

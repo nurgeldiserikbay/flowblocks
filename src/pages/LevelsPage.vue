@@ -63,7 +63,7 @@ import { LEVEL_CONFIGS } from '@/entities/level/levelConfig'
 const router = useRouter()
 const progressStore = useProgressStore()
 
-// Fixed difficulty - always use 'normal' (6 colors)
+// Fixed difficulty - always use 'normal' (8 colors)
 const difficulty: Difficulty = 'normal'
 
 // Use level configs from LEVEL_CONFIGS (50 levels)

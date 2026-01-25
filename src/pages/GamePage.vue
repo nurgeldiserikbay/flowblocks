@@ -100,7 +100,6 @@
 
 			<div v-if="isGenerating" class="generation-loading">
 				<div class="generation-loading__spinner"></div>
-				<div class="generation-loading__text">Генерация игры...</div>
 			</div>
 		</div>
 	</AppLayout>

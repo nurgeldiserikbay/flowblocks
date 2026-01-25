@@ -7,7 +7,7 @@ import { WIDTH, getCube, setCube } from './grid'
 import { applyGravityWithFallTracking } from './gravity'
 import { findMatchesAround } from './matches'
 
-const NUM_COLORS = 6
+const NUM_COLORS = 8
 
 export function spawnWave(
 	grid: (Cube | null)[][],

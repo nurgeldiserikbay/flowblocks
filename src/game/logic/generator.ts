@@ -5,7 +5,7 @@
 import type { Cube } from './types'
 import { WIDTH, setCube } from './grid'
 
-const NUM_COLORS = 6
+const NUM_COLORS = 8
 
 export function createInitialGrid(height: number, nextId: number = 1): {
 	grid: (Cube | null)[][]
