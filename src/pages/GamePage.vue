@@ -1461,6 +1461,9 @@ onMounted(async () => {
 		// Create game controller
 		gameController = new GameController(renderer, { onVesselExpanded: handleVesselExpanded })
 
+		// Initialize controller (load textures)
+		await gameController.init()
+
 		// Set initial scroll position to top
 		momentumScrollRef.value?.scrollToTop()
 

@@ -5,7 +5,7 @@
 import { Application, Container, Sprite, Text, TextStyle, Graphics } from 'pixi.js'
 import { gsap } from 'gsap'
 import type { GameEvent, Cube } from '../logic/types'
-import { getBlockTexture, loadBlockTextures } from '../blockTextures'
+import { getBlockTexture } from '../blockTextures'
 import { WIDTH } from '../logic/grid'
 
 const TILE_PADDING = 2
@@ -39,8 +39,6 @@ export class GameRenderer {
 	}
 
 	async init(): Promise<void> {
-		await loadBlockTextures()
-
 		this.app = new Application()
 		// Используем devicePixelRatio для четкого рендеринга на мобильных устройствах
 		const devicePixelRatio = window.devicePixelRatio || 1
@@ -766,11 +764,6 @@ export class GameRenderer {
 			
 			// Проверяем наличие текстуры
 			if (!cubeContainer.sprite.texture) {
-				return false
-			}
-			
-			// Проверяем, что текстура валидна (загружена и готова)
-			if (!cubeContainer.sprite.texture.valid) {
 				return false
 			}
 			

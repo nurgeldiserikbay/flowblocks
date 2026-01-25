@@ -28,36 +28,58 @@ const COLOR_TO_IMAGE: string[] = [
 
 // Кэш загруженных текстур
 let textureCache: Map<number, Texture> | null = null
+// Промис загрузки для предотвращения множественных одновременных загрузок
+let loadPromise: Promise<Map<number, Texture>> | null = null
 
 /**
  * Загрузить все текстуры блоков
  */
 export async function loadBlockTextures(): Promise<Map<number, Texture>> {
+	// Если уже загружены, вернуть кэш
 	if (textureCache) {
 		return textureCache
 	}
 
-	// Создать объект для загрузки ресурсов
-	const assetsToLoad: Record<string, string> = {}
-
-	for (let i = 0; i < COLOR_TO_IMAGE.length; i++) {
-		const imagePath = COLOR_TO_IMAGE[i]
-		assetsToLoad[`block_${i}`] = imagePath
+	// Если загрузка уже идет, вернуть существующий промис
+	if (loadPromise) {
+		return loadPromise
 	}
 
-	// Загрузить все текстуры
-	await Assets.load(Object.values(assetsToLoad))
+	// Начать загрузку
+	loadPromise = (async () => {
+		try {
+			// Создать bundle для параллельной загрузки всех текстур
+			const bundleName = 'blockTextures'
+			const assetsToLoad: Record<string, string> = {}
 
-	// Создать кэш текстур
-	textureCache = new Map()
-	for (let i = 0; i < COLOR_TO_IMAGE.length; i++) {
-		const texture = Assets.get(assetsToLoad[`block_${i}`])
-		if (texture) {
-			textureCache.set(i, texture)
+			for (let i = 0; i < COLOR_TO_IMAGE.length; i++) {
+				const imagePath = COLOR_TO_IMAGE[i]
+				assetsToLoad[`block_${i}`] = imagePath
+			}
+
+			// Добавить bundle и загрузить все текстуры параллельно
+			// addBundle безопасно вызывать повторно - если bundle уже существует, он будет обновлен
+			Assets.addBundle(bundleName, assetsToLoad)
+			const loadedTextures = await Assets.loadBundle(bundleName)
+
+			// Создать кэш текстур напрямую из результата загрузки
+			textureCache = new Map()
+			for (let i = 0; i < COLOR_TO_IMAGE.length; i++) {
+				const textureKey = `block_${i}`
+				const texture = loadedTextures[textureKey] as Texture
+				if (texture) {
+					textureCache.set(i, texture)
+				}
+			}
+
+			return textureCache
+		} finally {
+			// Очистить промис после завершения загрузки
+			loadPromise = null
 		}
-	}
+	})()
 
-	return textureCache
+	return loadPromise
 }
 
 /**
@@ -81,9 +103,9 @@ export function areTexturesLoaded(): boolean {
 		return false
 	}
 	
-	// Проверяем, что все текстуры валидны
+	// Проверяем, что все текстуры существуют
 	for (const texture of textureCache.values()) {
-		if (!texture || !texture.valid) {
+		if (!texture) {
 			return false
 		}
 	}
@@ -96,4 +118,5 @@ export function areTexturesLoaded(): boolean {
  */
 export function clearBlockTextures(): void {
 	textureCache = null
+	loadPromise = null
 }

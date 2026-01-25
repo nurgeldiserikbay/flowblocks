@@ -21,6 +21,7 @@ import {
 } from './logic'
 import type { GameEvent } from './logic/types'
 import { AudioManager } from './audio/AudioManager'
+import { loadBlockTextures } from './blockTextures'
 
 const COMBO_WINDOW_MS = 2500
 
@@ -42,6 +43,13 @@ export class GameController {
 	constructor(renderer: GameRenderer, opts?: GameControllerOptions) {
 		this.renderer = renderer
 		this.opts = opts ?? {}
+	}
+
+	/**
+	 * Инициализация контроллера - загрузка текстур блоков
+	 */
+	async init(): Promise<void> {
+		await loadBlockTextures()
 	}
 
 	async startGame(): Promise<void> {
