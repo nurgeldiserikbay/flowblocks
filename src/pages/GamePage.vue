@@ -32,7 +32,9 @@
 					class="game-page__scroll-container"
 				>
 					<div class="game-page__canvas-container">
-						<canvas ref="canvas" class="game-canvas"></canvas>
+						<!-- Canvas будет заменен на canvas из PixiService при attachToHost -->
+						<!-- Но нужен ref для получения контейнера -->
+						<canvas ref="canvas" class="game-canvas" style="display: none;"></canvas>
 					</div>
 				</MomentumScroll>
 
@@ -118,7 +120,7 @@ import { GameController } from '@/game/GameController'
 import { useGameStore } from '@/shared/stores/gameStore'
 import { WIDTH } from '@/game/logic'
 import { AudioManager } from '@/game/audio/AudioManager'
-import { waitForTexturesReady } from '@/game/blockTextures'
+import { PixiService } from '@/pixi/PixiService'
 
 const router = useRouter()
 const gameStore = useGameStore()
@@ -129,6 +131,11 @@ const levelIndicatorRef = useTemplateRef<HTMLElement>('levelIndicator')
 const playAreaRef = useTemplateRef<HTMLElement>('playArea')
 const isExitDialogOpen = ref(false)
 const isGenerating = ref(true)
+
+// Хелпер для получения canvas из PixiService или fallback на ref
+function getPixiCanvas(): HTMLCanvasElement | null {
+	return PixiService.isReady() ? PixiService.getCanvas() : canvas.value
+}
 
 // Состояние для обработки событий на level-indicator
 let levelIndicatorPointerId: number | null = null
@@ -1066,22 +1073,27 @@ const levelBarColor = computed(() => {
 
 /** При расширении сосуда: только переразмер канваса и Pixi. Скролл (updateBounds, scrollToBottom) — в MomentumScroll по ResizeObserver. */
 async function handleVesselExpanded(): Promise<void> {
-	if (!renderer || !canvas.value) return
+	if (!renderer) return
+	
+	// КРИТИЧНО: Получаем canvas из PixiService
+	const pixiCanvas = getPixiCanvas()
+	if (!pixiCanvas) return
+	
 	initCanvas()
 	
 	// Получаем актуальную высоту grid для правильного расчета позиций
 	const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
 	
 	// Обновляем размер плитки в renderer (на случай если ширина контейнера изменилась)
-	const container = canvas.value.parentElement
+	const container = pixiCanvas.parentElement
 	// Инвалидируем кэш перед получением новых размеров
 	cachedContainerRect = null
-	const containerWidth = (container?.getBoundingClientRect().width ?? parseInt(canvas.value.style.width)) || 320
+	const containerWidth = (container?.getBoundingClientRect().width ?? parseInt(pixiCanvas.style.width)) || 320
 	const newTileSize = Math.max(containerWidth, 320) / WIDTH
 	
 	// Получаем логические размеры из CSS стилей (не внутренние размеры canvas!)
-	const logicalWidth = parseInt(canvas.value.style.width) || containerWidth
-	const logicalHeight = parseInt(canvas.value.style.height) || (gridHeight * newTileSize)
+	const logicalWidth = parseInt(pixiCanvas.style.width) || containerWidth
+	const logicalHeight = parseInt(pixiCanvas.style.height) || (gridHeight * newTileSize)
 	
 	// forceUpdatePositions = true гарантирует, что все позиции будут пересчитаны даже если tileSize не изменился
 	// Передаем gridHeight для правильного расчета позиций снизу
@@ -1097,10 +1109,19 @@ async function handleVesselExpanded(): Promise<void> {
 }
 
 function initCanvas(): void {
-	if (!canvas.value) return
+	// КРИТИЧНО: Получаем контейнер из canvas ref или из DOM
+	const container = canvas.value?.parentElement || document.querySelector('.game-page__canvas-container')
+	if (!container) {
+		console.warn('[GamePage] initCanvas: container not found')
+		return
+	}
 
-	const container = canvas.value.parentElement
-	if (!container) return
+	// КРИТИЧНО: Получаем canvas из PixiService
+	const pixiCanvas = getPixiCanvas()
+	if (!pixiCanvas) {
+		console.warn('[GamePage] initCanvas: canvas not available')
+		return
+	}
 
 	// Принудительно используем полную ширину контейнера для 8 кубиков
 	// Получаем актуальные размеры контейнера
@@ -1117,9 +1138,9 @@ function initCanvas(): void {
 
 	// Устанавливаем CSS размеры (логические пиксели)
 	// Это важно для правильного отображения на мобильных устройствах
-	canvas.value.style.width = `${maxWidth}px`
-	canvas.value.style.height = `${canvasHeight}px`
-	canvas.value.style.display = 'block'
+	pixiCanvas.style.width = `${maxWidth}px`
+	pixiCanvas.style.height = `${canvasHeight}px`
+	pixiCanvas.style.display = 'block'
 	
 	// НЕ устанавливаем внутренние размеры canvas вручную!
 	// PixiJS с autoDensity: true сам управляет внутренними размерами
@@ -1128,7 +1149,9 @@ function initCanvas(): void {
 }
 
 function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: number; c: number } | null {
-	if (!canvas.value || !renderer) return null
+	// КРИТИЧНО: Используем canvas из PixiService
+	const pixiCanvas = getPixiCanvas()
+	if (!pixiCanvas || !renderer) return null
 
 	// Получаем координаты в зависимости от типа события
 	let clientX: number
@@ -1150,7 +1173,7 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 	}
 
 	// Получаем bounding rect для расчета относительных координат
-	const rect = canvas.value.getBoundingClientRect()
+	const rect = pixiCanvas.getBoundingClientRect()
 	
 	// Координаты относительно canvas (getBoundingClientRect учитывает все трансформации и скролл)
 	const x = clientX - rect.left
@@ -1207,14 +1230,17 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// Unlock audio context on first interaction (iOS/Android)
 	AudioManager.unlock()
 
-	// Предотвращаем скролл при взаимодействии с canvas
-	if (e instanceof PointerEvent) {
-		e.preventDefault()
-		e.stopPropagation()
-		// Захватываем pointer для отслеживания движения
-		if (canvas.value && e.pointerId !== undefined) {
-			canvas.value.setPointerCapture(e.pointerId)
-		}
+		// Предотвращаем скролл при взаимодействии с canvas
+		// КРИТИЧНО: Используем canvas из PixiService
+		const pixiCanvas = getPixiCanvas()
+		
+		if (e instanceof PointerEvent) {
+			e.preventDefault()
+			e.stopPropagation()
+			// Захватываем pointer для отслеживания движения
+			if (pixiCanvas && e.pointerId !== undefined) {
+				pixiCanvas.setPointerCapture(e.pointerId)
+			}
 	} else if (e instanceof TouchEvent) {
 		// Для touch событий также предотвращаем скролл
 		e.preventDefault()
@@ -1268,9 +1294,12 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 	}
 	
 	// Освобождаем pointer, если был захвачен
-	if (e instanceof PointerEvent && canvas.value && e.pointerId !== undefined) {
-		if (canvas.value.hasPointerCapture(e.pointerId)) {
-			canvas.value.releasePointerCapture(e.pointerId)
+	// КРИТИЧНО: Используем canvas из PixiService
+	const pixiCanvas = getPixiCanvas()
+	
+	if (e instanceof PointerEvent && pixiCanvas && e.pointerId !== undefined) {
+		if (pixiCanvas.hasPointerCapture(e.pointerId)) {
+			pixiCanvas.releasePointerCapture(e.pointerId)
 		}
 	}
 	
@@ -1424,22 +1453,24 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 }
 
 onMounted(async () => {
+	const gamePageStartTime = performance.now()
+	console.log('[GamePage] onMounted: starting game initialization')
+
 	// Initialize AudioManager
 	await AudioManager.init()
 
-	if (!canvas.value) return
-
-	// КРИТИЧНО: Убеждаемся, что canvas в DOM и видим
-	if (!canvas.value.parentElement) {
-		console.error('Canvas is not in DOM')
+	// КРИТИЧНО: Получаем контейнер для canvas
+	// Используем canvas ref для получения контейнера, но сам canvas будет заменен на canvas из PixiService
+	const container = canvas.value?.parentElement || document.querySelector('.game-page__canvas-container') as HTMLElement
+	if (!container) {
+		console.error('[GamePage] onMounted: Canvas container not found')
 		return
 	}
 	
 	// КРИТИЧНО: Проверяем, что контейнер не скрыт (display: none)
-	const container = canvas.value.parentElement
 	const containerStyle = window.getComputedStyle(container)
 	if (containerStyle.display === 'none' || containerStyle.visibility === 'hidden') {
-		console.warn('Canvas container is hidden, waiting for visibility...')
+		console.warn('[GamePage] onMounted: Canvas container is hidden, waiting for visibility...')
 		// Ждем, пока контейнер станет видимым
 		await new Promise((resolve) => {
 			const checkVisibility = () => {
@@ -1454,6 +1485,28 @@ onMounted(async () => {
 		})
 	}
 
+	// КРИТИЧНО: Проверяем, что PixiService инициализирован
+	if (!PixiService.isReady()) {
+		console.error('[GamePage] onMounted: PixiService not initialized. Please initialize on StartPage first.')
+		// Попытка инициализировать в экстренном случае (не должно происходить)
+		await PixiService.init(container, { width: 320, height: 400 })
+	}
+
+	// КРИТИЧНО: Удаляем временный canvas из template (если есть)
+	if (canvas.value && canvas.value.parentElement === container) {
+		container.removeChild(canvas.value)
+	}
+
+	// КРИТИЧНО: Прикрепляем canvas из PixiService к нашему контейнеру
+	PixiService.attachToHost(container)
+	
+	// Получаем canvas из PixiService
+	const pixiCanvas = getPixiCanvas()
+	if (!pixiCanvas) {
+		console.error('[GamePage] onMounted: Failed to get canvas from PixiService')
+		return
+	}
+
 	// Инициализируем canvas с правильными размерами
 	initCanvas()
 	
@@ -1464,7 +1517,7 @@ onMounted(async () => {
 	// КРИТИЧНО: Проверяем размеры canvas перед инициализацией PixiJS
 	const containerRect = container.getBoundingClientRect()
 	if (containerRect.width === 0 || containerRect.height === 0) {
-		console.error('Canvas container has zero dimensions:', {
+		console.error('[GamePage] onMounted: Canvas container has zero dimensions:', {
 			width: containerRect.width,
 			height: containerRect.height,
 			styleWidth: container.style.width,
@@ -1474,15 +1527,20 @@ onMounted(async () => {
 
 	// Create renderer с правильным tileSize (всегда ширина / 8)
 	// Используем кэшированное значение из initCanvas
-	const containerWidth = cachedContainerRect?.width ?? containerRect.width ?? canvas.value.width
+	const containerWidth = cachedContainerRect?.width ?? containerRect.width ?? pixiCanvas.width
 	const tileSize = Math.max(containerWidth, 320) / WIDTH // Минимум 320px для мобильных
 	
+	const rendererInitStartTime = performance.now()
+	console.log('[GamePage] onMounted: creating GameRenderer')
+	
 	renderer = new GameRenderer({
-		canvas: canvas.value,
+		canvas: pixiCanvas, // Используем canvas из PixiService
 		tileSize,
 	})
 
 	await renderer.init()
+	
+	console.log(`[GamePage] onMounted: GameRenderer initialized in ${(performance.now() - rendererInitStartTime).toFixed(2)}ms`)
 	
 	// После инициализации PixiJS нужно убедиться, что размеры canvas правильные
 	// Получаем актуальные размеры из CSS (они уже установлены в initCanvas)
@@ -1493,47 +1551,77 @@ onMounted(async () => {
 	// Обновляем размеры через renderer, чтобы PixiJS правильно их обработал
 	renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
 
+	const controllerInitStartTime = performance.now()
+	console.log('[GamePage] onMounted: creating GameController')
+	
 	// Create game controller с callback'ами для boot-цепочки
 	gameController = new GameController(renderer, {
 		onVesselExpanded: handleVesselExpanded,
 		onHideLoading: () => {
 			// Callback для скрытия loading overlay
+			const hideLoadingTime = performance.now()
+			gameStore.setDiagnostic('loaderHidden', hideLoadingTime)
+			console.log(`[GamePage] onHideLoading: loader hidden at ${hideLoadingTime.toFixed(2)}ms`)
 			isGenerating.value = false
 		},
 		onStartScrollAnimation: async () => {
 			// Callback для запуска анимации скроллинга
-			// Текстуры уже прогреты в warmUpTextures(), поэтому не ждем здесь
+			const scrollStartTime = performance.now()
+			gameStore.setDiagnostic('scrollStarted', scrollStartTime)
+			console.log(`[GamePage] onStartScrollAnimation: scroll started at ${scrollStartTime.toFixed(2)}ms`)
 			
 			// Update scroll bounds после того, как игра запущена
 			momentumScrollRef.value?.updateBounds()
 
 			// Animate scroll to bottom
 			await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
+			
+			const scrollEndTime = performance.now()
+			console.log(`[GamePage] onStartScrollAnimation: scroll completed in ${(scrollEndTime - scrollStartTime).toFixed(2)}ms`)
 		}
 	})
 
-	// Initialize controller (load textures) - устанавливает isAssetsReady = true
+	// Initialize controller - текстуры уже загружены в PixiService
 	await gameController.init()
+	
+	console.log(`[GamePage] onMounted: GameController initialized in ${(performance.now() - controllerInitStartTime).toFixed(2)}ms`)
 
 	// Set initial scroll position to top
 	momentumScrollRef.value?.scrollToTop()
 
+	const gameStartTime = performance.now()
+	console.log('[GamePage] onMounted: starting game')
+	
 	// Start game (generation happens here)
 	// startGame() теперь:
 	// 1. Устанавливает isAssetsReady, isSceneReady, isTilesAdded
 	// 2. Вызывает renderGrid(), который ждет первого рендера через app.ticker.addOnce()
 	// 3. После первого рендера вызывает onFirstFrameRendered(), который устанавливает isFirstFrameRendered = true
 	await gameController.startGame()
+	
+	const tilesAddedTime = performance.now()
+	gameStore.setDiagnostic('tilesAdded', tilesAddedTime)
+	console.log(`[GamePage] onMounted: tiles added at ${tilesAddedTime.toFixed(2)}ms`)
 
-		// КРИТИЧНО: Запускаем единую boot-цепочку после того, как плитки готовы
-		// Порядок: tiles visible -> hide loader -> start scroll -> start timer
-		await gameController.bootGame()
+	// КРИТИЧНО: Запускаем единую boot-цепочку после того, как плитки готовы
+	// Порядок: tiles visible -> hide loader -> start scroll -> start timer
+	await gameController.bootGame()
+	
+	console.log(`[GamePage] onMounted: game boot completed in ${(performance.now() - gameStartTime).toFixed(2)}ms`)
+	console.log(`[GamePage] onMounted: total initialization completed in ${(performance.now() - gamePageStartTime).toFixed(2)}ms`)
 
 		// Setup input handlers
+		// КРИТИЧНО: Используем canvas из PixiService
+		const pixiCanvasForHandlers = getPixiCanvas()
+		if (!pixiCanvasForHandlers) {
+			console.error('[GamePage] onMounted: Failed to get canvas for event handlers')
+			return
+		}
+		
 		// Используем pointer events с preventDefault для предотвращения скролла
-		canvas.value.addEventListener('pointerdown', handlePointerDown, { passive: false })
-		canvas.value.addEventListener('pointerup', handlePointerUp, { passive: false })
-		canvas.value.addEventListener('pointercancel', handlePointerUp, { passive: false })
+		pixiCanvasForHandlers.addEventListener('pointerdown', handlePointerDown, { passive: false })
+		pixiCanvasForHandlers.addEventListener('pointerup', handlePointerUp, { passive: false })
+		pixiCanvasForHandlers.addEventListener('pointercancel', handlePointerUp, { passive: false })
 		
 		// Обработчик для pointermove - отслеживаем свайп
 		pointerMoveHandler = (e: PointerEvent) => {
@@ -1596,12 +1684,12 @@ onMounted(async () => {
 				}
 			}
 		}
-		canvas.value.addEventListener('pointermove', pointerMoveHandler, { passive: false })
+		pixiCanvasForHandlers.addEventListener('pointermove', pointerMoveHandler, { passive: false })
 		
 		// Touch events для мобильных устройств
-		canvas.value.addEventListener('touchstart', handlePointerDown, { passive: false })
-		canvas.value.addEventListener('touchend', handlePointerUp, { passive: false })
-		canvas.value.addEventListener('touchcancel', handlePointerUp, { passive: false })
+		pixiCanvasForHandlers.addEventListener('touchstart', handlePointerDown, { passive: false })
+		pixiCanvasForHandlers.addEventListener('touchend', handlePointerUp, { passive: false })
+		pixiCanvasForHandlers.addEventListener('touchcancel', handlePointerUp, { passive: false })
 		
 		// Обработчик для touchmove - отслеживаем свайп
 		touchMoveHandler = (e: TouchEvent) => {
@@ -1667,13 +1755,15 @@ onMounted(async () => {
 				}
 			}
 		}
-		canvas.value.addEventListener('touchmove', touchMoveHandler, { passive: false })
+		pixiCanvasForHandlers.addEventListener('touchmove', touchMoveHandler, { passive: false })
 
 		// Скролл теперь запускается через bootGame() в правильном порядке
 
 		// Handle resize - функция для обновления размера с debounce
 		const handleResize = async () => {
-			if (!canvas.value) return
+			// КРИТИЧНО: Получаем canvas из PixiService
+			const pixiCanvas = getPixiCanvas()
+			if (!pixiCanvas) return
 			
 			// Debounce: отменяем предыдущий вызов, если он еще не выполнился
 			if (resizeTimeout) {
@@ -1681,7 +1771,7 @@ onMounted(async () => {
 			}
 			
 			resizeTimeout = setTimeout(async () => {
-				if (!canvas.value) return
+				if (!pixiCanvas) return
 				
 				// Инвалидируем кэш перед изменением размеров
 				cachedContainerRect = null
@@ -1696,8 +1786,8 @@ onMounted(async () => {
 				initCanvas()
 				
 				// Получаем логические размеры из CSS стилей (не внутренние размеры canvas!)
-				const logicalWidth = parseInt(canvas.value.style.width) || canvas.value.getBoundingClientRect().width
-				const logicalHeight = parseInt(canvas.value.style.height) || canvas.value.getBoundingClientRect().height
+				const logicalWidth = parseInt(pixiCanvas.style.width) || pixiCanvas.getBoundingClientRect().width
+				const logicalHeight = parseInt(pixiCanvas.style.height) || pixiCanvas.getBoundingClientRect().height
 				const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
 				
 				// Всегда используем логическую ширину / WIDTH для размера плитки
@@ -1736,7 +1826,8 @@ onMounted(async () => {
 		}
 		
 		// Также используем ResizeObserver для контейнера canvas (более надежно на мобильных)
-		const canvasContainer = canvas.value.parentElement
+		const pixiCanvasForResize = getPixiCanvas()
+		const canvasContainer = pixiCanvasForResize?.parentElement || document.querySelector('.game-page__canvas-container')
 		if (canvasContainer) {
 			resizeObserver = new ResizeObserver(() => {
 				handleResize()
@@ -1746,6 +1837,8 @@ onMounted(async () => {
 	})
 
 onBeforeUnmount(() => {
+	console.log('[GamePage] onBeforeUnmount: cleaning up')
+	
 	// Очищаем таймеры play-area
 	clearPlayAreaPressTimer()
 	
@@ -1777,24 +1870,35 @@ onBeforeUnmount(() => {
 		resizeTimeout = null
 	}
 
-	if (canvas.value) {
-		canvas.value.removeEventListener('pointerdown', handlePointerDown)
-		canvas.value.removeEventListener('pointerup', handlePointerUp)
-		canvas.value.removeEventListener('pointercancel', handlePointerUp)
+		// КРИТИЧНО: Получаем canvas из PixiService для удаления обработчиков
+		const pixiCanvas = getPixiCanvas()
+
+		if (pixiCanvas) {
+		pixiCanvas.removeEventListener('pointerdown', handlePointerDown)
+		pixiCanvas.removeEventListener('pointerup', handlePointerUp)
+		pixiCanvas.removeEventListener('pointercancel', handlePointerUp)
 		if (pointerMoveHandler) {
-			canvas.value.removeEventListener('pointermove', pointerMoveHandler)
+			pixiCanvas.removeEventListener('pointermove', pointerMoveHandler)
 		}
-		canvas.value.removeEventListener('touchstart', handlePointerDown)
-		canvas.value.removeEventListener('touchend', handlePointerUp)
-		canvas.value.removeEventListener('touchcancel', handlePointerUp)
+		pixiCanvas.removeEventListener('touchstart', handlePointerDown)
+		pixiCanvas.removeEventListener('touchend', handlePointerUp)
+		pixiCanvas.removeEventListener('touchcancel', handlePointerUp)
 		if (touchMoveHandler) {
-			canvas.value.removeEventListener('touchmove', touchMoveHandler)
+			pixiCanvas.removeEventListener('touchmove', touchMoveHandler)
 		}
 	}
+
+	// КРИТИЧНО: Открепляем canvas от хоста (возвращаем в скрытое состояние)
+	PixiService.detach()
+	
+	// Переключаемся обратно на стартовую сцену
+	PixiService.switchToStartScene()
 
 	gameController?.destroy()
 	gameController = null
 	renderer = null
+	
+	console.log('[GamePage] onBeforeUnmount: cleanup completed')
 })
 
 function showExitDialog(): void {

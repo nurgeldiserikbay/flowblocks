@@ -1,72 +1,77 @@
 /**
  * Загрузка и управление текстурами блоков
+ * ОБНОВЛЕНО: Использует PixiService для получения текстур из кэша
  */
 
-import { Assets, Texture, Rectangle } from 'pixi.js'
+import { Texture } from 'pixi.js'
+import { PixiService } from '@/pixi/PixiService'
+import { getTileTexture } from '@/pixi/textures/TileAtlas'
 
-// Импорт sprite sheet для Vite
-import spritesheetImg from '@/assets/img/spritesheet.webp'
-
-// Константы для sprite sheet
-const TILE_SIZE = 30
+// Константы для совместимости
 const FRAME_COUNT = 8
 
-// Кэш загруженных текстур
+// Кэш загруженных текстур (для обратной совместимости)
 let textureCache: Map<number, Texture> | null = null
-// Промис загрузки для предотвращения множественных одновременных загрузок
-let loadPromise: Promise<Map<number, Texture>> | null = null
 
 /**
  * Загрузить все текстуры блоков
+ * ОБНОВЛЕНО: Использует PixiService, если он инициализирован
  */
 export async function loadBlockTextures(): Promise<Map<number, Texture>> {
-	// Если уже загружены, вернуть кэш
+	// Если PixiService готов, используем его текстуры
+	if (PixiService.isReady()) {
+		const tileTextures = PixiService.getTileTextures()
+		// Создаем кэш для обратной совместимости
+		textureCache = new Map()
+		for (let i = 0; i < tileTextures.length; i++) {
+			textureCache.set(i, tileTextures[i])
+		}
+		return textureCache
+	}
+
+	// Если кэш уже есть, вернуть его
 	if (textureCache) {
 		return textureCache
 	}
 
-	// Если загрузка уже идет, вернуть существующий промис
-	if (loadPromise) {
-		return loadPromise
+	// Fallback: если PixiService не готов, ждем его инициализации
+	// Это может произойти при первой загрузке, если StartPage еще не загрузился
+	console.warn('[blockTextures] loadBlockTextures: PixiService not ready, waiting...')
+	
+	// Ждем инициализации PixiService (максимум 10 секунд)
+	const startTime = Date.now()
+	while (!PixiService.isReady() && Date.now() - startTime < 10000) {
+		await new Promise(resolve => setTimeout(resolve, 100))
 	}
 
-	// Начать загрузку
-	loadPromise = (async () => {
-		try {
-			// Загрузить sprite sheet через Assets
-			const loadedTexture = await Assets.load(spritesheetImg) as Texture
-			
-			// Получить source из загруженной текстуры (в PixiJS v8 это TextureSource)
-			const source = loadedTexture.source
-
-			// Создать массив текстур для каждого кадра (0..7)
-			const tileTextures: Texture[] = Array.from({ length: FRAME_COUNT }, (_, i) =>
-				new Texture({
-					source,
-					frame: new Rectangle(i * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE)
-				})
-			)
-
-			// Создать кэш текстур
-			textureCache = new Map()
-			for (let i = 0; i < FRAME_COUNT; i++) {
-				textureCache.set(i, tileTextures[i])
-			}
-
-			return textureCache
-		} finally {
-			// Очистить промис после завершения загрузки
-			loadPromise = null
+	if (PixiService.isReady()) {
+		const tileTextures = PixiService.getTileTextures()
+		textureCache = new Map()
+		for (let i = 0; i < tileTextures.length; i++) {
+			textureCache.set(i, tileTextures[i])
 		}
-	})()
+		return textureCache
+	}
 
-	return loadPromise
+	throw new Error('Failed to load textures: PixiService not initialized')
 }
 
 /**
  * Получить текстуру для цвета блока
+ * ОБНОВЛЕНО: Использует PixiService, если он готов
  */
 export function getBlockTexture(colorIndex: number): Texture | null {
+	// Если PixiService готов, используем его текстуры напрямую
+	if (PixiService.isReady()) {
+		try {
+			const tileTextures = PixiService.getTileTextures()
+			return getTileTexture(tileTextures, colorIndex)
+		} catch (error) {
+			console.warn('[blockTextures] getBlockTexture: failed to get texture from PixiService', error)
+		}
+	}
+
+	// Fallback на старый кэш
 	if (!textureCache) {
 		return null
 	}

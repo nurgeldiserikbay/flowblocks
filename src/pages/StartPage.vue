@@ -1,5 +1,8 @@
 <template>
 	<div class="start-page">
+		<!-- Hidden container for Pixi canvas (background initialization) -->
+		<div ref="pixiHostRef" class="pixi-host" style="position: absolute; left: -9999px; top: 0; width: 1px; height: 1px; overflow: hidden;"></div>
+		
 		<!-- Sound button (top right) -->
 		<button
 			class="sound-button"
@@ -163,29 +166,58 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAudioStore } from '@/shared/stores/audioStore'
 import { AudioManager } from '@/game/audio/AudioManager'
-import { loadBlockTextures, waitForTexturesReady } from '@/game/blockTextures'
+import { PixiService } from '@/pixi/PixiService'
+import { useGameStore } from '@/shared/stores/gameStore'
 
 const audioStore = useAudioStore()
+const gameStore = useGameStore()
+const pixiHostRef = ref<HTMLElement | null>(null)
 
 function toggleSound() {
 	audioStore.toggleMute()
 }
 
 onMounted(async () => {
+	const startTime = performance.now()
+	console.log('[StartPage] onMounted: starting initialization')
+
 	// Initialize AudioManager on start page
 	await AudioManager.init()
 	
+	// КРИТИЧНО: Инициализируем PixiService на StartPage
+	// Это создаст Pixi Application, загрузит текстуры и прогреет GPU в фоне
+	if (!pixiHostRef.value) {
+		console.error('[StartPage] pixiHostRef not available')
+		return
+	}
+
 	try {
-		await loadBlockTextures()
+		const pixiInitStartTime = performance.now()
+		console.log('[StartPage] onMounted: initializing PixiService')
 		
-		// Ждем, пока текстуры полностью готовы (декодированы браузером)
-		await waitForTexturesReady(10000)
+		// Инициализируем PixiService с базовыми размерами
+		// Canvas будет создан и добавлен в DOM в фоне (скрытый)
+		await PixiService.init(pixiHostRef.value, {
+			width: 320,
+			height: 400
+		})
+		
+		gameStore.setDiagnostic('pixiInit', performance.now())
+		console.log(`[StartPage] onMounted: PixiService initialized in ${(performance.now() - pixiInitStartTime).toFixed(2)}ms`)
+
+		// Текстуры уже загружены и прогреты в PixiService.init()
+		gameStore.setAssetsReady(true)
+		gameStore.setDiagnostic('assetsLoaded', performance.now())
+		gameStore.setTexturesWarmed(true)
+		gameStore.setDiagnostic('texturesWarmed', performance.now())
+		
+		console.log(`[StartPage] onMounted: all initialization completed in ${(performance.now() - startTime).toFixed(2)}ms`)
 	} catch (error) {
-		console.warn('[StartPage] onMounted: failed to preload textures, will load on game start', error)
-		// Продолжаем выполнение - текстуры загрузятся при старте игры
+		console.error('[StartPage] onMounted: failed to initialize PixiService', error)
+		// Продолжаем выполнение - игра попытается инициализировать при старте
 	}
 	
 	// Sync AudioManager with store state

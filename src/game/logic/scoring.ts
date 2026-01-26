@@ -23,3 +23,14 @@ export function calculateComboBonus(comboLevel: number, tileCount: number): numb
 export function getVesselClearBonus(grid: (unknown | null)[][]): number {
 	return WIDTH * grid.length
 }
+
+/** Bonus for clearing all cubes: same as vessel clear bonus */
+export function getGreatBonus(grid: (unknown | null)[][]): number {
+	return getVesselClearBonus(grid)
+}
+
+/** Bonus for no moves left: depends on remaining time */
+export function getNoMovesBonus(remainingTime: number): number {
+	// Бонус пропорционален оставшемуся времени (например, 10 очков за секунду)
+	return Math.max(0, Math.floor(remainingTime * 10))
+}

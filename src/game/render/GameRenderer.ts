@@ -2,12 +2,14 @@
  * Pixi.js game renderer - handles rendering and animations
  */
 
-import { Application, Container, Sprite, Text, TextStyle, Graphics } from 'pixi.js'
+import { Container, Sprite, Text, TextStyle, Graphics } from 'pixi.js'
 import { gsap } from 'gsap'
 import type { GameEvent, Cube } from '../logic/types'
 import { getBlockTexture } from '../blockTextures'
 import { WIDTH } from '../logic/grid'
 import { AudioManager } from '../audio/AudioManager'
+import { PixiService } from '@/pixi/PixiService'
+import type { Application } from 'pixi.js'
 
 const TILE_PADDING = 2
 
@@ -40,35 +42,41 @@ export class GameRenderer {
 	}
 
 	async init(): Promise<void> {
-		this.app = new Application()
-		// Используем devicePixelRatio для четкого рендеринга на мобильных устройствах
-		const devicePixelRatio = window.devicePixelRatio || 1
-		
-		// КРИТИЧНО: Получаем логические размеры из CSS стилей или getBoundingClientRect
-		// Если CSS размеры не установлены, используем размеры из DOM
-		let logicalWidth = parseInt(this.canvas.style.width)
-		let logicalHeight = parseInt(this.canvas.style.height)
-		
-		// Если размеры не установлены в CSS, получаем из DOM
-		if (!logicalWidth || !logicalHeight) {
-			const rect = this.canvas.getBoundingClientRect()
-			logicalWidth = logicalWidth || rect.width || 320
-			logicalHeight = logicalHeight || rect.height || 400
+		const initStartTime = performance.now()
+		console.log('[GameRenderer] init: starting initialization')
+
+		// КРИТИЧНО: Используем PixiService вместо создания нового Application
+		if (!PixiService.isReady()) {
+			throw new Error('PixiService not initialized. Call PixiService.init() on StartPage first.')
 		}
-		
-		// Минимальные размеры для предотвращения ошибок инициализации
-		logicalWidth = Math.max(logicalWidth, 320)
-		logicalHeight = Math.max(logicalHeight, 400)
-		
-		await this.app.init({
-			canvas: this.canvas,
-			width: logicalWidth,
-			height: logicalHeight,
-			backgroundColor: 0x000000,
-			backgroundAlpha: 0,
-			resolution: devicePixelRatio, // Используем devicePixelRatio для четкости
-			autoDensity: true, // Включаем автоматическое масштабирование для правильного отображения
-		})
+
+		// Получаем Application из PixiService
+		this.app = PixiService.getApp()
+
+		// КРИТИЧНО: Получаем контейнер из переданного canvas ref
+		// Canvas из PixiService будет прикреплен к этому контейнеру через attachToHost в GamePage
+		const container = this.canvas.parentElement
+		if (!container) {
+			throw new Error('Canvas parent container not found')
+		}
+
+		// КРИТИЧНО: Прикрепляем canvas из PixiService к нашему хосту
+		// Это должно быть сделано в GamePage перед вызовом renderer.init()
+		// Но на всякий случай проверяем и прикрепляем здесь
+		const pixiCanvas = PixiService.getCanvas()
+		if (pixiCanvas.parentElement !== container) {
+			PixiService.attachToHost(container)
+		}
+
+		// Обновляем ссылку на canvas из PixiService
+		this.canvas = pixiCanvas
+
+		// КРИТИЧНО: Получаем игровую сцену из PixiService
+		const gameScene = PixiService.getGameScene()
+		this.gameContainer = gameScene
+
+		// КРИТИЧНО: Переключаемся на игровую сцену
+		PixiService.switchToGameScene()
 
 		// КРИТИЧНО: Проверяем, что renderer инициализирован корректно
 		if (!this.app.renderer) {
@@ -79,9 +87,7 @@ export class GameRenderer {
 		if (this.app.renderer.width <= 0 || this.app.renderer.height <= 0) {
 			console.warn('PixiJS renderer has invalid dimensions:', {
 				width: this.app.renderer.width,
-				height: this.app.renderer.height,
-				canvasWidth: logicalWidth,
-				canvasHeight: logicalHeight
+				height: this.app.renderer.height
 			})
 		}
 		
@@ -90,102 +96,22 @@ export class GameRenderer {
 			console.warn('PixiJS ticker is not started, starting manually')
 			this.app.ticker.start()
 		}
-
-		this.gameContainer = new Container()
-		this.app.stage.addChild(this.gameContainer)
-		
-		// КРИТИЧНО: Убеждаемся, что gameContainer добавлен в stage
-		if (!this.gameContainer.parent || this.gameContainer.parent !== this.app.stage) {
-			throw new Error('Failed to add gameContainer to stage')
-		}
 		
 		// КРИТИЧНО: Принудительно рендерим первый кадр для проверки
 		this.forceRender()
+
+		console.log(`[GameRenderer] init: completed in ${(performance.now() - initStartTime).toFixed(2)}ms`)
 	}
 
 	/**
 	 * КРИТИЧНО: Прогрев текстур - создание тестовых спрайтов и рендеринг для подготовки GPU
-	 * Это гарантирует, что все текстуры загружены в GPU память и готовы к быстрому отображению
-	 * Вызывается после загрузки текстур, но до создания реальных спрайтов игры
+	 * ОБНОВЛЕНО: Текстуры уже прогреты в PixiService.init(), этот метод больше не нужен
+	 * Оставлен для обратной совместимости, но ничего не делает
 	 */
 	async warmUpTextures(): Promise<void> {
-		if (!this.app || !this.gameContainer) {
-			console.warn('warmUpTextures: app or gameContainer not initialized')
-			return
-		}
-
-		const warmUpStartTime = performance.now()
-		console.log('[GameRenderer] warmUpTextures: starting texture warm-up')
-
-		// Создаем временный контейнер для тестовых спрайтов (вне видимой области)
-		const warmUpContainer = new Container()
-		warmUpContainer.visible = false // Скрываем, чтобы не было видно на экране
-		warmUpContainer.alpha = 0 // Дополнительно делаем невидимым
-		this.app.stage.addChild(warmUpContainer)
-
-		const testSprites: Sprite[] = []
-		const spriteSize = Math.max(1, this.tileSize - TILE_PADDING * 2)
-
-		// Создаем тестовые спрайты для всех текстур
-		// Это заставит GPU загрузить текстуры в память
-		for (let colorIndex = 0; colorIndex < 8; colorIndex++) {
-			const texture = getBlockTexture(colorIndex)
-			if (texture && texture.width > 0 && texture.height > 0) {
-				const sprite = new Sprite(texture)
-				sprite.width = spriteSize
-				sprite.height = spriteSize
-				sprite.x = colorIndex * spriteSize // Размещаем в ряд вне экрана
-				sprite.y = 0
-				sprite.visible = true
-				sprite.alpha = 1
-				warmUpContainer.addChild(sprite)
-				testSprites.push(sprite)
-			} else {
-				console.warn(`[GameRenderer] warmUpTextures: texture ${colorIndex} not ready`)
-			}
-		}
-
-		if (testSprites.length === 0) {
-			console.warn('[GameRenderer] warmUpTextures: no sprites created')
-			warmUpContainer.destroy({ children: true })
-			return
-		}
-
-		console.log(`[GameRenderer] warmUpTextures: created ${testSprites.length} test sprites`)
-
-		// КРИТИЧНО: Рендерим несколько кадров для прогрева GPU
-		// Это гарантирует, что текстуры загружены в GPU память
-		for (let i = 0; i < 3; i++) {
-			// Принудительно рендерим кадр
-			this.forceRender()
-			
-			// Ждем следующий кадр ticker для гарантии рендера
-			await new Promise<void>((resolve) => {
-				if (!this.app || !this.app.ticker) {
-					resolve()
-					return
-				}
-				this.app.ticker.addOnce(() => {
-					resolve()
-				})
-			})
-		}
-
-		// Удаляем тестовые спрайты
-		testSprites.forEach(sprite => {
-			if (sprite.parent) {
-				sprite.parent.removeChild(sprite)
-			}
-			sprite.destroy()
-		})
-
-		if (warmUpContainer.parent) {
-			warmUpContainer.parent.removeChild(warmUpContainer)
-		}
-		warmUpContainer.destroy({ children: true })
-
-		const warmUpDuration = performance.now() - warmUpStartTime
-		console.log(`[GameRenderer] warmUpTextures: completed in ${warmUpDuration.toFixed(2)}ms`)
+		// Текстуры уже прогреты в PixiService.init() на StartPage
+		console.log('[GameRenderer] warmUpTextures: textures already warmed in PixiService, skipping')
+		return Promise.resolve()
 	}
 
 	async renderGrid(grid: (Cube | null)[][], nextCubeId: number = 1, excludeCubeIds?: Set<number>): Promise<void> {
@@ -940,6 +866,106 @@ export class GameRenderer {
 		})
 	}
 
+	async showGreatMessage(bonus: number): Promise<void> {
+		if (!this.app) return
+
+		const popup = new Container()
+		popup.x = this.canvas.width / 2
+		popup.y = this.canvas.height / 2
+
+		const t = new Text({
+			text: `Great! +${bonus}`,
+			style: new TextStyle({
+				fontFamily: 'Arial',
+				fontSize: Math.max(32, this.tileSize * 1.4),
+				fill: 0x00ff00,
+				align: 'center',
+				fontWeight: 'bold',
+			}),
+		})
+		t.resolution = window.devicePixelRatio || 1
+		t.anchor.set(0.5)
+		t.x = 0
+		t.y = 0
+		t.style.stroke = { color: 0x000000, width: 4 }
+		popup.addChild(t)
+
+		popup.alpha = 0
+		popup.scale.set(0.5)
+		this.app.stage.addChild(popup)
+
+		await new Promise<void>((resolve) => {
+			gsap.to(popup, {
+				alpha: 1,
+				duration: 0.3,
+				ease: 'back.out',
+			})
+			gsap.to(popup.scale, { x: 1.3, y: 1.3, duration: 0.3, ease: 'back.out' })
+			gsap.to(popup, {
+				alpha: 0,
+				y: popup.y - 60,
+				duration: 1.0,
+				delay: 1.5,
+				ease: 'power2.in',
+				onComplete: () => {
+					if (popup.parent) popup.parent.removeChild(popup)
+					popup.destroy({ children: true })
+					resolve()
+				},
+			})
+		})
+	}
+
+	async showNoMovesMessage(bonus: number): Promise<void> {
+		if (!this.app) return
+
+		const popup = new Container()
+		popup.x = this.canvas.width / 2
+		popup.y = this.canvas.height / 2
+
+		const t = new Text({
+			text: `Нет ходов +${bonus}`,
+			style: new TextStyle({
+				fontFamily: 'Arial',
+				fontSize: Math.max(28, this.tileSize * 1.2),
+				fill: 0xffaa00,
+				align: 'center',
+				fontWeight: 'bold',
+			}),
+		})
+		t.resolution = window.devicePixelRatio || 1
+		t.anchor.set(0.5)
+		t.x = 0
+		t.y = 0
+		t.style.stroke = { color: 0x000000, width: 4 }
+		popup.addChild(t)
+
+		popup.alpha = 0
+		popup.scale.set(0.5)
+		this.app.stage.addChild(popup)
+
+		await new Promise<void>((resolve) => {
+			gsap.to(popup, {
+				alpha: 1,
+				duration: 0.3,
+				ease: 'back.out',
+			})
+			gsap.to(popup.scale, { x: 1.2, y: 1.2, duration: 0.3, ease: 'back.out' })
+			gsap.to(popup, {
+				alpha: 0,
+				y: popup.y - 60,
+				duration: 1.0,
+				delay: 1.4,
+				ease: 'power2.in',
+				onComplete: () => {
+					if (popup.parent) popup.parent.removeChild(popup)
+					popup.destroy({ children: true })
+					resolve()
+				},
+			})
+		})
+	}
+
 	async syncGridPositions(grid: (Cube | null)[][], forceUpdate = false): Promise<void> {
 		if (!this.gameContainer) return
 
@@ -1376,13 +1402,9 @@ export class GameRenderer {
 		})
 		this.cubeContainers.clear()
 
-		if (this.app) {
-			this.app.destroy(true, {
-				children: true,
-				texture: true,
-				textureSource: true,
-			})
-			this.app = null
-		}
+		// КРИТИЧНО: НЕ уничтожаем Application - он принадлежит PixiService
+		// Просто очищаем ссылки
+		this.app = null
+		this.gameContainer = null
 	}
 }

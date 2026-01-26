@@ -14,14 +14,20 @@ import {
 	calculateBaseRemovalScore,
 	calculateComboBonus,
 	getVesselClearBonus,
+	getGreatBonus,
+	getNoMovesBonus,
 	cloneGrid,
 	expandGrid,
+	hasPossibleMoves,
+	isGridEmpty,
 	type Position,
+	type Cube,
 	WIDTH,
 } from './logic'
 import type { GameEvent } from './logic/types'
 import { AudioManager } from './audio/AudioManager'
 import { loadBlockTextures, waitForTexturesReady } from './blockTextures'
+import { PixiService } from '@/pixi/PixiService'
 
 const COMBO_WINDOW_MS = 2500
 
@@ -51,22 +57,30 @@ export class GameController {
 
 	/**
 	 * Инициализация контроллера - загрузка текстур блоков
-	 * КРИТИЧНО: Если текстуры уже предзагружены (например, на StartPage),
-	 * они будут использованы из кэша без повторной загрузки
+	 * ОБНОВЛЕНО: Текстуры уже загружены и прогреты в PixiService на StartPage
+	 * Просто проверяем готовность и устанавливаем флаги
 	 */
 	async init(): Promise<void> {
-		// Загружаем текстуры (если уже предзагружены, вернется кэш)
-		await loadBlockTextures()
+		// КРИТИЧНО: Текстуры уже загружены в PixiService.init() на StartPage
+		// Просто проверяем готовность
+		if (!PixiService.isReady()) {
+			console.warn('[GameController] init: PixiService not ready, attempting to load textures')
+			// Fallback: пытаемся загрузить текстуры (не должно происходить)
+			await loadBlockTextures()
+			await waitForTexturesReady(5000)
+		} else {
+			// Текстуры уже готовы, просто проверяем
+			console.log('[GameController] init: PixiService ready, textures already loaded')
+		}
 		
-		// КРИТИЧНО: Убеждаемся, что текстуры полностью готовы к использованию
-		// Это особенно важно, если они были предзагружены, но еще не декодированы
-		await waitForTexturesReady(5000)
-		
-		// Ассеты загружены
+		// Ассеты загружены (уже установлено в StartPage, но устанавливаем для совместимости)
 		this.store.setAssetsReady(true)
 	}
 
 	async startGame(): Promise<void> {
+		const startGameTime = performance.now()
+		console.log('[GameController] startGame: starting game')
+
 		// Reset store
 		this.store.reset()
 
@@ -81,13 +95,11 @@ export class GameController {
 		this.store.setFirstFrameRendered(false)
 		this.store.setGameStarted(false)
 
-		// КРИТИЧНО: Убеждаемся, что текстуры загружены перед проверкой готовности
-		// Это особенно важно при обновлении страницы, когда кэш может быть очищен
-		await loadBlockTextures()
+		// КРИТИЧНО: Текстуры уже загружены и прогреты в PixiService на StartPage
+		// Просто устанавливаем флаги готовности
 		this.store.setAssetsReady(true)
 		this.store.setDiagnostic('assetsLoaded', performance.now())
-
-		await waitForTexturesReady()
+		console.log('[GameController] startGame: assets ready (already loaded in PixiService)')
 
 		// Проверяем, что сцена готова (Pixi Application инициализирован)
 		if (!this.renderer || !this.renderer.isInitialized()) {
@@ -95,21 +107,12 @@ export class GameController {
 		}
 		this.store.setSceneReady(true)
 		this.store.setDiagnostic('pixiInit', performance.now())
+		console.log('[GameController] startGame: pixi initialized')
 
-		// КРИТИЧНО: Прогреваем текстуры - создаем тестовые спрайты и рендерим их
-		// Это заставляет GPU загрузить текстуры в память и подготовить их к быстрому отображению
-		// Loading overlay будет показываться во время прогрева
-		if (this.renderer) {
-			try {
-				await this.renderer.warmUpTextures()
-				this.store.setTexturesWarmed(true)
-				this.store.setDiagnostic('texturesWarmed', performance.now())
-			} catch (error) {
-				console.warn('[GameController] startGame: texture warm-up failed', error)
-				// Продолжаем выполнение - текстуры все равно будут работать, но могут быть медленнее
-				this.store.setTexturesWarmed(true) // Помечаем как прогретые даже при ошибке
-			}
-		}  
+		// КРИТИЧНО: Текстуры уже прогреты в PixiService.init() на StartPage
+		this.store.setTexturesWarmed(true)
+		this.store.setDiagnostic('texturesWarmed', performance.now())
+		console.log('[GameController] startGame: textures warmed (already warmed in PixiService)')  
 
 		// Create initial grid
 		const { grid, nextId } = createInitialGrid(this.store.getHeight(), 1)
@@ -147,8 +150,10 @@ export class GameController {
 		// Render initial grid БЕЗ создания спрайтов для начальных плиток
 		// Они будут созданы в animateSpawn с правильными начальными состояниями
 		const initialCubeIds = new Set(initialCubes.map((c) => c.id))
+		const tilesAddedTime = performance.now()
 		this.store.setTilesAdded(true)
-		this.store.setDiagnostic('tilesAdded', performance.now())
+		this.store.setDiagnostic('tilesAdded', tilesAddedTime)
+		console.log(`[GameController] startGame: tiles added at ${tilesAddedTime.toFixed(2)}ms`)
 		await this.renderer?.renderGrid(grid, this.nextCubeId, initialCubeIds)
 
 		// КРИТИЧНО: Ждем дополнительный кадр перед запуском анимации
@@ -176,9 +181,14 @@ export class GameController {
 		// Только после этого можно скрывать loading overlay и запускать таймер
 		if (this.renderer) {
 			try {
+				const waitForVisibleStartTime = performance.now()
+				console.log('[GameController] startGame: waiting for tiles visible')
+				
 				// Ждем видимости плиток (детерминированное ожидание первого видимого кадра)
 				// КРИТИЧНО: Вызывается ПОСЛЕ завершения анимации spawn
 				await this.renderer.waitForTilesVisible()
+				
+				console.log(`[GameController] startGame: tiles visible after ${(performance.now() - waitForVisibleStartTime).toFixed(2)}ms`)
 				
 				// После реального рендера первого кадра с видимыми плитками
 				// Устанавливаем флаг готовности
@@ -193,6 +203,8 @@ export class GameController {
 			// Если renderer отсутствует, все равно устанавливаем флаг
 			this.onFirstFrameRendered()
 		}
+		
+		console.log(`[GameController] startGame: completed in ${(performance.now() - startGameTime).toFixed(2)}ms`)
 	}
 
 	/**
@@ -249,7 +261,9 @@ export class GameController {
 		}
 
 		// 4. Запускаем таймер обратного отсчёта
-		this.store.setDiagnostic('timerStarted', performance.now())
+		const timerStartTime = performance.now()
+		this.store.setDiagnostic('timerStarted', timerStartTime)
+		console.log(`[GameController] bootGame: timer started at ${timerStartTime.toFixed(2)}ms`)
 		this.startTimer()
 		
 		// Логируем диагностику после завершения boot-цепочки
@@ -258,6 +272,7 @@ export class GameController {
 
 		// Игра запущена
 		this.store.setGameStarted(true)
+		console.log('[GameController] bootGame: game started')
 	}
 
 	/**
@@ -268,8 +283,10 @@ export class GameController {
 	 */
 	private onFirstFrameRendered(): void {
 		// Первый кадр отрендерен
+		const firstFrameTime = performance.now()
 		this.store.setFirstFrameRendered(true)
-		this.store.setDiagnostic('firstFrameRendered', performance.now())
+		this.store.setDiagnostic('firstFrameRendered', firstFrameTime)
+		console.log(`[GameController] onFirstFrameRendered: first frame rendered at ${firstFrameTime.toFixed(2)}ms`)
 	}
 
 	private startTimer(): void {
@@ -291,6 +308,16 @@ export class GameController {
 
 		if (newTime <= 0) {
 			this.onWaveEnd()
+		} else {
+			// Check game state between ticks (only if not locked to avoid concurrent checks)
+			// Use setTimeout to avoid blocking the tick
+			if (!this.store.isLocked) {
+				setTimeout(() => {
+					if (!this.store.isLocked && !this.store.isGameOver) {
+						this.checkGameStateAsync(this.store.grid)
+					}
+				}, 0)
+			}
 		}
 	}
 
@@ -550,9 +577,164 @@ export class GameController {
 			AudioManager.playClear()
 		}
 
+		// Check game state: cubes finished or no moves
+		await this.checkGameState(grid)
+
 		this.store.setLocked(false)
 	}
 
+
+	/**
+	 * Check game state: cubes finished or no moves left
+	 * Called after resolveAfterMove (game is already locked)
+	 */
+	private async checkGameState(grid: (Cube | null)[][]): Promise<void> {
+		if (this.store.isGameOver) return
+
+		const isEmpty = isGridEmpty(grid)
+		const hasMoves = hasPossibleMoves(grid)
+		const remainingTime = this.store.remainingTime
+
+		// Case 1: Cubes finished and timer still running
+		if (isEmpty && remainingTime > 0) {
+			// Show "Great" message and add bonus
+			const greatBonus = getGreatBonus(grid)
+			this.store.addScore(greatBonus)
+			await this.renderer?.showGreatMessage(greatBonus)
+			AudioManager.playClear()
+
+			// Spawn new wave with half vessel height rows
+			const halfHeight = Math.floor(this.store.getHeight() / 2)
+			await this.spawnMidWave(grid, halfHeight)
+			return
+		}
+
+		// Case 2: Cubes finished (timer expired)
+		if (isEmpty) {
+			// Show "Great" message and add bonus
+			const greatBonus = getGreatBonus(grid)
+			this.store.addScore(greatBonus)
+			await this.renderer?.showGreatMessage(greatBonus)
+			AudioManager.playClear()
+			return
+		}
+
+		// Case 3: Cubes exist but no moves left
+		if (!hasMoves && remainingTime > 0) {
+			// Show "No moves" message and add bonus based on remaining time
+			const noMovesBonus = getNoMovesBonus(remainingTime)
+			this.store.addScore(noMovesBonus)
+			await this.renderer?.showNoMovesMessage(noMovesBonus)
+			// Spawn new wave with half vessel height rows
+			const halfHeight = Math.floor(this.store.getHeight() / 2)
+			await this.spawnMidWave(grid, halfHeight)
+			return
+		}
+	}
+
+	/**
+	 * Async version for checking game state (called from tick)
+	 * Doesn't lock the game, just checks and handles if needed
+	 */
+	private async checkGameStateAsync(grid: (Cube | null)[][]): Promise<void> {
+		if (this.store.isLocked || this.store.isGameOver) return
+
+		const isEmpty = isGridEmpty(grid)
+		const hasMoves = hasPossibleMoves(grid)
+		const remainingTime = this.store.remainingTime
+
+		// Case 1: Cubes finished and timer still running
+		if (isEmpty && remainingTime > 0) {
+			this.store.setLocked(true)
+			try {
+				// Show "Great" message and add bonus
+				const greatBonus = getGreatBonus(grid)
+				this.store.addScore(greatBonus)
+				await this.renderer?.showGreatMessage(greatBonus)
+				AudioManager.playClear()
+
+				// Spawn new wave with half vessel height rows
+				const halfHeight = Math.floor(this.store.getHeight() / 2)
+				await this.spawnMidWave(grid, halfHeight)
+			} finally {
+				this.store.setLocked(false)
+			}
+			return
+		}
+
+		// Case 2: Cubes exist but no moves left
+		if (!hasMoves && remainingTime > 0) {
+			this.store.setLocked(true)
+			try {
+				// Show "No moves" message and add bonus based on remaining time
+				const noMovesBonus = getNoMovesBonus(remainingTime)
+				this.store.addScore(noMovesBonus)
+				await this.renderer?.showNoMovesMessage(noMovesBonus)
+				// Spawn new wave with half vessel height rows
+				const halfHeight = Math.floor(this.store.getHeight() / 2)
+				await this.spawnMidWave(grid, halfHeight)
+			} finally {
+				this.store.setLocked(false)
+			}
+			return
+		}
+	}
+
+	/**
+	 * Spawn mid-wave: spawn new cubes with specified number of rows
+	 * Used when cubes finish or no moves left but timer still running
+	 * Note: Game should already be locked when calling this
+	 */
+	private async spawnMidWave(grid: (Cube | null)[][], spawnRows: number): Promise<void> {
+		if (this.store.isGameOver) return
+
+		// Spawn wave with specified number of rows
+		const result = spawnWave(grid, spawnRows, this.nextCubeId)
+		this.nextCubeId = result.nextId
+
+		// Update grid
+		this.store.setGrid(grid)
+
+		// Collect new cube IDs
+		const newCubeIds = new Set<number>()
+		for (const event of result.events) {
+			if (event.type === 'spawn') {
+				for (const cell of event.cells) {
+					newCubeIds.add(cell.id)
+				}
+			}
+		}
+
+		// Re-render grid, excluding new cubes
+		await this.renderer?.renderGrid(grid, this.nextCubeId, newCubeIds.size > 0 ? newCubeIds : undefined)
+
+		// Play spawn sound
+		AudioManager.playSpawn()
+
+		// Animate spawn events
+		if (this.renderer && result.events.length > 0) {
+			await this.renderer.applyEvents(result.events)
+
+			// Update moves for new cubes
+			for (let r = 0; r < grid.length; r++) {
+				for (let c = 0; c < WIDTH; c++) {
+					const cube = grid[r]?.[c]
+					if (cube && newCubeIds.has(cube.id) && cube.moves > 0) {
+						this.renderer.updateCubeMoves(cube.id, cube.moves)
+					}
+				}
+			}
+		}
+
+		// Sync positions after spawn animations
+		await this.renderer?.syncGridPositions(grid)
+
+		// Check game over
+		if (result.gameOver) {
+			this.store.setGameOver(true)
+			AudioManager.playGameOver()
+		}
+	}
 
 	stop(): void {
 		if (this.timerInterval) {
