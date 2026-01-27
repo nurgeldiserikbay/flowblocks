@@ -8,7 +8,7 @@ import {
 	createInitialGrid,
 	trySwap,
 	trySlide,
-	applyGravityWithFallTracking,
+	applyGravityUntilSettled,
 	resolveAfterMove,
 	spawnWave,
 	calculateBaseRemovalScore,
@@ -20,6 +20,8 @@ import {
 	expandGrid,
 	hasPossibleMoves,
 	isGridEmpty,
+	countCubes,
+	getCube,
 	type Position,
 	type Cube,
 	WIDTH,
@@ -44,11 +46,15 @@ export class GameController {
 	private renderer: GameRenderer | null = null
 	private store = useGameStore()
 	private nextCubeId: number = 1
-	private timerInterval: number | null = null
-	private lastTickTime: number = 0
+	private timerTimeout: ReturnType<typeof setTimeout> | null = null
+	private timerStartTime: number = 0 // Время начала текущего таймера
+	private expectedNextTick: number = 0 // Ожидаемое время следующего тика
 	private comboLevel: number = 0
 	private comboTimer: ReturnType<typeof setTimeout> | null = null
 	private opts: GameControllerOptions
+	private lastStateCheckTime: number = 0 // Время последней проверки состояния игры
+	private readonly STATE_CHECK_INTERVAL = 2000 // Проверяем состояние не чаще чем раз в 2 секунды
+	private lastHasMovesCheck: { gridHash: string; result: boolean } | null = null // Кэш последней проверки hasPossibleMoves
 
 	constructor(renderer: GameRenderer, opts?: GameControllerOptions) {
 		this.renderer = renderer
@@ -80,6 +86,9 @@ export class GameController {
 	async startGame(): Promise<void> {
 		const startGameTime = performance.now()
 		console.log('[GameController] startGame: starting game')
+
+		// Очищаем кэш при старте игры
+		this.lastHasMovesCheck = null
 
 		// Reset store
 		this.store.reset()
@@ -115,7 +124,7 @@ export class GameController {
 		console.log('[GameController] startGame: textures warmed (already warmed in PixiService)')  
 
 		// Create initial grid
-		const { grid, nextId } = createInitialGrid(this.store.getHeight(), 1)
+		const { grid, nextId } = createInitialGrid(this.store.getHeight(), 1, this.store.currentLevel)
 		this.nextCubeId = nextId
 		this.store.setGrid(grid)
 
@@ -290,39 +299,107 @@ export class GameController {
 	}
 
 	private startTimer(): void {
-		this.lastTickTime = Date.now()
-		this.timerInterval = window.setInterval(() => {
+		const now = Date.now()
+		this.timerStartTime = now
+		this.expectedNextTick = now + 1000 // Первый тик через 1 секунду
+		this.scheduleNextTick()
+	}
+
+	private scheduleNextTick(force: boolean = false): void {
+		if (this.store.isGameOver) return
+
+		// Защита от двойного запуска
+		if (this.timerTimeout !== null) {
+			// Не логируем предупреждение, если это нормальный вызов (не force)
+			if (force) {
+				console.warn('[GameController] scheduleNextTick: timer already scheduled, clearing and rescheduling')
+				clearTimeout(this.timerTimeout)
+				this.timerTimeout = null
+			} else {
+				return
+			}
+		}
+
+		const now = Date.now()
+		const delay = Math.max(0, this.expectedNextTick - now)
+		
+		// Если задержка слишком большая (больше 2 секунд), значит что-то пошло не так
+		// В этом случае сбрасываем ожидаемое время
+		if (delay > 2000) {
+			console.warn(`[GameController] scheduleNextTick: large delay detected: ${delay}ms, resetting timer`)
+			this.expectedNextTick = now + 1000
+		}
+
+		this.timerTimeout = window.setTimeout(() => {
+			this.timerTimeout = null // Очищаем перед вызовом tick
 			this.tick()
-		}, 1000) // Update every second
+		}, Math.max(0, this.expectedNextTick - Date.now()))
 	}
 
 	private tick(): void {
-		if (this.store.isGameOver || this.store.isLocked) return
+		if (this.store.isGameOver) {
+			// Если игра завершена, останавливаем таймер
+			if (this.timerTimeout !== null) {
+				clearTimeout(this.timerTimeout)
+				this.timerTimeout = null
+			}
+			return
+		}
+
+		// Если игра заблокирована, планируем следующий тик без обновления времени
+		// Это позволяет таймеру продолжать работать и возобновиться после разблокировки
+		if (this.store.isLocked) {
+			const now = Date.now()
+			// Планируем следующий тик через 1 секунду от текущего момента
+			// Это гарантирует, что таймер продолжит работать даже при длительной блокировке
+			this.expectedNextTick = now + 1000
+			this.scheduleNextTick()
+			return
+		}
 
 		const now = Date.now()
-		const dt = (now - this.lastTickTime) / 1000 // seconds
-		this.lastTickTime = now
-
-		const newTime = this.store.remainingTime - dt
+		
+		// Всегда вычитаем ровно 1 секунду для точности
+		// Это гарантирует, что таймер уменьшается равномерно
+		const newTime = this.store.remainingTime - 1
 		this.store.setRemainingTime(newTime)
+
+		// Обновляем ожидаемое время следующего тика (ровно через 1 секунду от текущего момента)
+		this.expectedNextTick = now + 1000
 
 		if (newTime <= 0) {
 			this.onWaveEnd()
 		} else {
+			// Планируем следующий тик
+			this.scheduleNextTick()
+			
 			// Check game state between ticks (only if not locked to avoid concurrent checks)
-			// Use setTimeout to avoid blocking the tick
+			// КРИТИЧНО: Проверяем состояние только если кубиков <= 32 для оптимизации
+			// Также ограничиваем частоту проверок - не чаще чем раз в STATE_CHECK_INTERVAL
+			// Используем setTimeout чтобы не блокировать tick
 			if (!this.store.isLocked) {
-				setTimeout(() => {
-					if (!this.store.isLocked && !this.store.isGameOver) {
-						this.checkGameStateAsync(this.store.grid)
-					}
-				}, 0)
+				const now = Date.now()
+				const timeSinceLastCheck = now - this.lastStateCheckTime
+				
+				// Проверяем состояние только если прошло достаточно времени с последней проверки
+				if (timeSinceLastCheck >= this.STATE_CHECK_INTERVAL) {
+					setTimeout(() => {
+						if (!this.store.isLocked && !this.store.isGameOver) {
+							this.lastStateCheckTime = Date.now()
+							// Pass current grid from store (will be re-read inside function)
+							this.checkGameStateAsync(this.store.grid)
+						}
+					}, 100) // Small delay to ensure state is stable
+				}
 			}
 		}
 	}
 
 	private async onWaveEnd(): Promise<void> {
 		if (this.store.isLocked || this.store.isGameOver) return
+
+		// Очищаем кэш при окончании волны
+		this.lastHasMovesCheck = null
 
 		if (this.comboTimer !== null) {
 			clearTimeout(this.comboTimer)
@@ -336,12 +413,13 @@ export class GameController {
 		// Reset timer (длительность волны уменьшается с уровнем)
 		this.store.setRemainingTime(this.store.getWaveDuration(newWaveIndex))
 
-		// Spawn wave
+		// Spawn wave - это изменяет grid синхронно и создает события для анимации
 		const grid = cloneGrid(this.store.grid)
-		const result = spawnWave(grid, this.store.spawnRows, this.nextCubeId)
+		const result = spawnWave(grid, this.store.spawnRows, this.nextCubeId, this.store.currentLevel)
 		this.nextCubeId = result.nextId
 
-		// Update grid (new cubes are already placed)
+		// КРИТИЧНО: Обновляем grid в store СРАЗУ после spawnWave
+		// Это гарантирует, что grid содержит финальное состояние после всех операций
 		this.store.setGrid(grid)
 
 		// Собираем ID новых кубов из событий spawn, чтобы не создавать для них спрайты в renderGrid
@@ -356,23 +434,27 @@ export class GameController {
 		}
 
 		// Re-render grid, исключая новые кубы (они будут созданы в animateSpawn)
+		// КРИТИЧНО: renderGrid вызывается с финальным grid, но исключает новые кубы
+		// Это гарантирует, что существующие кубы отображаются в правильных позициях
 		await this.renderer?.renderGrid(grid, this.nextCubeId, newCubeIds.size > 0 ? newCubeIds : undefined)
 
+		// КРИТИЧНО: НЕ разблокируем игру до завершения всех анимаций
+		// Это гарантирует правильную последовательность: сначала все анимации завершаются, потом игра разблокируется
 		// Play spawn sound (once per wave)
 		AudioManager.playSpawn()
 
-		// Then animate spawn events (falling from above)
-		// animateSpawn создаст спрайты для новых кубов с правильными начальными состояниями
+		// КРИТИЧНО: Обрабатываем события последовательно и ждем завершения всех анимаций
+		// Правильный порядок событий: remove -> fall -> spawn -> fall (для новых кубов) -> remove -> fall (каскад)
 		if (this.renderer && result.events.length > 0) {
+			// Ждем завершения всех анимаций перед разблокировкой игры
 			await this.renderer.applyEvents(result.events)
 			
-			// Обновляем moves для новых плиток (они были созданы с moves=0)
-			// Собираем ID новых кубов из событий spawn
-			const newCubeIds = new Set<number>()
+			// Обновляем moves для новых плиток после завершения анимаций
+			const newCubeIdsAfterAnim = new Set<number>()
 			for (const event of result.events) {
 				if (event.type === 'spawn') {
 					for (const cell of event.cells) {
-						newCubeIds.add(cell.id)
+						newCubeIdsAfterAnim.add(cell.id)
 					}
 				}
 			}
@@ -382,12 +464,20 @@ export class GameController {
 			for (let r = 0; r < grid.length; r++) {
 				for (let c = 0; c < WIDTH; c++) {
 					const cube = grid[r]?.[c]
-					if (cube && newCubeIds.has(cube.id) && cube.moves > 0) {
-						this.renderer.updateCubeMoves(cube.id, cube.moves)
+					if (cube && newCubeIdsAfterAnim.has(cube.id) && cube.moves > 0) {
+						this.renderer?.updateCubeMoves(cube.id, cube.moves)
 					}
 				}
 			}
+			
+			// КРИТИЧНО: Синхронизируем позиции после всех анимаций
+			// Это гарантирует, что все спрайты находятся в правильных позициях
+			await this.renderer?.syncGridPositions(grid)
 		}
+
+		// КРИТИЧНО: Разблокируем игру ТОЛЬКО после завершения всех анимаций
+		// Это гарантирует правильную последовательность операций
+		this.store.setLocked(false)
 
 		this.store.setWaveIndex(newWaveIndex)
 		// С ростом уровня растёт количество строк спавна (макс. 8)
@@ -404,17 +494,18 @@ export class GameController {
 			}
 		}
 
-		// Sync positions after spawn animations
-		await this.renderer?.syncGridPositions(grid)
-
 		// Check game over
 		if (result.gameOver) {
 			this.store.setGameOver(true)
 			// Play game over sound
 			AudioManager.playGameOver()
 		}
-
-		this.store.setLocked(false)
+		
+		// КРИТИЧНО: Перезапускаем таймер ПОСЛЕ разблокировки игры, чтобы избежать скачков
+		// Таймер должен запуститься только если игра не завершена
+		if (!result.gameOver) {
+			this.restartTimer()
+		}
 	}
 
 	async applyUserAction(
@@ -423,6 +514,9 @@ export class GameController {
 		to: Position
 	): Promise<void> {
 		if (this.store.isLocked || this.store.isGameOver) return
+
+		// Очищаем кэш проверки hasPossibleMoves при действии пользователя
+		this.lastHasMovesCheck = null
 
 		this.store.setLocked(true)
 
@@ -491,8 +585,9 @@ export class GameController {
 		let checkPositions: Position[] = [from, to]
 
 		// After slide move: from is always empty — blocks above it must fall. Always apply gravity.
+		// КРИТИЧНО: Применяем гравитацию до полного заполнения всех пустот
 		if (action === 'slide' && success) {
-			const fallItems = applyGravityWithFallTracking(grid)
+			const fallItems = applyGravityUntilSettled(grid)
 			this.store.setGrid(grid)
 
 			if (fallItems.length > 0 && this.renderer) {
@@ -591,71 +686,107 @@ export class GameController {
 	private async checkGameState(grid: (Cube | null)[][]): Promise<void> {
 		if (this.store.isGameOver) return
 
-		const isEmpty = isGridEmpty(grid)
-		const hasMoves = hasPossibleMoves(grid)
+		// Use current grid from store (may have changed since call)
+		const currentGrid = this.store.grid
+		if (!currentGrid || currentGrid.length === 0) return
+
+		const isEmpty = isGridEmpty(currentGrid)
 		const remainingTime = this.store.remainingTime
 
 		// Case 1: Cubes finished and timer still running
 		if (isEmpty && remainingTime > 0) {
 			// Show "Great" message and add bonus
-			const greatBonus = getGreatBonus(grid)
+			const greatBonus = getGreatBonus(currentGrid)
 			this.store.addScore(greatBonus)
-			await this.renderer?.showGreatMessage(greatBonus)
 			AudioManager.playClear()
+			await this.renderer?.showGreatMessage(greatBonus)
 
 			// Spawn new wave with half vessel height rows
 			const halfHeight = Math.floor(this.store.getHeight() / 2)
-			await this.spawnMidWave(grid, halfHeight)
+			await this.spawnMidWave(currentGrid, halfHeight)
 			return
 		}
 
 		// Case 2: Cubes finished (timer expired)
 		if (isEmpty) {
 			// Show "Great" message and add bonus
-			const greatBonus = getGreatBonus(grid)
+			const greatBonus = getGreatBonus(currentGrid)
 			this.store.addScore(greatBonus)
-			await this.renderer?.showGreatMessage(greatBonus)
 			AudioManager.playClear()
+			await this.renderer?.showGreatMessage(greatBonus)
 			return
 		}
 
 		// Case 3: Cubes exist but no moves left
-		if (!hasMoves && remainingTime > 0) {
-			// Show "No moves" message and add bonus based on remaining time
-			const noMovesBonus = getNoMovesBonus(remainingTime)
-			this.store.addScore(noMovesBonus)
-			await this.renderer?.showNoMovesMessage(noMovesBonus)
-			// Spawn new wave with half vessel height rows
-			const halfHeight = Math.floor(this.store.getHeight() / 2)
-			await this.spawnMidWave(grid, halfHeight)
-			return
+		// КРИТИЧНО: Проверяем наличие ходов только если кубиков <= 32 для оптимизации
+		// Это предотвращает ненужные проверки когда кубиков много
+		if (!isEmpty && remainingTime > 0) {
+			// Подсчитываем количество кубиков
+			const cubeCount = countCubes(currentGrid)
+			
+			// Проверяем наличие ходов только если кубиков <= 32
+			// Если кубиков больше, значит игра еще активна и ходы точно есть
+			if (cubeCount <= 32) {
+				// Используем кэш для оптимизации
+				const gridHash = this.getGridHash(currentGrid)
+				let hasMoves: boolean
+				
+				if (this.lastHasMovesCheck && this.lastHasMovesCheck.gridHash === gridHash) {
+					hasMoves = this.lastHasMovesCheck.result
+				} else {
+					hasMoves = hasPossibleMoves(currentGrid)
+					this.lastHasMovesCheck = { gridHash, result: hasMoves }
+				}
+				
+				if (!hasMoves) {
+					// Очищаем кэш перед спавном
+					this.lastHasMovesCheck = null
+					// Show "No moves" message and add bonus based on remaining time
+					const noMovesBonus = getNoMovesBonus(remainingTime)
+					this.store.addScore(noMovesBonus)
+					await this.renderer?.showNoMovesMessage(noMovesBonus)
+					// Spawn new wave with half vessel height rows
+					const halfHeight = Math.floor(this.store.getHeight() / 2)
+					await this.spawnMidWave(currentGrid, halfHeight)
+					return
+				}
+			}
+			// Если кубиков > 32, не проверяем наличие ходов - игра продолжается
 		}
 	}
 
 	/**
 	 * Async version for checking game state (called from tick)
 	 * Doesn't lock the game, just checks and handles if needed
+	 * КРИТИЧНО: Проверяет наличие ходов только если кубиков <= 32 для оптимизации
 	 */
 	private async checkGameStateAsync(grid: (Cube | null)[][]): Promise<void> {
+		// Защита от проверки во время блокировки или завершения игры
 		if (this.store.isLocked || this.store.isGameOver) return
 
-		const isEmpty = isGridEmpty(grid)
-		const hasMoves = hasPossibleMoves(grid)
+		// Use current grid from store (may have changed since call)
+		const currentGrid = this.store.grid
+		if (!currentGrid || currentGrid.length === 0) return
+
+		const isEmpty = isGridEmpty(currentGrid)
 		const remainingTime = this.store.remainingTime
 
 		// Case 1: Cubes finished and timer still running
 		if (isEmpty && remainingTime > 0) {
+			// Дополнительная проверка: убеждаемся что игра не заблокирована
+			if (this.store.isLocked || this.store.isGameOver) return
+			
 			this.store.setLocked(true)
 			try {
 				// Show "Great" message and add bonus
-				const greatBonus = getGreatBonus(grid)
+				const greatBonus = getGreatBonus(currentGrid)
 				this.store.addScore(greatBonus)
 				await this.renderer?.showGreatMessage(greatBonus)
 				AudioManager.playClear()
 
 				// Spawn new wave with half vessel height rows
 				const halfHeight = Math.floor(this.store.getHeight() / 2)
-				await this.spawnMidWave(grid, halfHeight)
+				await this.spawnMidWave(currentGrid, halfHeight)
 			} finally {
 				this.store.setLocked(false)
 			}
@@ -663,20 +794,52 @@ export class GameController {
 		}
 
 		// Case 2: Cubes exist but no moves left
-		if (!hasMoves && remainingTime > 0) {
-			this.store.setLocked(true)
-			try {
-				// Show "No moves" message and add bonus based on remaining time
-				const noMovesBonus = getNoMovesBonus(remainingTime)
-				this.store.addScore(noMovesBonus)
-				await this.renderer?.showNoMovesMessage(noMovesBonus)
-				// Spawn new wave with half vessel height rows
-				const halfHeight = Math.floor(this.store.getHeight() / 2)
-				await this.spawnMidWave(grid, halfHeight)
-			} finally {
-				this.store.setLocked(false)
+		// КРИТИЧНО: Проверяем наличие ходов только если кубиков <= 32 для оптимизации
+		// Это предотвращает ненужные проверки когда кубиков много
+		if (!isEmpty && remainingTime > 0) {
+			// Подсчитываем количество кубиков
+			const cubeCount = countCubes(currentGrid)
+			
+			// Оптимизация: если кубиков очень мало (меньше 8), скорее всего нет ходов
+			// Но все равно проверяем, чтобы быть уверенными
+			if (cubeCount <= 32) {
+				// Оптимизация: используем простой хэш grid для кэширования проверки
+				// Это позволяет избежать повторных проверок одного и того же состояния
+				const gridHash = this.getGridHash(currentGrid)
+				let hasMoves: boolean
+				
+				// Проверяем кэш
+				if (this.lastHasMovesCheck && this.lastHasMovesCheck.gridHash === gridHash) {
+					hasMoves = this.lastHasMovesCheck.result
+				} else {
+					// Выполняем проверку только один раз
+					hasMoves = hasPossibleMoves(currentGrid)
+					this.lastHasMovesCheck = { gridHash, result: hasMoves }
+				}
+				
+				if (!hasMoves) {
+					// Перед блокировкой убеждаемся что игра не заблокирована
+					if (this.store.isLocked || this.store.isGameOver) return
+					
+					// Очищаем кэш перед спавном (grid изменится)
+					this.lastHasMovesCheck = null
+					
+					this.store.setLocked(true)
+					try {
+						// Show "No moves" message and add bonus based on remaining time
+						const noMovesBonus = getNoMovesBonus(remainingTime)
+						this.store.addScore(noMovesBonus)
+						await this.renderer?.showNoMovesMessage(noMovesBonus)
+						// Spawn new wave with half vessel height rows
+						const halfHeight = Math.floor(this.store.getHeight() / 2)
+						await this.spawnMidWave(currentGrid, halfHeight)
+					} finally {
+						this.store.setLocked(false)
+					}
+					return
+				}
 			}
-			return
+			// Если кубиков > 32, не проверяем наличие ходов - игра продолжается
 		}
 	}
 
@@ -684,18 +847,23 @@ export class GameController {
 	 * Spawn mid-wave: spawn new cubes with specified number of rows
 	 * Used when cubes finish or no moves left but timer still running
 	 * Note: Game should already be locked when calling this
+	 * ОПТИМИЗИРОВАНО: Разблокируем игру сразу после обновления grid, анимации продолжаются в фоне
 	 */
 	private async spawnMidWave(grid: (Cube | null)[][], spawnRows: number): Promise<void> {
 		if (this.store.isGameOver) return
 
+		// Очищаем кэш перед спавном (grid изменится)
+		this.lastHasMovesCheck = null
+
 		// Spawn wave with specified number of rows
-		const result = spawnWave(grid, spawnRows, this.nextCubeId)
+		// maxFilledRows ensures maximum filled rows equals half vessel height
+		const result = spawnWave(grid, spawnRows, this.nextCubeId, this.store.currentLevel, spawnRows)
 		this.nextCubeId = result.nextId
 
 		// Update grid
 		this.store.setGrid(grid)
 
-		// Collect new cube IDs
+		// Оптимизация: собираем newCubeIds только один раз и используем для всех операций
 		const newCubeIds = new Set<number>()
 		for (const event of result.events) {
 			if (event.type === 'spawn') {
@@ -708,43 +876,102 @@ export class GameController {
 		// Re-render grid, excluding new cubes
 		await this.renderer?.renderGrid(grid, this.nextCubeId, newCubeIds.size > 0 ? newCubeIds : undefined)
 
+		// КРИТИЧНО: Разблокируем игру СРАЗУ после обновления grid
+		// Это позволяет пользователю двигать плитки даже во время анимации спавна
+		// Анимации будут продолжаться в фоне без блокировки игры
+		this.store.setLocked(false)
+
 		// Play spawn sound
 		AudioManager.playSpawn()
 
-		// Animate spawn events
+		// Animate spawn events (анимации продолжаются в фоне, игра уже разблокирована)
 		if (this.renderer && result.events.length > 0) {
-			await this.renderer.applyEvents(result.events)
-
-			// Update moves for new cubes
-			for (let r = 0; r < grid.length; r++) {
-				for (let c = 0; c < WIDTH; c++) {
-					const cube = grid[r]?.[c]
-					if (cube && newCubeIds.has(cube.id) && cube.moves > 0) {
-						this.renderer.updateCubeMoves(cube.id, cube.moves)
+			// Запускаем анимации асинхронно, не блокируя игру
+			this.renderer.applyEvents(result.events).then(() => {
+				// После завершения анимаций обновляем moves для новых кубиков
+				for (const event of result.events) {
+					if (event.type === 'spawn') {
+						for (const cell of event.cells) {
+							// Находим кубик в grid по ID (после гравитации позиция может измениться)
+							for (let r = 0; r < grid.length; r++) {
+								for (let c = 0; c < WIDTH; c++) {
+									const cube = grid[r]?.[c]
+									if (cube && cube.id === cell.id && cube.moves > 0) {
+										this.renderer?.updateCubeMoves(cube.id, cube.moves)
+										break
+									}
+								}
+							}
+						}
 					}
 				}
-			}
+				// Sync positions after spawn animations
+				this.renderer?.syncGridPositions(grid)
+			}).catch((error) => {
+				console.error('[GameController] spawnMidWave: animation error', error)
+			})
 		}
-
-		// Sync positions after spawn animations
-		await this.renderer?.syncGridPositions(grid)
 
 		// Check game over
 		if (result.gameOver) {
 			this.store.setGameOver(true)
 			AudioManager.playGameOver()
 		}
+
+		// Обновляем таймер и waveIndex, чтобы избежать двойного спавна
+		// Это нужно делать после спавна, чтобы таймер не истек и не вызвал onWaveEnd()
+		const newWaveIndex = this.store.waveIndex + 1
+		this.store.setWaveIndex(newWaveIndex)
+		// Сбрасываем таймер на полную длительность новой волны
+		this.store.setRemainingTime(this.store.getWaveDuration(newWaveIndex))
+		// КРИТИЧНО: Перезапускаем таймер с новым временем, чтобы избежать скачков
+		this.restartTimer()
+		// Обновляем количество строк спавна для следующего уровня
+		this.store.setSpawnRows(this.store.getSpawnRowsForLevel(newWaveIndex))
+	}
+
+	private restartTimer(): void {
+		// Останавливаем текущий таймер
+		if (this.timerTimeout !== null) {
+			clearTimeout(this.timerTimeout)
+			this.timerTimeout = null
+		}
+		// Перезапускаем с новым временем (принудительно, даже если игра заблокирована)
+		const now = Date.now()
+		this.timerStartTime = now
+		this.expectedNextTick = now + 1000
+		this.scheduleNextTick(true) // Принудительный запуск
+	}
+
+	/**
+	 * Простой хэш grid для кэширования проверки hasPossibleMoves
+	 * Использует только позиции и цвета кубиков с moves > 0
+	 */
+	private getGridHash(grid: (Cube | null)[][]): string {
+		const h = grid.length
+		const parts: string[] = []
+		for (let r = 0; r < h; r++) {
+			for (let c = 0; c < WIDTH; c++) {
+				const cube = getCube(grid, r, c)
+				if (cube && cube.moves > 0) {
+					parts.push(`${r},${c}:${cube.color}:${cube.moves}`)
+				}
+			}
+		}
+		return parts.join('|')
 	}
 
 	stop(): void {
-		if (this.timerInterval) {
-			window.clearInterval(this.timerInterval)
-			this.timerInterval = null
+		if (this.timerTimeout !== null) {
+			clearTimeout(this.timerTimeout)
+			this.timerTimeout = null
 		}
 		if (this.comboTimer !== null) {
 			clearTimeout(this.comboTimer)
 			this.comboTimer = null
 		}
+		// Очищаем кэш при остановке
+		this.lastHasMovesCheck = null
 	}
 
 	destroy(): void {

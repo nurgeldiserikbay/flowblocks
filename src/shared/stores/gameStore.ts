@@ -4,8 +4,8 @@ import type { Cube } from '@/game/logic/types'
 import { WIDTH } from '@/game/logic/grid'
 const BASE_HEIGHT = 30
 const BASE_WAVE_DURATION = 30
-const MIN_WAVE_DURATION = 10
-const WAVE_DURATION_DECREASE = 1.5
+const MIN_WAVE_DURATION = 14 // Увеличено с 10 до 14 для более длительной игры
+const WAVE_DURATION_DECREASE = 0.6 // Уменьшено с 1.5 до 0.6 для более плавного снижения
 const NUM_COLORS = 8
 
 /** Длительность волны в секундах: с ростом уровня уменьшается (мин. MIN_WAVE_DURATION) */
@@ -13,14 +13,27 @@ export function getWaveDuration(level: number): number {
 	return Math.max(MIN_WAVE_DURATION, Math.floor(BASE_WAVE_DURATION - level * WAVE_DURATION_DECREASE))
 }
 
-/** Строк спавна за волну: с ростом уровня растёт (макс. 8) */
+/** Строк спавна за волну: с ростом уровня растёт (макс. 10) - более плавный рост */
 export function getSpawnRowsForLevel(level: number): number {
-	return Math.min(10, 4 + Math.floor(level / 2))
+	// Изменено с level/2 на level/3 для более постепенного увеличения сложности
+	return Math.min(10, 3 + Math.floor(level / 3))
 }
 
 /** Высота сосуда: каждые 5 уровней +4 ряда для бесконечной игры */
 export function getHeightForLevel(level: number): number {
 	return BASE_HEIGHT + 4 * Math.floor(level / 5)
+}
+
+/** Количество цветов: растет с уровнем от 5 до 8 */
+export function getNumColorsForLevel(level: number): number {
+	// Level 1-12: 5 colors
+	// Level 13-25: 6 colors
+	// Level 26-37: 7 colors
+	// Level 38-50: 8 colors
+	if (level <= 12) return 5
+	if (level <= 25) return 6
+	if (level <= 37) return 7
+	return 8
 }
 
 export const useGameStore = defineStore('game', () => {
@@ -30,6 +43,7 @@ export const useGameStore = defineStore('game', () => {
 	const remainingTime = ref(BASE_WAVE_DURATION)
 	const spawnRows = ref(2)
 	const height = ref(BASE_HEIGHT)
+	const currentLevel = ref(1) // Текущий уровень (1-based)
 	const isLocked = ref(false)
 	const isGameOver = ref(false)
 	
@@ -68,6 +82,7 @@ export const useGameStore = defineStore('game', () => {
 		remainingTime.value = getWaveDuration(0)
 		spawnRows.value = getSpawnRowsForLevel(0)
 		height.value = BASE_HEIGHT
+		currentLevel.value = 1
 		isLocked.value = false
 		isGameOver.value = false
 		// Сбрасываем состояния готовности
@@ -78,6 +93,10 @@ export const useGameStore = defineStore('game', () => {
 		isFirstFrameRendered.value = false
 		isGameStarted.value = false
 		diagnostics.value = {}
+	}
+	
+	function setCurrentLevel(level: number) {
+		currentLevel.value = level
 	}
 	
 	function setAssetsReady(ready: boolean) {
@@ -190,6 +209,7 @@ export const useGameStore = defineStore('game', () => {
 		remainingTime,
 		spawnRows,
 		height,
+		currentLevel,
 		isLocked,
 		isGameOver,
 		// Readiness states
@@ -213,6 +233,7 @@ export const useGameStore = defineStore('game', () => {
 		setSpawnRows,
 		setHeight,
 		getHeight,
+		setCurrentLevel,
 		setLocked,
 		setGameOver,
 		setAssetsReady,
@@ -226,5 +247,6 @@ export const useGameStore = defineStore('game', () => {
 		getWaveDuration,
 		getSpawnRowsForLevel,
 		getHeightForLevel,
+		getNumColorsForLevel,
 	}
 })

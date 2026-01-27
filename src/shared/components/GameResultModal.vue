@@ -14,16 +14,16 @@
 							'game-result-modal__title--defeat': !isVictory,
 						}"
 					>
-						{{ isVictory ? '🎉 Победа!' : '😔 Нет ходов' }}
+						{{ isVictory ? '🎉 Victory!' : '😔 No Moves' }}
 					</div>
 
 					<div class="game-result-modal__stats">
 						<div class="stat-item">
-							<div class="stat-item__label">Очки</div>
+							<div class="stat-item__label">Score</div>
 							<div class="stat-item__value">{{ score.toLocaleString() }}</div>
 						</div>
 						<div class="stat-item">
-							<div class="stat-item__label">Время</div>
+							<div class="stat-item__label">Time</div>
 							<div class="stat-item__value">{{ formattedTime }}</div>
 						</div>
 					</div>
@@ -34,13 +34,13 @@
 							class="game-result-modal__btn game-result-modal__btn--primary"
 							@click="handleNextLevel"
 						>
-							Следующий уровень
+							Next Level
 						</button>
 						<button
 							class="game-result-modal__btn game-result-modal__btn--secondary"
 							@click="handleLevelMenu"
 						>
-							Меню уровней
+							Level Menu
 						</button>
 					</div>
 				</div>

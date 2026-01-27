@@ -29,6 +29,7 @@ export type GameEvent =
 	| {
 			type: 'fall'
 			items: Array<{
+				id: number
 				from: Position
 				to: Position
 				color: number

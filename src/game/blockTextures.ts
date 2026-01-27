@@ -13,20 +13,17 @@ const FRAME_COUNT = 8
 // Кэш загруженных текстур (для обратной совместимости)
 let textureCache: Map<number, Texture> | null = null
 
+// Промис текущей загрузки текстур (для предотвращения параллельных загрузок)
+let loadPromise: Promise<Map<number, Texture>> | null = null
+
 /**
  * Загрузить все текстуры блоков
  * ОБНОВЛЕНО: Использует PixiService, если он инициализирован
  */
 export async function loadBlockTextures(): Promise<Map<number, Texture>> {
-	// Если PixiService готов, используем его текстуры
-	if (PixiService.isReady()) {
-		const tileTextures = PixiService.getTileTextures()
-		// Создаем кэш для обратной совместимости
-		textureCache = new Map()
-		for (let i = 0; i < tileTextures.length; i++) {
-			textureCache.set(i, tileTextures[i])
-		}
-		return textureCache
+	// Если загрузка уже идет, ждем ее завершения
+	if (loadPromise) {
+		return await loadPromise
 	}
 
 	// Если кэш уже есть, вернуть его
@@ -34,26 +31,47 @@ export async function loadBlockTextures(): Promise<Map<number, Texture>> {
 		return textureCache
 	}
 
-	// Fallback: если PixiService не готов, ждем его инициализации
-	// Это может произойти при первой загрузке, если StartPage еще не загрузился
-	console.warn('[blockTextures] loadBlockTextures: PixiService not ready, waiting...')
-	
-	// Ждем инициализации PixiService (максимум 10 секунд)
-	const startTime = Date.now()
-	while (!PixiService.isReady() && Date.now() - startTime < 10000) {
-		await new Promise(resolve => setTimeout(resolve, 100))
-	}
+	// Создаем промис загрузки
+	loadPromise = (async () => {
+		try {
+			// Если PixiService готов, используем его текстуры
+			if (PixiService.isReady()) {
+				const tileTextures = PixiService.getTileTextures()
+				// Создаем кэш для обратной совместимости
+				textureCache = new Map()
+				for (let i = 0; i < tileTextures.length; i++) {
+					textureCache.set(i, tileTextures[i])
+				}
+				return textureCache
+			}
 
-	if (PixiService.isReady()) {
-		const tileTextures = PixiService.getTileTextures()
-		textureCache = new Map()
-		for (let i = 0; i < tileTextures.length; i++) {
-			textureCache.set(i, tileTextures[i])
+			// Fallback: если PixiService не готов, ждем его инициализации
+			// Это может произойти при первой загрузке, если StartPage еще не загрузился
+			console.warn('[blockTextures] loadBlockTextures: PixiService not ready, waiting...')
+			
+			// Ждем инициализации PixiService (максимум 10 секунд)
+			const startTime = Date.now()
+			while (!PixiService.isReady() && Date.now() - startTime < 10000) {
+				await new Promise(resolve => setTimeout(resolve, 100))
+			}
+
+			if (PixiService.isReady()) {
+				const tileTextures = PixiService.getTileTextures()
+				textureCache = new Map()
+				for (let i = 0; i < tileTextures.length; i++) {
+					textureCache.set(i, tileTextures[i])
+				}
+				return textureCache
+			}
+
+			throw new Error('Failed to load textures: PixiService not initialized')
+		} finally {
+			// Очищаем промис после завершения загрузки
+			loadPromise = null
 		}
-		return textureCache
-	}
+	})()
 
-	throw new Error('Failed to load textures: PixiService not initialized')
+	return await loadPromise
 }
 
 /**

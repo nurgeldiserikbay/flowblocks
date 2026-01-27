@@ -9,7 +9,7 @@
 
 import type { GameEvent, ResolveResult, Position } from './types'
 import { getCube, setCube } from './grid'
-import { applyGravityWithFallTracking } from './gravity'
+import { applyGravityUntilSettled } from './gravity'
 import { findMatchesAround } from './matches'
 
 export function resolveAfterMove(
@@ -48,7 +48,9 @@ export function resolveAfterMove(
 			removedCounts.push(removeCells.length)
 			events.push({ type: 'remove', cells: removeCells })
 
-			const fallItems = applyGravityWithFallTracking(grid)
+			// КРИТИЧНО: Применяем гравитацию до полного заполнения всех пустот
+			// Это гарантирует, что все кубы упадут до конца без пустых пространств
+			const fallItems = applyGravityUntilSettled(grid)
 
 			// Next cascade: only matches that touch blocks that just fell
 			currentCheckPositions = fallItems.map((f) => f.to)

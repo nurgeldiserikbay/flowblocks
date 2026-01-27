@@ -123,10 +123,19 @@ export class GameRenderer {
 
 		// Clear existing containers
 		this.cubeContainers.forEach((cubeContainer) => {
-			if (cubeContainer.container.parent) {
-				cubeContainer.container.parent.removeChild(cubeContainer.container)
+			if (cubeContainer && cubeContainer.container) {
+				// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
+				gsap.killTweensOf(cubeContainer.container)
+				
+				if (cubeContainer.container.parent) {
+					cubeContainer.container.parent.removeChild(cubeContainer.container)
+				}
+				
+				// Проверяем, что контейнер еще существует перед destroy
+				if (cubeContainer.container && cubeContainer.container.scale) {
+					cubeContainer.container.destroy({ children: true })
+				}
 			}
-			cubeContainer.container.destroy({ children: true })
 		})
 		this.cubeContainers.clear()
 		this.cubePositions.clear()
@@ -468,16 +477,30 @@ export class GameRenderer {
 	}
 
 	private async animateFall(
-		items: Array<{ from: { r: number; c: number }; to: { r: number; c: number }; color: number }>
+		items: Array<{ id?: number; from: { r: number; c: number }; to: { r: number; c: number }; color: number }>
 	): Promise<void> {
 		const animations = items.map((item) => {
-			const cubeId = this.findCubeIdAt(item.from.r, item.from.c)
-			if (cubeId === null) return Promise.resolve()
+			// Use ID if available (more reliable), otherwise fall back to position lookup
+			let cubeId: number | null = null
+			if (item.id !== undefined) {
+				cubeId = item.id
+			} else {
+				// Fallback: try to find cube by position (for backward compatibility)
+				cubeId = this.findCubeIdAt(item.from.r, item.from.c)
+			}
+			
+			if (cubeId === null) {
+				// Cube not found - skip animation (may have been removed or already moved)
+				return Promise.resolve()
+			}
 
 			const cubeContainer = this.cubeContainers.get(cubeId)
-			if (!cubeContainer) return Promise.resolve()
+			if (!cubeContainer) {
+				// Container not found - skip animation
+				return Promise.resolve()
+			}
 
-			// Update position
+			// Update position immediately to prevent duplicate lookups
 			this.cubePositions.set(cubeId, { r: item.to.r, c: item.to.c })
 
 			const targetX = item.to.c * this.tileSize
@@ -572,8 +595,13 @@ export class GameRenderer {
 				duration: 2.0,
 				ease: 'power2.out',
 				onComplete: () => {
-					if (popup.parent) popup.parent.removeChild(popup)
-					popup.destroy({ children: true })
+					// КРИТИЧНО: Проверяем, что popup еще существует перед уничтожением
+					if (popup && popup.parent) {
+						popup.parent.removeChild(popup)
+					}
+					if (popup) {
+						popup.destroy({ children: true })
+					}
 				},
 			})
 		}
@@ -582,16 +610,38 @@ export class GameRenderer {
 			containers.map(
 				(cubeContainer) =>
 					new Promise<void>((resolve) => {
-						gsap.to(cubeContainer.container, {
+						// КРИТИЧНО: Проверяем, что контейнер еще существует
+						if (!cubeContainer || !cubeContainer.container) {
+							resolve()
+							return
+						}
+
+						const container = cubeContainer.container
+						
+						gsap.to(container, {
 							alpha: 0,
 							scale: 0,
 							duration: 0.15,
 							ease: 'back.in',
 							onComplete: () => {
-								if (cubeContainer.container.parent) {
-									cubeContainer.container.parent.removeChild(cubeContainer.container)
+								// КРИТИЧНО: Проверяем, что контейнер еще существует и не уничтожен
+								if (!container || !container.scale) {
+									resolve()
+									return
 								}
-								cubeContainer.container.destroy({ children: true })
+								
+								// КРИТИЧНО: Убиваем все GSAP анимации на контейнере перед уничтожением
+								gsap.killTweensOf(container)
+								
+								if (container.parent) {
+									container.parent.removeChild(container)
+								}
+								
+								// Проверяем еще раз перед destroy
+								if (container && container.scale) {
+									container.destroy({ children: true })
+								}
+								
 								resolve()
 							},
 						})
@@ -675,16 +725,26 @@ export class GameRenderer {
 				// Для визуального эффекта падения сверху используем отрицательную позицию
 				const startY = -Math.abs(cell.fromRow) * this.tileSize
 				// КРИТИЧНО: Устанавливаем начальную позицию ПЕРЕД анимацией
-				cubeContainer.container.y = startY
-				cubeContainer.container.visible = true
+				const container = cubeContainer.container
+				
+				if (!container) {
+					return Promise.resolve()
+				}
+				
+				container.y = startY
+				container.visible = true
 				cubeContainer.sprite.visible = true
+				
 				return new Promise<void>((resolve) => {
-					gsap.to(cubeContainer.container, {
+					gsap.to(container, {
 						y: targetY,
 						duration: 0.6,
 						ease: 'power2.out',
 						onComplete: () => {
-							cubeContainer.container.y = targetY
+							// КРИТИЧНО: Проверяем, что контейнер еще существует
+							if (container && container.y !== undefined) {
+								container.y = targetY
+							}
 							resolve()
 						},
 					})
@@ -697,19 +757,29 @@ export class GameRenderer {
 				
 				// Убеждаемся, что начальные значения установлены правильно
 				cubeContainer.container.alpha = 0
-				cubeContainer.container.scale.set(0)
+				if (cubeContainer.container.scale) {
+					cubeContainer.container.scale.set(0)
+				}
 				
 				// Анимируем от 0 до 1 (текстуры уже прогреты в warmUpTextures)
 				return new Promise<void>((resolve) => {
-					gsap.to(cubeContainer.container, {
+					const container = cubeContainer.container
+					
+					gsap.to(container, {
 						alpha: 1,
 						scale: 1,
 						duration: 0.15,
 						ease: 'back.out',
 						onComplete: () => {
+							// КРИТИЧНО: Проверяем, что контейнер еще существует перед установкой значений
+							if (!container || !container.scale) {
+								resolve()
+								return
+							}
+							
 							// Убеждаемся, что финальные значения установлены
-							cubeContainer.container.alpha = 1
-							cubeContainer.container.scale.set(1)
+							container.alpha = 1
+							container.scale.set(1)
 							resolve()
 						},
 					})
@@ -841,7 +911,9 @@ export class GameRenderer {
 		popup.addChild(t)
 
 		popup.alpha = 0
-		popup.scale.set(0.5)
+		if (popup.scale) {
+			popup.scale.set(0.5)
+		}
 		this.app.stage.addChild(popup)
 
 		await new Promise<void>((resolve) => {
@@ -850,7 +922,9 @@ export class GameRenderer {
 				duration: 0.3,
 				ease: 'back.out',
 			})
-			gsap.to(popup.scale, { x: 1.2, y: 1.2, duration: 0.3, ease: 'back.out' })
+			if (popup.scale) {
+				gsap.to(popup.scale, { x: 1.2, y: 1.2, duration: 0.3, ease: 'back.out' })
+			}
 			gsap.to(popup, {
 				alpha: 0,
 				y: popup.y - 60,
@@ -858,8 +932,18 @@ export class GameRenderer {
 				delay: 1.4,
 				ease: 'power2.in',
 				onComplete: () => {
-					if (popup.parent) popup.parent.removeChild(popup)
-					popup.destroy({ children: true })
+					// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
+					gsap.killTweensOf(popup)
+					if (popup.scale) {
+						gsap.killTweensOf(popup.scale)
+					}
+					
+					if (popup && popup.parent) {
+						popup.parent.removeChild(popup)
+					}
+					if (popup) {
+						popup.destroy({ children: true })
+					}
 					resolve()
 				},
 			})
@@ -870,14 +954,17 @@ export class GameRenderer {
 		if (!this.app) return
 
 		const popup = new Container()
-		popup.x = this.canvas.width / 2
-		popup.y = this.canvas.height / 2
+		// Center on screen (viewport) instead of canvas
+		const screenWidth = this.app.screen.width || window.innerWidth
+		const screenHeight = this.app.screen.height || window.innerHeight
+		popup.x = screenWidth / 2
+		popup.y = screenHeight * 0.6 // Position lower than center
 
 		const t = new Text({
 			text: `Great! +${bonus}`,
 			style: new TextStyle({
 				fontFamily: 'Arial',
-				fontSize: Math.max(32, this.tileSize * 1.4),
+				fontSize: Math.max(18, this.tileSize * 0.7),
 				fill: 0x00ff00,
 				align: 'center',
 				fontWeight: 'bold',
@@ -887,12 +974,17 @@ export class GameRenderer {
 		t.anchor.set(0.5)
 		t.x = 0
 		t.y = 0
-		t.style.stroke = { color: 0x000000, width: 4 }
+		t.style.stroke = { color: 0x000000, width: 2 }
 		popup.addChild(t)
 
 		popup.alpha = 0
-		popup.scale.set(0.5)
+		if (popup.scale) {
+			popup.scale.set(0.5)
+		}
 		this.app.stage.addChild(popup)
+
+		// Воспроизводим звук combo5 в момент появления надписи
+		AudioManager.playCombo5()
 
 		await new Promise<void>((resolve) => {
 			gsap.to(popup, {
@@ -900,16 +992,28 @@ export class GameRenderer {
 				duration: 0.3,
 				ease: 'back.out',
 			})
-			gsap.to(popup.scale, { x: 1.3, y: 1.3, duration: 0.3, ease: 'back.out' })
+			if (popup.scale) {
+				gsap.to(popup.scale, { x: 1.1, y: 1.1, duration: 0.3, ease: 'back.out' })
+			}
 			gsap.to(popup, {
 				alpha: 0,
-				y: popup.y - 60,
+				y: popup.y - 30,
 				duration: 1.0,
 				delay: 1.5,
 				ease: 'power2.in',
 				onComplete: () => {
-					if (popup.parent) popup.parent.removeChild(popup)
-					popup.destroy({ children: true })
+					// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
+					gsap.killTweensOf(popup)
+					if (popup.scale) {
+						gsap.killTweensOf(popup.scale)
+					}
+					
+					if (popup && popup.parent) {
+						popup.parent.removeChild(popup)
+					}
+					if (popup) {
+						popup.destroy({ children: true })
+					}
 					resolve()
 				},
 			})
@@ -920,29 +1024,56 @@ export class GameRenderer {
 		if (!this.app) return
 
 		const popup = new Container()
-		popup.x = this.canvas.width / 2
-		popup.y = this.canvas.height / 2
+		// Center on screen (viewport) instead of canvas
+		const screenWidth = this.app.screen.width || window.innerWidth
+		const screenHeight = this.app.screen.height || window.innerHeight
+		popup.x = screenWidth / 2
+		popup.y = screenHeight * 0.6 // Position lower than center
 
-		const t = new Text({
-			text: `Нет ходов +${bonus}`,
+		// "No Moves" text
+		const noMovesText = new Text({
+			text: 'No Moves',
 			style: new TextStyle({
 				fontFamily: 'Arial',
-				fontSize: Math.max(28, this.tileSize * 1.2),
+				fontSize: Math.max(18, this.tileSize * 0.7),
 				fill: 0xffaa00,
 				align: 'center',
 				fontWeight: 'bold',
 			}),
 		})
-		t.resolution = window.devicePixelRatio || 1
-		t.anchor.set(0.5)
-		t.x = 0
-		t.y = 0
-		t.style.stroke = { color: 0x000000, width: 4 }
-		popup.addChild(t)
+		noMovesText.resolution = window.devicePixelRatio || 1
+		noMovesText.anchor.set(0.5)
+		noMovesText.x = 0
+		noMovesText.y = -12 // Position above bonus text
+		noMovesText.style.stroke = { color: 0x000000, width: 2 }
+		popup.addChild(noMovesText)
+
+		// Timer bonus text (separate, below "No Moves")
+		const bonusText = new Text({
+			text: `+${bonus}`,
+			style: new TextStyle({
+				fontFamily: 'Arial',
+				fontSize: Math.max(16, this.tileSize * 0.6),
+				fill: 0x00ff00,
+				align: 'center',
+				fontWeight: 'bold',
+			}),
+		})
+		bonusText.resolution = window.devicePixelRatio || 1
+		bonusText.anchor.set(0.5)
+		bonusText.x = 0
+		bonusText.y = 12 // Position below "No Moves" text
+		bonusText.style.stroke = { color: 0x000000, width: 2 }
+		popup.addChild(bonusText)
 
 		popup.alpha = 0
-		popup.scale.set(0.5)
+		if (popup.scale) {
+			popup.scale.set(0.5)
+		}
 		this.app.stage.addChild(popup)
+
+		// Воспроизводим звук combo4 в момент появления надписи
+		AudioManager.playCombo4()
 
 		await new Promise<void>((resolve) => {
 			gsap.to(popup, {
@@ -950,16 +1081,28 @@ export class GameRenderer {
 				duration: 0.3,
 				ease: 'back.out',
 			})
-			gsap.to(popup.scale, { x: 1.2, y: 1.2, duration: 0.3, ease: 'back.out' })
+			if (popup.scale) {
+				gsap.to(popup.scale, { x: 1.1, y: 1.1, duration: 0.3, ease: 'back.out' })
+			}
 			gsap.to(popup, {
 				alpha: 0,
-				y: popup.y - 60,
+				y: popup.y - 30,
 				duration: 1.0,
 				delay: 1.4,
 				ease: 'power2.in',
 				onComplete: () => {
-					if (popup.parent) popup.parent.removeChild(popup)
-					popup.destroy({ children: true })
+					// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
+					gsap.killTweensOf(popup)
+					if (popup.scale) {
+						gsap.killTweensOf(popup.scale)
+					}
+					
+					if (popup && popup.parent) {
+						popup.parent.removeChild(popup)
+					}
+					if (popup) {
+						popup.destroy({ children: true })
+					}
 					resolve()
 				},
 			})
@@ -1007,12 +1150,20 @@ export class GameRenderer {
 
 		for (const cubeId of cubesToRemove) {
 			const cubeContainer = this.cubeContainers.get(cubeId)
-			if (cubeContainer) {
+			if (cubeContainer && cubeContainer.container) {
+				// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
+				gsap.killTweensOf(cubeContainer.container)
+				
 				// Only remove if still in parent (wasn't already removed by animateRemove)
 				if (cubeContainer.container.parent) {
 					cubeContainer.container.parent.removeChild(cubeContainer.container)
 				}
-				cubeContainer.container.destroy({ children: true })
+				
+				// Проверяем, что контейнер еще существует перед destroy
+				if (cubeContainer.container && cubeContainer.container.scale) {
+					cubeContainer.container.destroy({ children: true })
+				}
+				
 				this.cubeContainers.delete(cubeId)
 				this.cubePositions.delete(cubeId)
 			}
@@ -1395,10 +1546,19 @@ export class GameRenderer {
 
 	destroy(): void {
 		this.cubeContainers.forEach((cubeContainer) => {
-			if (cubeContainer.container.parent) {
-				cubeContainer.container.parent.removeChild(cubeContainer.container)
+			if (cubeContainer && cubeContainer.container) {
+				// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
+				gsap.killTweensOf(cubeContainer.container)
+				
+				if (cubeContainer.container.parent) {
+					cubeContainer.container.parent.removeChild(cubeContainer.container)
+				}
+				
+				// Проверяем, что контейнер еще существует перед destroy
+				if (cubeContainer.container && cubeContainer.container.scale) {
+					cubeContainer.container.destroy({ children: true })
+				}
 			}
-			cubeContainer.container.destroy({ children: true })
 		})
 		this.cubeContainers.clear()
 

@@ -42,7 +42,7 @@
 					v-if="!gameStore.isGameOver" 
 					ref="levelIndicatorRef"
 					class="level-indicator" 
-					:title="`До верха: ${rowsToTop} ряд.`"
+					:title="`Rows to top: ${rowsToTop}`"
 					@pointerdown="handleLevelIndicatorPointerDown"
 					@pointermove="handleLevelIndicatorPointerMove"
 					@pointerup="handleLevelIndicatorPointerUp"
@@ -75,9 +75,16 @@
 				</div>
 			</div>
 
-			<button class="btn btn--back btn--game" @click="showExitDialog">
-				← Exit
-			</button>
+			<div class="game-page__bottom-section">
+				<button class="btn btn--back btn--game" @click="showExitDialog">
+					← Exit
+				</button>
+				
+				<!-- Контейнер для рекламного баннера -->
+				<div class="game-page__ad-banner" id="ad-banner">
+					<!-- Здесь будет размещен рекламный баннер -->
+				</div>
+			</div>
 
 			<ConfirmDialog
 				v-model="isExitDialogOpen"
@@ -109,7 +116,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ScreenOrientation } from '@capacitor/screen-orientation'
 import { Capacitor } from '@capacitor/core'
 import AppLayout from '@/shared/components/AppLayout.vue'
@@ -123,6 +130,7 @@ import { AudioManager } from '@/game/audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
 
 const router = useRouter()
+const route = useRoute()
 const gameStore = useGameStore()
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
@@ -1125,7 +1133,42 @@ function initCanvas(): void {
 
 	// Принудительно используем полную ширину контейнера для 8 кубиков
 	// Получаем актуальные размеры контейнера
-	const containerRect = container.getBoundingClientRect()
+	let containerRect = container.getBoundingClientRect()
+	
+	// Если размеры нулевые, пытаемся получить их из computed styles или используем кэш
+	if (containerRect.width === 0 || containerRect.height === 0) {
+		const computedStyle = window.getComputedStyle(container)
+		const parentRect = container.parentElement?.getBoundingClientRect()
+		
+		// Пытаемся использовать ширину родителя или computed width
+		if (parentRect && parentRect.width > 0) {
+			containerRect = {
+				...containerRect,
+				width: parentRect.width,
+			} as DOMRect
+		} else if (computedStyle.width && computedStyle.width !== 'auto' && computedStyle.width !== '0px') {
+			const width = parseFloat(computedStyle.width)
+			if (width > 0) {
+				containerRect = {
+					...containerRect,
+					width: width,
+				} as DOMRect
+			}
+		}
+		
+		// Если все еще нулевые, используем кэш или минимальные значения
+		if (containerRect.width === 0) {
+			if (cachedContainerRect && cachedContainerRect.width > 0) {
+				containerRect = cachedContainerRect
+			} else {
+				containerRect = {
+					...containerRect,
+					width: 320, // Минимальная ширина для мобильных
+				} as DOMRect
+			}
+		}
+	}
+	
 	cachedContainerRect = containerRect
 	const maxWidth = Math.max(containerRect.width, 320) // Минимум 320px для мобильных
 	// Используем фактическую высоту grid, а не gameStore.getHeight()
@@ -1271,10 +1314,11 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	const pos = getPositionFromEvent(e)
 	if (pos) {
 		dragStart = pos
+		const cube = gameStore.grid[pos.r]?.[pos.c]
 		// Определяем, было ли касание на плитке (блоке) или на пустом месте
-		canvasDragStartedOnBlock = !!gameStore.grid[pos.r]?.[pos.c]
-		// Highlight selected tile
-		if (gameStore.grid[pos.r]?.[pos.c]) {
+		canvasDragStartedOnBlock = !!cube
+		// Highlight selected tile (only if it has moves > 0)
+		if (cube && cube.moves > 0) {
 			renderer?.setSelectedPosition(pos.r, pos.c)
 		} else {
 			renderer?.setSelectedPosition(null, null)
@@ -1364,10 +1408,11 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 			const targetCube = gameStore.grid[pos.r]?.[pos.c]
 			const fromCube = gameStore.grid[dragStart.r]?.[dragStart.c]
 
-			if (targetCube && fromCube) {
+			// IMPORTANT: Check that starting cube has moves > 0
+			if (targetCube && fromCube && fromCube.moves > 0) {
 				// Both have cubes - swap
 				gameController?.applyUserAction('swap', dragStart, pos)
-			} else if (!targetCube && fromCube && Math.abs(dc) === 1 && dr === 0) {
+			} else if (!targetCube && fromCube && fromCube.moves > 0 && Math.abs(dc) === 1 && dr === 0) {
 				// Target empty and horizontal move - slide
 				gameController?.applyUserAction('slide', dragStart, pos)
 			}
@@ -1394,9 +1439,15 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 			return
 		}
 		if (!selectedForSwap) {
-			// First click: select this block
-			selectedForSwap = { r: pos.r, c: pos.c }
-			renderer?.setSelectedPosition(pos.r, pos.c)
+			// First click: select this block (only if it has moves > 0)
+			if (fromCube && fromCube.moves > 0) {
+				selectedForSwap = { r: pos.r, c: pos.c }
+				renderer?.setSelectedPosition(pos.r, pos.c)
+			} else {
+				// Block has no moves, clear selection
+				selectedForSwap = null
+				renderer?.setSelectedPosition(null, null)
+			}
 			dragStart = null
 			return
 		}
@@ -1413,14 +1464,15 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		const isAdjacentClick = adjR || adjC
 		const targetCube = gameStore.grid[pos.r]?.[pos.c]
 		const fromCubeSel = gameStore.grid[selectedForSwap.r]?.[selectedForSwap.c]
-		if (isAdjacentClick && targetCube && fromCubeSel) {
+		// IMPORTANT: Check that starting cube has moves > 0
+		if (isAdjacentClick && targetCube && fromCubeSel && fromCubeSel.moves > 0) {
 			gameController?.applyUserAction('swap', selectedForSwap, pos)
 			selectedForSwap = null
 			renderer?.setSelectedPosition(null, null)
 			dragStart = null
 			return
 		}
-		if (isAdjacentClick && !targetCube && fromCubeSel && Math.abs(pos.c - selectedForSwap.c) === 1 && pos.r === selectedForSwap.r) {
+		if (isAdjacentClick && !targetCube && fromCubeSel && fromCubeSel.moves > 0 && Math.abs(pos.c - selectedForSwap.c) === 1 && pos.r === selectedForSwap.r) {
 			// Horizontal slide into empty
 			gameController?.applyUserAction('slide', selectedForSwap, pos)
 			selectedForSwap = null
@@ -1461,9 +1513,25 @@ onMounted(async () => {
 
 	// КРИТИЧНО: Получаем контейнер для canvas
 	// Используем canvas ref для получения контейнера, но сам canvas будет заменен на canvas из PixiService
-	const container = canvas.value?.parentElement || document.querySelector('.game-page__canvas-container') as HTMLElement
+	// Ждем, пока DOM полностью отрендерится
+	await nextTick()
+	await new Promise((resolve) => requestAnimationFrame(resolve))
+	
+	let container = canvas.value?.parentElement || document.querySelector('.game-page__canvas-container') as HTMLElement
+	
+	// Если контейнер не найден, пытаемся найти его через playAreaRef
+	if (!container && playAreaRef.value) {
+		container = playAreaRef.value.querySelector('.game-page__canvas-container') as HTMLElement
+	}
+	
+	// Если все еще не найден, ждем еще немного и ищем снова
 	if (!container) {
-		console.error('[GamePage] onMounted: Canvas container not found')
+		await new Promise((resolve) => setTimeout(resolve, 100))
+		container = canvas.value?.parentElement || document.querySelector('.game-page__canvas-container') as HTMLElement
+	}
+	
+	if (!container) {
+		console.error('[GamePage] onMounted: Canvas container not found after waiting')
 		return
 	}
 	
@@ -1506,23 +1574,83 @@ onMounted(async () => {
 		console.error('[GamePage] onMounted: Failed to get canvas from PixiService')
 		return
 	}
+	
+	// КРИТИЧНО: Убеждаемся, что canvas видим после прикрепления
+	pixiCanvas.style.display = 'block'
+	pixiCanvas.style.visibility = 'visible'
+	pixiCanvas.style.opacity = '1'
+
+	// КРИТИЧНО: Ждем, пока контейнер получит размеры от flexbox layout
+	// После изменений в layout нужно дать время браузеру рассчитать размеры
+	let containerRect = container.getBoundingClientRect()
+	let attempts = 0
+	const maxAttempts = 20 // Максимум 20 попыток (примерно 1 секунда при 50ms задержке)
+	
+	while ((containerRect.width === 0 || containerRect.height === 0) && attempts < maxAttempts) {
+		attempts++
+		console.log(`[GamePage] onMounted: Waiting for container dimensions (attempt ${attempts}/${maxAttempts})...`)
+		
+		// Ждем несколько кадров для расчета layout
+		await nextTick()
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+		await new Promise((resolve) => requestAnimationFrame(resolve))
+		await new Promise((resolve) => setTimeout(resolve, 50)) // Дополнительная задержка для flexbox
+		
+		containerRect = container.getBoundingClientRect()
+	}
+	
+	if (containerRect.width === 0 || containerRect.height === 0) {
+		console.error('[GamePage] onMounted: Canvas container has zero dimensions after waiting:', {
+			width: containerRect.width,
+			height: containerRect.height,
+			styleWidth: container.style.width,
+			styleHeight: container.style.height,
+			computedWidth: window.getComputedStyle(container).width,
+			computedHeight: window.getComputedStyle(container).height,
+			parentWidth: container.parentElement?.getBoundingClientRect().width,
+			parentHeight: container.parentElement?.getBoundingClientRect().height
+		})
+		// Продолжаем с минимальными размерами вместо ошибки
+		console.warn('[GamePage] onMounted: Using fallback dimensions (320x400)')
+		containerRect = { width: 320, height: 400 } as DOMRect
+	}
 
 	// Инициализируем canvas с правильными размерами
 	initCanvas()
 	
-	// Ждем один кадр для гарантии, что layout завершен
+	// Ждем еще один кадр после initCanvas для гарантии, что размеры установлены
 	await nextTick()
 	await new Promise((resolve) => requestAnimationFrame(resolve))
-
-	// КРИТИЧНО: Проверяем размеры canvas перед инициализацией PixiJS
-	const containerRect = container.getBoundingClientRect()
-	if (containerRect.width === 0 || containerRect.height === 0) {
-		console.error('[GamePage] onMounted: Canvas container has zero dimensions:', {
-			width: containerRect.width,
-			height: containerRect.height,
-			styleWidth: container.style.width,
-			styleHeight: container.style.height
+	
+	// КРИТИЧНО: Проверяем видимость canvas после инициализации
+	const pixiCanvasAfterInit = getPixiCanvas()
+	if (pixiCanvasAfterInit) {
+		const canvasRect = pixiCanvasAfterInit.getBoundingClientRect()
+		const canvasStyle = window.getComputedStyle(pixiCanvasAfterInit)
+		console.log('[GamePage] onMounted: Canvas visibility check:', {
+			display: canvasStyle.display,
+			visibility: canvasStyle.visibility,
+			opacity: canvasStyle.opacity,
+			width: canvasRect.width,
+			height: canvasRect.height,
+			styleWidth: pixiCanvasAfterInit.style.width,
+			styleHeight: pixiCanvasAfterInit.style.height
 		})
+		
+		// Принудительно устанавливаем видимость если нужно
+		if (canvasStyle.display === 'none' || canvasRect.width === 0) {
+			console.warn('[GamePage] onMounted: Canvas is hidden or has zero width, forcing visibility')
+			pixiCanvasAfterInit.style.display = 'block'
+			pixiCanvasAfterInit.style.visibility = 'visible'
+			pixiCanvasAfterInit.style.opacity = '1'
+		}
+	}
+	
+	// КРИТИЧНО: Обновляем bounds для MomentumScroll после установки размеров canvas
+	if (momentumScrollRef.value) {
+		await nextTick()
+		momentumScrollRef.value.updateBounds()
+		console.log('[GamePage] onMounted: MomentumScroll bounds updated')
 	}
 
 	// Create renderer с правильным tileSize (всегда ширина / 8)
@@ -1542,14 +1670,40 @@ onMounted(async () => {
 	
 	console.log(`[GamePage] onMounted: GameRenderer initialized in ${(performance.now() - rendererInitStartTime).toFixed(2)}ms`)
 	
+	// КРИТИЧНО: Проверяем видимость canvas после инициализации renderer
+	const pixiCanvasAfterRenderer = getPixiCanvas()
+	if (pixiCanvasAfterRenderer) {
+		pixiCanvasAfterRenderer.style.display = 'block'
+		pixiCanvasAfterRenderer.style.visibility = 'visible'
+		pixiCanvasAfterRenderer.style.opacity = '1'
+		
+		const canvasRectAfterRenderer = pixiCanvasAfterRenderer.getBoundingClientRect()
+		console.log('[GamePage] onMounted: Canvas after renderer init:', {
+			display: pixiCanvasAfterRenderer.style.display,
+			width: canvasRectAfterRenderer.width,
+			height: canvasRectAfterRenderer.height,
+			styleWidth: pixiCanvasAfterRenderer.style.width,
+			styleHeight: pixiCanvasAfterRenderer.style.height
+		})
+	}
+	
 	// После инициализации PixiJS нужно убедиться, что размеры canvas правильные
 	// Получаем актуальные размеры из CSS (они уже установлены в initCanvas)
 	const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
 	
-	const canvasWidth = parseInt(canvas.value.style.width) || containerWidth
-	const canvasHeight = parseInt(canvas.value.style.height) || (gridHeight * tileSize)
+	const finalPixiCanvas = getPixiCanvas()
+	const canvasWidth = finalPixiCanvas ? (parseInt(finalPixiCanvas.style.width) || containerWidth) : containerWidth
+	const canvasHeight = finalPixiCanvas ? (parseInt(finalPixiCanvas.style.height) || (gridHeight * tileSize)) : (gridHeight * tileSize)
 	// Обновляем размеры через renderer, чтобы PixiJS правильно их обработал
 	renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
+	
+	// КРИТИЧНО: Обновляем bounds для MomentumScroll после установки размеров canvas
+	await nextTick()
+	await new Promise((resolve) => requestAnimationFrame(resolve))
+	if (momentumScrollRef.value) {
+		momentumScrollRef.value.updateBounds()
+		console.log('[GamePage] onMounted: MomentumScroll bounds updated after renderer resize')
+	}
 
 	const controllerInitStartTime = performance.now()
 	console.log('[GamePage] onMounted: creating GameController')
@@ -1588,6 +1742,17 @@ onMounted(async () => {
 
 	// Set initial scroll position to top
 	momentumScrollRef.value?.scrollToTop()
+
+	// Читаем уровень из URL query параметров (для level mode)
+	const levelParam = route.query.level
+	const level = levelParam ? parseInt(String(levelParam), 10) : 1
+	if (isNaN(level) || level < 1) {
+		console.warn(`[GamePage] Invalid level parameter: ${levelParam}, using default level 1`)
+		gameStore.setCurrentLevel(1)
+	} else {
+		gameStore.setCurrentLevel(level)
+		console.log(`[GamePage] Starting game at level ${level}`)
+	}
 
 	const gameStartTime = performance.now()
 	console.log('[GamePage] onMounted: starting game')
@@ -1656,11 +1821,18 @@ onMounted(async () => {
 					// Обновляем выделение при движении
 					const pos = getPositionFromEvent(e)
 					if (pos) {
-						// Highlight tile under pointer
-						if (gameStore.grid[pos.r]?.[pos.c]) {
+						// Highlight tile under pointer (only if it has moves > 0)
+						const cube = gameStore.grid[pos.r]?.[pos.c]
+						if (cube && cube.moves > 0) {
 							renderer?.setSelectedPosition(pos.r, pos.c)
 						} else {
-							renderer?.setSelectedPosition(dragStart.r, dragStart.c)
+							// Highlight starting tile if it has moves > 0
+							const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
+							if (startCube && startCube.moves > 0) {
+								renderer?.setSelectedPosition(dragStart.r, dragStart.c)
+							} else {
+								renderer?.setSelectedPosition(null, null)
+							}
 						}
 					}
 				} else {
@@ -1726,11 +1898,18 @@ onMounted(async () => {
 						// Обновляем выделение при движении
 						const pos = getPositionFromEvent(e)
 						if (pos) {
-							// Highlight tile under pointer
-							if (gameStore.grid[pos.r]?.[pos.c]) {
+							// Highlight tile under pointer (only if it has moves > 0)
+							const cube = gameStore.grid[pos.r]?.[pos.c]
+							if (cube && cube.moves > 0) {
 								renderer?.setSelectedPosition(pos.r, pos.c)
 							} else {
-								renderer?.setSelectedPosition(dragStart.r, dragStart.c)
+								// Highlight starting tile if it has moves > 0
+								const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
+								if (startCube && startCube.moves > 0) {
+									renderer?.setSelectedPosition(dragStart.r, dragStart.c)
+								} else {
+									renderer?.setSelectedPosition(null, null)
+								}
 							}
 						}
 					} else {
@@ -1938,17 +2117,21 @@ async function restart(): Promise<void> {
 	flex: 1;
 	display: flex;
 	flex-direction: column;
-	padding: 1rem clamp(0.5rem, 2vw, 1rem) 1rem clamp(0.5rem, 2vw, 2rem);
+	padding: 1rem clamp(0.5rem, 2vw, 1rem) 0 clamp(0.5rem, 2vw, 2rem);
 	padding-top: max(1rem, env(safe-area-inset-top, 0px));
-	padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
-	gap: 1rem;
+	padding-bottom: 0;
+	gap: 0.75rem;
 	position: relative;
 	overflow: hidden;
 	min-height: 0; // Важно для flex-контейнеров, чтобы они правильно ограничивали высоту
+	// Используем calc для учета высоты нижней секции и safe-area
+	max-height: 100%;
+	height: 100%;
 
 	@media (max-width: 640px) {
 		padding-left: clamp(0.5rem, 1.5vw, 0.75rem);
 		padding-right: clamp(0.5rem, 1.5vw, 0.75rem);
+		gap: 0.5rem;
 	}
 
 	&__play-area {
@@ -1958,18 +2141,74 @@ async function restart(): Promise<void> {
 		flex: 1;
 		min-height: 0; // Важно для flex-контейнеров, чтобы они правильно ограничивали высоту
 		overflow: hidden; // Предотвращаем выход контента за пределы
+		// Используем flex для автоматического расчета высоты
+		// Высота будет автоматически ограничена родительским контейнером
+	}
+
+	&__bottom-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		flex-shrink: 0;
+		padding: 0.5rem 0;
+		padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+		// Высота нижней секции: кнопка (~48px) + баннер (~50px) + отступы (~16px)
+		// Итого примерно 114px + safe-area-inset-bottom
+		min-height: fit-content;
+		
+		@media (max-width: 640px) {
+			gap: 0.4rem;
+			padding: 0.4rem 0;
+			padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
+		}
+	}
+
+	&__ad-banner {
+		width: 100%;
+		min-height: 50px;
+		max-height: 50px;
+		background: rgba(0, 0, 0, 0.3);
+		border-radius: 8px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		// Резервируем место для рекламного баннера
+		// Стандартная высота баннера обычно 50px на мобильных
+		
+		@media (max-width: 640px) {
+			min-height: 50px;
+			max-height: 50px;
+		}
+		
+		// Стили для будущего рекламного баннера
+		&::before {
+			content: 'Ad';
+			color: rgba(255, 255, 255, 0.3);
+			font-size: 0.75rem;
+			font-weight: 600;
+		}
 	}
 
 	&__scroll-container {
 		flex: 1;
-		min-height: 400px;
+		min-height: 0; // Важно для правильной работы flex
 		backdrop-filter: blur(20px);
 		box-shadow: inset 0 4px 32px rgba(0, 0, 0, 0.5),
 			0 8px 32px rgba(0, 0, 0, 0.3);
 		border: 2px solid rgba(255, 255, 255, 0.3);
 		position: relative;
 		z-index: 1;
-		flex-grow: 1;
+		// MomentumScroll сам управляет overflow
+		width: 100%;
+		// КРИТИЧНО: MomentumScroll требует height: 100% для правильной работы
+		height: 100%;
+		// Высота также будет установлена через flex от родителя
+		display: flex;
+		flex-direction: column;
+		// Гарантируем видимость
+		visibility: visible;
+		opacity: 1;
 	}
 
 	&__canvas-container {
@@ -1979,7 +2218,12 @@ async function restart(): Promise<void> {
 		width: 100%;
 		/* Предотвращаем растяжение canvas */
 		min-width: 0;
-		overflow: hidden;
+		// Контейнер должен расти по содержимому (canvas)
+		min-height: fit-content;
+		position: relative;
+		// Гарантируем, что canvas виден
+		visibility: visible;
+		opacity: 1;
 	}
 }
 
@@ -2102,7 +2346,9 @@ async function restart(): Promise<void> {
 	width: 100% !important;
 	height: auto !important;
 	max-width: 100%;
-	display: block;
+	display: block !important;
+	visibility: visible !important;
+	opacity: 1 !important;
 	background: transparent;
 	image-rendering: -webkit-optimize-contrast;
 	image-rendering: crisp-edges;
@@ -2113,6 +2359,8 @@ async function restart(): Promise<void> {
 	/* Предотвращаем растяжение на мобильных устройствах */
 	object-fit: contain;
 	flex-shrink: 0;
+	position: relative;
+	z-index: 1;
 }
 
 .game-overlay {
@@ -2218,8 +2466,8 @@ async function restart(): Promise<void> {
 }
 
 .btn--back {
-	padding: clamp(0.875rem, 2.5vw, 1rem) clamp(1.25rem, 4vw, 1.75rem);
-	border-radius: clamp(14px, 3vw, 16px);
+	padding: clamp(0.75rem, 2vw, 0.875rem) clamp(1rem, 3.5vw, 1.5rem);
+	border-radius: clamp(12px, 2.5vw, 14px);
 	border: 2px solid rgba(255, 255, 255, 0.3);
 	background: linear-gradient(
 		135deg,
@@ -2228,7 +2476,7 @@ async function restart(): Promise<void> {
 	);
 	backdrop-filter: blur(20px);
 	color: white;
-	font-size: clamp(0.9375rem, 2.75vw, 1.0625rem);
+	font-size: clamp(0.875rem, 2.5vw, 1rem);
 	font-weight: 600;
 	cursor: pointer;
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2237,21 +2485,27 @@ async function restart(): Promise<void> {
 	position: relative;
 	z-index: 1;
 	flex-shrink: 0; // Предотвращаем сжатие кнопки
+	width: 100%;
+	max-width: 200px;
+	margin: 0 auto;
+
+	@media (max-width: 640px) {
+		padding: clamp(0.65rem, 1.8vw, 0.75rem) clamp(0.9rem, 3vw, 1.25rem);
+		font-size: clamp(0.8125rem, 2.2vw, 0.9375rem);
+	}
 
 	&:hover {
-		transform: translateY(-4px) scale(1.02);
-		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+		transform: translateY(-2px) scale(1.01);
+		box-shadow: 0 10px 36px rgba(0, 0, 0, 0.35);
 		border-color: rgba(255, 255, 255, 0.5);
 	}
 
 	&:active {
-		transform: translateY(-2px) scale(1);
+		transform: translateY(-1px) scale(1);
 	}
 
 	&--game {
-		max-width: 200px;
-		margin: 0 auto;
-		width: 100%;
+		// Стили уже применены выше
 	}
 }
 

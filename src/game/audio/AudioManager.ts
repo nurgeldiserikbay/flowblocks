@@ -325,6 +325,20 @@ class AudioManagerClass {
 	}
 
 	/**
+	 * Воспроизведение звука combo 4
+	 */
+	playCombo4(): void {
+		this.play('combo4')
+	}
+
+	/**
+	 * Воспроизведение звука combo 5
+	 */
+	playCombo5(): void {
+		this.play('combo5')
+	}
+
+	/**
 	 * Установка громкости категории
 	 */
 	setCategoryVolume(category: string, volume: number): void {

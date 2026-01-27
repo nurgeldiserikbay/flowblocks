@@ -449,7 +449,7 @@ const patternStyles = computed(() =>
 
 // Play button
 .play-button {
-	width: 100%;
+	width: 70%;
 	padding: clamp(1.25rem, 5vw, 1.75rem) clamp(1.5rem, 5vw, 2.5rem);
 	border-radius: clamp(20px, 5vw, 28px);
 	border: 2px solid rgba(255, 255, 255, 0.2);
