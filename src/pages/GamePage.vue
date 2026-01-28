@@ -9,7 +9,7 @@
 		</template>
 
 		<div class="game-page">
-			<div 
+			<div
 				ref="playAreaRef"
 				class="game-page__play-area"
 				@pointerdown="handlePlayAreaPointerDown"
@@ -34,14 +34,18 @@
 					<div class="game-page__canvas-container">
 						<!-- Canvas будет заменен на canvas из PixiService при attachToHost -->
 						<!-- Но нужен ref для получения контейнера -->
-						<canvas ref="canvas" class="game-canvas" style="display: none;"></canvas>
+						<canvas
+							ref="canvas"
+							class="game-canvas"
+							style="display: none"
+						></canvas>
 					</div>
 				</MomentumScroll>
 
-				<div 
-					v-if="!gameStore.isGameOver" 
+				<div
+					v-if="!gameStore.isGameOver"
 					ref="levelIndicatorRef"
-					class="level-indicator" 
+					class="level-indicator"
 					:title="`Rows to top: ${rowsToTop}`"
 					@pointerdown="handleLevelIndicatorPointerDown"
 					@pointermove="handleLevelIndicatorPointerMove"
@@ -54,7 +58,7 @@
 					@touchcancel="handleLevelIndicatorTouchEnd"
 				>
 					<div class="level-indicator__label">{{ rowsToTop }}</div>
-					<div 
+					<div
 						class="level-indicator__bar"
 						@pointerdown.stop="handleLevelIndicatorBarPointerDown"
 						@pointermove.stop="handleLevelIndicatorBarPointerMove"
@@ -79,7 +83,7 @@
 				<button class="btn btn--back btn--game" @click="showExitDialog">
 					← Exit
 				</button>
-				
+
 				<!-- Контейнер для рекламного баннера -->
 				<div class="game-page__ad-banner" id="ad-banner">
 					<!-- Здесь будет размещен рекламный баннер -->
@@ -99,7 +103,9 @@
 				<div class="game-overlay__content">
 					<div class="game-overlay__icon">✕</div>
 					<h2 class="game-overlay__title">Game Over</h2>
-					<p class="game-overlay__score">Final Score: <strong>{{ gameStore.score }}</strong></p>
+					<p class="game-overlay__score">
+						Final Score: <strong>{{ gameStore.score }}</strong>
+					</p>
 					<button class="btn btn--restart" @click="restart">
 						<span class="btn--restart__icon">↻</span>
 						Restart
@@ -115,7 +121,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import {
+	ref,
+	computed,
+	onMounted,
+	onBeforeUnmount,
+	useTemplateRef,
+	nextTick,
+} from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ScreenOrientation } from '@capacitor/screen-orientation'
 import { Capacitor } from '@capacitor/core'
@@ -128,13 +141,15 @@ import { useGameStore } from '@/shared/stores/gameStore'
 import { WIDTH } from '@/game/logic'
 import { AudioManager } from '@/game/audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
+import admob from '@/utils/admob'
 
 const router = useRouter()
 const route = useRoute()
 const gameStore = useGameStore()
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
-const momentumScrollRef = useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
+const momentumScrollRef =
+	useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
 const levelIndicatorRef = useTemplateRef<HTMLElement>('levelIndicator')
 const playAreaRef = useTemplateRef<HTMLElement>('playArea')
 const isExitDialogOpen = ref(false)
@@ -202,9 +217,13 @@ function isInsideMomentumScroll(target: HTMLElement | null): boolean {
 
 // Вспомогательная функция для определения мобильных устройств
 function isMobileDevice(): boolean {
-	return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-		('ontouchstart' in window) ||
-		(navigator.maxTouchPoints > 0)
+	return (
+		/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+			navigator.userAgent,
+		) ||
+		'ontouchstart' in window ||
+		navigator.maxTouchPoints > 0
+	)
 }
 
 // Обработчики событий для play-area - dragging scroll на всем компоненте
@@ -224,40 +243,40 @@ function activatePlayAreaDrag() {
 
 function handlePlayAreaPointerDown(e: PointerEvent) {
 	if (e.button !== 0 && e.pointerType === 'mouse') return
-	
+
 	// На мобильных устройствах игнорируем pointer события типа touch
 	if (isMobileDevice() && e.pointerType === 'touch') {
 		return
 	}
-	
+
 	// Проверяем, является ли целевой элемент интерактивным
 	const target = e.target as HTMLElement
 	if (isInteractiveElement(target)) {
 		return // Позволяем интерактивным элементам обработать событие
 	}
-	
+
 	// Если событие происходит на MomentumScroll (не на интерактивных элементах),
 	// полностью пропускаем его - MomentumScroll обработает его сам
 	if (isInsideMomentumScroll(target)) {
 		return
 	}
-	
+
 	// Обрабатываем только события вне MomentumScroll (например, на play-area вокруг него)
 	if (!playAreaRef.value || !momentumScrollRef.value) return
-	
+
 	// Завершаем предыдущий drag, если он был активен
 	if (playAreaDragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	// Захватываем pointer для отслеживания движения даже вне элемента
 	playAreaRef.value.setPointerCapture(e.pointerId)
-	
+
 	playAreaPointerId = e.pointerId
 	playAreaStartY = e.clientY
 	playAreaLastY = e.clientY
 	playAreaDragStarted = false
-	
+
 	clearPlayAreaPressTimer()
 	playAreaPressTimer = setTimeout(() => {
 		activatePlayAreaDrag()
@@ -265,13 +284,18 @@ function handlePlayAreaPointerDown(e: PointerEvent) {
 }
 
 function handlePlayAreaPointerMove(e: PointerEvent) {
-	if (!momentumScrollRef.value || !playAreaRef.value || playAreaPointerId !== e.pointerId) return
-	
+	if (
+		!momentumScrollRef.value ||
+		!playAreaRef.value ||
+		playAreaPointerId !== e.pointerId
+	)
+		return
+
 	// На мобильных устройствах игнорируем pointer события типа touch
 	if (isMobileDevice() && e.pointerType === 'touch') {
 		return
 	}
-	
+
 	// Проверяем, находится ли pointer на MomentumScroll (не на интерактивных элементах)
 	const target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement
 	if (isInsideMomentumScroll(target)) {
@@ -289,12 +313,12 @@ function handlePlayAreaPointerMove(e: PointerEvent) {
 			return
 		}
 	}
-	
+
 	const deltaY = playAreaLastY - e.clientY
 	playAreaLastY = e.clientY
-	
+
 	const moved = Math.abs(e.clientY - playAreaStartY)
-	
+
 	// Если пользователь сдвинулся чуть-чуть — ждём long-press
 	if (!playAreaDragStarted) {
 		// если сильно потащил — можно активировать раньше, чем pressDelay
@@ -307,7 +331,7 @@ function handlePlayAreaPointerMove(e: PointerEvent) {
 			return
 		}
 	}
-	
+
 	// drag активирован => скроллим
 	e.preventDefault()
 	e.stopPropagation()
@@ -316,26 +340,26 @@ function handlePlayAreaPointerMove(e: PointerEvent) {
 
 function handlePlayAreaPointerUp(e: PointerEvent) {
 	if (!playAreaRef.value || playAreaPointerId !== e.pointerId) return
-	
+
 	// Освобождаем захват pointer
 	if (playAreaRef.value.hasPointerCapture(e.pointerId)) {
 		playAreaRef.value.releasePointerCapture(e.pointerId)
 	}
-	
+
 	clearPlayAreaPressTimer()
-	
+
 	const moved = Math.abs(e.clientY - playAreaStartY)
 	const dragStarted = playAreaDragStarted
-	
+
 	// Завершаем drag через MomentumScroll, если он был начат
 	if (dragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	// Очищаем состояние
 	playAreaPointerId = null
 	playAreaDragStarted = false
-	
+
 	// Если движения не было, это клик - не обрабатываем здесь
 	if (!dragStarted && moved <= PLAY_AREA_CLICK_THRESHOLD) {
 		// Позволяем событию клика пройти дальше
@@ -346,34 +370,34 @@ function handlePlayAreaPointerUp(e: PointerEvent) {
 // Touch event handlers для play-area
 function handlePlayAreaTouchStart(e: TouchEvent) {
 	if (!playAreaRef.value || !momentumScrollRef.value) return
-	
+
 	const touch = e.touches[0]
 	if (!touch) return
-	
+
 	// Проверяем, является ли целевой элемент интерактивным
 	const target = e.target as HTMLElement
 	if (isInteractiveElement(target)) {
 		return // Позволяем интерактивным элементам обработать событие
 	}
-	
+
 	// Если событие происходит на MomentumScroll (не на интерактивных элементах),
 	// позволяем MomentumScroll обработать его самому
 	if (isInsideMomentumScroll(target)) {
 		return
 	}
-	
+
 	// Завершаем предыдущий drag, если он был активен
 	if (playAreaDragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	playAreaTouchId = touch.identifier
 	playAreaStartY = touch.clientY
 	playAreaLastY = touch.clientY
 	playAreaStartX = touch.clientX
 	playAreaLastX = touch.clientX
 	playAreaDragStarted = false
-	
+
 	clearPlayAreaPressTimer()
 	playAreaPressTimer = setTimeout(() => {
 		activatePlayAreaDrag()
@@ -382,17 +406,22 @@ function handlePlayAreaTouchStart(e: TouchEvent) {
 
 function handlePlayAreaTouchMove(e: TouchEvent) {
 	if (!momentumScrollRef.value || !playAreaRef.value || !playAreaTouchId) return
-	
-	const touch = Array.from(e.touches).find(t => t.identifier === playAreaTouchId)
+
+	const touch = Array.from(e.touches).find(
+		(t) => t.identifier === playAreaTouchId,
+	)
 	if (!touch) {
 		if (e.touches.length === 0) {
 			handlePlayAreaTouchEnd(e)
 		}
 		return
 	}
-	
+
 	// Проверяем, не находится ли текущее касание на интерактивном элементе
-	const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement
+	const target = document.elementFromPoint(
+		touch.clientX,
+		touch.clientY,
+	) as HTMLElement
 	if (isInteractiveElement(target)) {
 		// Если касание переместилось на интерактивный элемент и скролл еще не активирован
 		if (!playAreaDragStarted) {
@@ -405,7 +434,7 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 			return
 		}
 	}
-	
+
 	// Если касание находится на MomentumScroll (не на интерактивных элементах),
 	// позволяем MomentumScroll обработать его самому
 	if (isInsideMomentumScroll(target)) {
@@ -419,18 +448,18 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 			return
 		}
 	}
-	
+
 	const deltaY = playAreaLastY - touch.clientY
 	playAreaLastY = touch.clientY
 	playAreaLastX = touch.clientX // Обновляем для вычисления movedX
-	
+
 	const movedY = Math.abs(touch.clientY - playAreaStartY)
 	const movedX = Math.abs(touch.clientX - playAreaStartX)
-	
+
 	// Определяем направление движения
 	const isVerticalSwipe = movedY > movedX
 	const minSwipeDistance = 8 // Минимальное расстояние для активации скролла
-	
+
 	// Активируем скролл только при вертикальном свайпе
 	if (!playAreaDragStarted) {
 		if (isVerticalSwipe && movedY > minSwipeDistance) {
@@ -447,7 +476,7 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 			return
 		}
 	}
-	
+
 	// drag активирован => скроллим только по вертикали
 	e.preventDefault()
 	e.stopPropagation()
@@ -456,28 +485,28 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 
 function handlePlayAreaTouchEnd(e: TouchEvent) {
 	if (!playAreaRef.value || !momentumScrollRef.value || !playAreaTouchId) return
-	
+
 	clearPlayAreaPressTimer()
-	
+
 	const touch = e.changedTouches[0]
 	if (!touch || touch.identifier !== playAreaTouchId) return
-	
+
 	const movedY = Math.abs(playAreaLastY - playAreaStartY)
 	const movedX = Math.abs(playAreaLastX - playAreaStartX)
 	const totalMoved = Math.sqrt(movedY * movedY + movedX * movedX)
 	const dragStarted = playAreaDragStarted
-	
+
 	// Завершаем drag через MomentumScroll, если он был начат
 	if (dragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	// Очищаем состояние
 	playAreaTouchId = null
 	playAreaStartX = 0
 	playAreaLastX = 0
 	playAreaDragStarted = false
-	
+
 	// Если движения не было, это клик - не обрабатываем здесь
 	if (!dragStarted && totalMoved <= PLAY_AREA_CLICK_THRESHOLD) {
 		return
@@ -487,130 +516,136 @@ function handlePlayAreaTouchEnd(e: TouchEvent) {
 // Обработчики событий для level-indicator - drag-scrolling через весь индикатор
 function handleLevelIndicatorPointerDown(e: PointerEvent) {
 	if (e.button !== 0 && e.pointerType === 'mouse') return
-	
+
 	// Проверяем, что клик не на баре (бар обрабатывает свои события отдельно)
 	const target = e.target as HTMLElement
 	if (target.closest('.level-indicator__bar')) {
 		return // Бар обрабатывает свои события отдельно
 	}
-	
+
 	if (!levelIndicatorRef.value || !momentumScrollRef.value) return
-	
+
 	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
 	if (levelIndicatorDragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	const indicatorElement = levelIndicatorRef.value
-	
+
 	// Захватываем pointer для отслеживания движения даже вне элемента
 	indicatorElement.setPointerCapture(e.pointerId)
-	
+
 	levelIndicatorPointerId = e.pointerId
 	levelIndicatorStartY = e.clientY
 	levelIndicatorLastY = e.clientY
 	levelIndicatorStartClientY = e.clientY
 	levelIndicatorHasMoved = false
 	levelIndicatorDragStarted = false
-	
+
 	// Вычисляем коэффициент масштабирования для преобразования движения мыши в скролл
 	const scrollState = momentumScrollRef.value.getScrollState()
 	const maxScroll = scrollState?.maxY ?? 0
 	const indicatorHeight = indicatorElement.getBoundingClientRect().height
-	
+
 	if (indicatorHeight > 0 && maxScroll > 0) {
 		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения мыши
 		levelIndicatorScrollRatio = maxScroll / indicatorHeight
 	} else {
 		levelIndicatorScrollRatio = 1
 	}
-	
+
 	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
 }
 
 function handleLevelIndicatorPointerMove(e: PointerEvent) {
-	if (!momentumScrollRef.value || !levelIndicatorRef.value || levelIndicatorPointerId !== e.pointerId) return
-	
+	if (
+		!momentumScrollRef.value ||
+		!levelIndicatorRef.value ||
+		levelIndicatorPointerId !== e.pointerId
+	)
+		return
+
 	// Всегда обновляем lastY для правильного расчета дельты
 	const deltaY = levelIndicatorLastY - e.clientY
 	levelIndicatorLastY = e.clientY
-	
+
 	const moved = Math.abs(e.clientY - levelIndicatorStartY)
 	if (moved > 3) {
 		// Если движение больше 3px, это drag - выполняем скролл
 		levelIndicatorHasMoved = true
 		e.preventDefault()
 		e.stopPropagation()
-		
+
 		// Начинаем drag через ElasticScroll при первом движении
 		if (!levelIndicatorDragStarted) {
 			levelIndicatorDragStarted = true
 			momentumScrollRef.value.updateBounds()
 			momentumScrollRef.value.startDrag(performance.now())
 		}
-		
+
 		// Преобразуем дельту движения мыши в дельту скролла
 		const scrollDelta = deltaY * levelIndicatorScrollRatio
-		
+
 		// Используем метод drag для плавного скролла с инерцией
 		momentumScrollRef.value.drag(scrollDelta, performance.now())
 	}
 }
 
 function handleLevelIndicatorPointerUp(e: PointerEvent) {
-	if (!levelIndicatorRef.value || levelIndicatorPointerId !== e.pointerId) return
-	
+	if (!levelIndicatorRef.value || levelIndicatorPointerId !== e.pointerId)
+		return
+
 	// Освобождаем захват pointer
 	if (levelIndicatorRef.value.hasPointerCapture(e.pointerId)) {
 		levelIndicatorRef.value.releasePointerCapture(e.pointerId)
 	}
-	
+
 	// Сохраняем значения в локальные переменные перед nextTick
 	const indicatorElement = levelIndicatorRef.value
 	const startClientY = levelIndicatorStartClientY
 	const hasMoved = levelIndicatorHasMoved
 	const dragStarted = levelIndicatorDragStarted
-	
+
 	// Завершаем drag через ElasticScroll, если он был начат
 	if (dragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	// Очищаем состояние сразу
 	levelIndicatorPointerId = null
 	levelIndicatorHasMoved = false
 	levelIndicatorDragStarted = false
-	
+
 	// Если движения не было, это клик - выполняем скролл
 	if (!hasMoved) {
 		e.preventDefault()
 		e.stopPropagation()
-		
+
 		// Используем nextTick для гарантии, что ref инициализирован
 		nextTick(() => {
 			if (!momentumScrollRef.value) {
 				console.warn('momentumScrollRef is still null after nextTick')
 				return
 			}
-			
+
 			// Обновляем границы скролла перед вычислением позиции
 			momentumScrollRef.value.updateBounds()
-			
+
 			// Получаем позицию клика относительно индикатора
 			const rect = indicatorElement.getBoundingClientRect()
 			const clickY = startClientY - rect.top
 			const indicatorHeight = rect.height
-			
+
 			// Вычисляем процент от верха индикатора (0 = верх, 1 = низ)
 			const clickPercent = Math.max(0, Math.min(1, clickY / indicatorHeight))
-			
+
 			// Получаем состояние скролла
 			const scrollState = momentumScrollRef.value.getScrollState()
 			const maxScroll = scrollState?.maxY ?? 0
-			
+
 			// Вычисляем целевую позицию скролла на основе процента клика
 			const targetScroll = clickPercent * maxScroll
-			
+
 			// Выполняем плавный скролл с анимацией
 			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
 		})
@@ -621,10 +656,10 @@ function handleLevelIndicatorPointerUp(e: PointerEvent) {
 function handleLevelIndicatorClick(e: MouseEvent) {
 	if (!momentumScrollRef.value || !levelIndicatorRef.value) return
 	if (levelIndicatorHasMoved) return // Если было движение, это не клик
-	
+
 	e.preventDefault()
 	e.stopPropagation()
-	
+
 	// При клике на level-indicator__bar скроллим к низу сосуда,
 	// чтобы пользователь мог увидеть место, где появляются новые блоки
 	momentumScrollRef.value.scrollToBottomAnimated(1.0, 2000)
@@ -633,19 +668,19 @@ function handleLevelIndicatorClick(e: MouseEvent) {
 // Обработчики pointer событий для level-indicator__bar
 function handleLevelIndicatorBarPointerDown(e: PointerEvent) {
 	if (e.button !== 0 && e.pointerType === 'mouse') return
-	
+
 	const barElement = e.currentTarget as HTMLElement
-	
+
 	if (!momentumScrollRef.value) return
-	
+
 	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
 	if (levelIndicatorBarDragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	// Захватываем pointer для отслеживания движения даже вне элемента
 	barElement.setPointerCapture(e.pointerId)
-	
+
 	levelIndicatorBarPointerId = e.pointerId
 	levelIndicatorBarStartY = e.clientY
 	levelIndicatorBarLastY = e.clientY
@@ -653,106 +688,113 @@ function handleLevelIndicatorBarPointerDown(e: PointerEvent) {
 	levelIndicatorBarElement = barElement
 	levelIndicatorBarHasMoved = false
 	levelIndicatorBarDragStarted = false
-	
+
 	// Вычисляем коэффициент масштабирования для преобразования движения мыши в скролл
 	const scrollState = momentumScrollRef.value.getScrollState()
 	const maxScroll = scrollState?.maxY ?? 0
 	const barHeight = barElement.getBoundingClientRect().height
-	
+
 	if (barHeight > 0 && maxScroll > 0) {
 		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения мыши
 		levelIndicatorBarScrollRatio = maxScroll / barHeight
 	} else {
 		levelIndicatorBarScrollRatio = 1
 	}
-	
+
 	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
 }
 
 function handleLevelIndicatorBarPointerMove(e: PointerEvent) {
-	if (!momentumScrollRef.value || !levelIndicatorBarPointerId || levelIndicatorBarPointerId !== e.pointerId || !levelIndicatorBarElement) return
-	
+	if (
+		!momentumScrollRef.value ||
+		!levelIndicatorBarPointerId ||
+		levelIndicatorBarPointerId !== e.pointerId ||
+		!levelIndicatorBarElement
+	)
+		return
+
 	// Всегда обновляем lastY для правильного расчета дельты
 	const deltaY = levelIndicatorBarLastY - e.clientY
 	levelIndicatorBarLastY = e.clientY
-	
+
 	const moved = Math.abs(e.clientY - levelIndicatorBarStartY)
 	if (moved > 3) {
 		// Если движение больше 3px, это drag - выполняем скролл
 		levelIndicatorBarHasMoved = true
 		e.preventDefault()
 		e.stopPropagation()
-		
+
 		// Начинаем drag через ElasticScroll при первом движении
 		if (!levelIndicatorBarDragStarted) {
 			levelIndicatorBarDragStarted = true
 			momentumScrollRef.value.updateBounds()
 			momentumScrollRef.value.startDrag(performance.now())
 		}
-		
+
 		// Преобразуем дельту движения мыши в дельту скролла
 		const scrollDelta = deltaY * levelIndicatorBarScrollRatio
-		
+
 		// Используем метод drag для плавного скролла с инерцией
 		momentumScrollRef.value.drag(scrollDelta, performance.now())
 	}
 }
 
 function handleLevelIndicatorBarPointerUp(e: PointerEvent) {
-	if (levelIndicatorBarPointerId !== e.pointerId || !levelIndicatorBarElement) return
-	
+	if (levelIndicatorBarPointerId !== e.pointerId || !levelIndicatorBarElement)
+		return
+
 	// Освобождаем захват pointer
 	if (levelIndicatorBarElement.hasPointerCapture(e.pointerId)) {
 		levelIndicatorBarElement.releasePointerCapture(e.pointerId)
 	}
-	
+
 	// Сохраняем значения в локальные переменные перед nextTick
 	const barElement = levelIndicatorBarElement
 	const startClientY = levelIndicatorBarStartClientY
 	const hasMoved = levelIndicatorBarHasMoved
 	const dragStarted = levelIndicatorBarDragStarted
-	
+
 	// Завершаем drag через ElasticScroll, если он был начат
 	if (dragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	// Очищаем состояние сразу
 	levelIndicatorBarPointerId = null
 	levelIndicatorBarElement = null
 	levelIndicatorBarHasMoved = false
 	levelIndicatorBarDragStarted = false
-	
+
 	// Если движения не было, это клик - выполняем скролл
 	if (!hasMoved) {
 		e.preventDefault()
 		e.stopPropagation()
-		
+
 		// Используем nextTick для гарантии, что ref инициализирован
 		nextTick(() => {
 			if (!momentumScrollRef.value) {
 				console.warn('momentumScrollRef is still null after nextTick')
 				return
 			}
-			
+
 			// Обновляем границы скролла перед вычислением позиции
 			momentumScrollRef.value.updateBounds()
-			
+
 			// Получаем позицию клика относительно бара (используем сохраненные координаты из pointerdown)
 			const rect = barElement.getBoundingClientRect()
 			const clickY = startClientY - rect.top
 			const barHeight = rect.height
-			
+
 			// Вычисляем процент от верха бара (0 = верх, 1 = низ)
 			const clickPercent = Math.max(0, Math.min(1, clickY / barHeight))
-			
+
 			// Получаем состояние скролла
 			const scrollState = momentumScrollRef.value.getScrollState()
 			const maxScroll = scrollState?.maxY ?? 0
-			
+
 			// Вычисляем целевую позицию скролла на основе процента клика
 			const targetScroll = clickPercent * maxScroll
-			
+
 			// Выполняем плавный скролл с анимацией
 			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
 		})
@@ -762,29 +804,29 @@ function handleLevelIndicatorBarPointerUp(e: PointerEvent) {
 // Обработчики touch событий для level-indicator__bar
 function handleLevelIndicatorBarTouchStart(e: TouchEvent) {
 	if (!momentumScrollRef.value) return
-	
+
 	const touch = e.touches[0]
 	if (!touch) return
-	
+
 	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
 	if (levelIndicatorBarDragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	const barElement = e.currentTarget as HTMLElement
-	
+
 	levelIndicatorBarTouchId = touch.identifier
 	levelIndicatorBarStartY = touch.clientY
 	levelIndicatorBarLastY = touch.clientY
 	levelIndicatorBarElement = barElement
 	levelIndicatorBarHasMoved = false
 	levelIndicatorBarDragStarted = false
-	
+
 	// Вычисляем коэффициент масштабирования для преобразования движения касания в скролл
 	const scrollState = momentumScrollRef.value.getScrollState()
 	const maxScroll = scrollState?.maxY ?? 0
 	const barHeight = barElement.getBoundingClientRect().height
-	
+
 	if (barHeight > 0 && maxScroll > 0) {
 		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения касания
 		levelIndicatorBarScrollRatio = maxScroll / barHeight
@@ -794,32 +836,39 @@ function handleLevelIndicatorBarTouchStart(e: TouchEvent) {
 }
 
 function handleLevelIndicatorBarTouchMove(e: TouchEvent) {
-	if (!momentumScrollRef.value || !levelIndicatorBarTouchId || !levelIndicatorBarElement) return
-	
-	const touch = Array.from(e.touches).find(t => t.identifier === levelIndicatorBarTouchId)
+	if (
+		!momentumScrollRef.value ||
+		!levelIndicatorBarTouchId ||
+		!levelIndicatorBarElement
+	)
+		return
+
+	const touch = Array.from(e.touches).find(
+		(t) => t.identifier === levelIndicatorBarTouchId,
+	)
 	if (!touch) return
-	
+
 	// Всегда обновляем lastY для правильного расчета дельты
 	const deltaY = levelIndicatorBarLastY - touch.clientY
 	levelIndicatorBarLastY = touch.clientY
-	
+
 	const moved = Math.abs(touch.clientY - levelIndicatorBarStartY)
 	if (moved > 3) {
 		// Если движение больше 3px, это drag - выполняем скролл
 		levelIndicatorBarHasMoved = true
 		e.preventDefault()
 		e.stopPropagation()
-		
+
 		// Начинаем drag через ElasticScroll при первом движении
 		if (!levelIndicatorBarDragStarted) {
 			levelIndicatorBarDragStarted = true
 			momentumScrollRef.value.updateBounds()
 			momentumScrollRef.value.startDrag(performance.now())
 		}
-		
+
 		// Преобразуем дельту движения касания в дельту скролла
 		const scrollDelta = deltaY * levelIndicatorBarScrollRatio
-		
+
 		// Используем метод drag для плавного скролла с инерцией
 		momentumScrollRef.value.drag(scrollDelta, performance.now())
 	}
@@ -827,59 +876,59 @@ function handleLevelIndicatorBarTouchMove(e: TouchEvent) {
 
 function handleLevelIndicatorBarTouchEnd(e: TouchEvent) {
 	if (!levelIndicatorBarElement) return
-	
+
 	const touch = e.changedTouches[0]
 	if (!touch || touch.identifier !== levelIndicatorBarTouchId) return
-	
+
 	const moved = Math.abs(touch.clientY - levelIndicatorBarStartY)
-	
+
 	// Сохраняем значения в локальные переменные перед nextTick
 	const barElement = levelIndicatorBarElement
 	const startY = levelIndicatorBarStartY
 	const hasMoved = levelIndicatorBarHasMoved
 	const dragStarted = levelIndicatorBarDragStarted
-	
+
 	// Завершаем drag через ElasticScroll, если он был начат
 	if (dragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	// Очищаем состояние сразу
 	levelIndicatorBarTouchId = null
 	levelIndicatorBarElement = null
 	levelIndicatorBarHasMoved = false
 	levelIndicatorBarDragStarted = false
-	
+
 	// Если движения не было, это клик - вычисляем позицию скролла
 	if (!hasMoved && moved <= 10) {
 		e.preventDefault()
 		e.stopPropagation()
-		
+
 		// Используем nextTick для гарантии, что ref инициализирован
 		nextTick(() => {
 			if (!momentumScrollRef.value) {
 				console.warn('momentumScrollRef is still null after nextTick')
 				return
 			}
-			
+
 			// Обновляем границы скролла перед вычислением позиции
 			momentumScrollRef.value.updateBounds()
-			
+
 			// Получаем позицию касания относительно бара (используем сохраненные координаты из touchstart)
 			const rect = barElement.getBoundingClientRect()
 			const touchY = startY - rect.top
 			const barHeight = rect.height
-			
+
 			// Вычисляем процент от верха бара (0 = верх, 1 = низ)
 			const touchPercent = Math.max(0, Math.min(1, touchY / barHeight))
-			
+
 			// Получаем состояние скролла
 			const scrollState = momentumScrollRef.value.getScrollState()
 			const maxScroll = scrollState?.maxY ?? 0
-			
+
 			// Вычисляем целевую позицию скролла на основе процента касания
 			const targetScroll = touchPercent * maxScroll
-			
+
 			// Выполняем плавный скролл с анимацией
 			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
 		})
@@ -892,67 +941,69 @@ function handleLevelIndicatorTouchStart(e: TouchEvent) {
 	if (target.closest('.level-indicator__bar')) {
 		return // Бар обрабатывает свои события отдельно
 	}
-	
+
 	if (!levelIndicatorRef.value || !momentumScrollRef.value) return
-	
+
 	const touch = e.touches[0]
 	if (!touch) return
-	
+
 	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
 	if (levelIndicatorDragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	const indicatorElement = levelIndicatorRef.value
-	
+
 	levelIndicatorTouchId = touch.identifier
 	levelIndicatorStartY = touch.clientY
 	levelIndicatorLastY = touch.clientY
 	levelIndicatorHasMoved = false
 	levelIndicatorDragStarted = false
-	
+
 	// Вычисляем коэффициент масштабирования для преобразования движения касания в скролл
 	const scrollState = momentumScrollRef.value.getScrollState()
 	const maxScroll = scrollState?.maxY ?? 0
 	const indicatorHeight = indicatorElement.getBoundingClientRect().height
-	
+
 	if (indicatorHeight > 0 && maxScroll > 0) {
 		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения касания
 		levelIndicatorScrollRatio = maxScroll / indicatorHeight
 	} else {
 		levelIndicatorScrollRatio = 1
 	}
-	
+
 	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
 }
 
 function handleLevelIndicatorTouchMove(e: TouchEvent) {
 	if (!momentumScrollRef.value || !levelIndicatorRef.value) return
-	
-	const touch = Array.from(e.touches).find(t => t.identifier === levelIndicatorTouchId)
+
+	const touch = Array.from(e.touches).find(
+		(t) => t.identifier === levelIndicatorTouchId,
+	)
 	if (!touch) return
-	
+
 	// Всегда обновляем lastY для правильного расчета дельты
 	const deltaY = levelIndicatorLastY - touch.clientY
 	levelIndicatorLastY = touch.clientY
-	
+
 	const moved = Math.abs(touch.clientY - levelIndicatorStartY)
 	if (moved > 3) {
 		// Если движение больше 3px, это drag - выполняем скролл
 		levelIndicatorHasMoved = true
 		e.preventDefault()
 		e.stopPropagation()
-		
+
 		// Начинаем drag через ElasticScroll при первом движении
 		if (!levelIndicatorDragStarted) {
 			levelIndicatorDragStarted = true
 			momentumScrollRef.value.updateBounds()
 			momentumScrollRef.value.startDrag(performance.now())
 		}
-		
+
 		// Преобразуем дельту движения касания в дельту скролла
 		const scrollDelta = deltaY * levelIndicatorScrollRatio
-		
+
 		// Используем метод drag для плавного скролла с инерцией
 		momentumScrollRef.value.drag(scrollDelta, performance.now())
 	}
@@ -960,58 +1011,58 @@ function handleLevelIndicatorTouchMove(e: TouchEvent) {
 
 function handleLevelIndicatorTouchEnd(e: TouchEvent) {
 	if (!levelIndicatorRef.value) return
-	
+
 	const touch = e.changedTouches[0]
 	if (!touch || touch.identifier !== levelIndicatorTouchId) return
-	
+
 	const moved = Math.abs(touch.clientY - levelIndicatorStartY)
-	
+
 	// Сохраняем значения в локальные переменные перед nextTick
 	const indicatorElement = levelIndicatorRef.value
 	const startY = levelIndicatorStartY
 	const hasMoved = levelIndicatorHasMoved
 	const dragStarted = levelIndicatorDragStarted
-	
+
 	// Завершаем drag через ElasticScroll, если он был начат
 	if (dragStarted && momentumScrollRef.value) {
 		momentumScrollRef.value.endDrag()
 	}
-	
+
 	// Очищаем состояние сразу
 	levelIndicatorTouchId = null
 	levelIndicatorHasMoved = false
 	levelIndicatorDragStarted = false
-	
+
 	// Если движения не было, это клик - вычисляем позицию скролла
 	if (!hasMoved && moved <= 10) {
 		e.preventDefault()
 		e.stopPropagation()
-		
+
 		// Используем nextTick для гарантии, что ref инициализирован
 		nextTick(() => {
 			if (!momentumScrollRef.value) {
 				console.warn('momentumScrollRef is still null after nextTick')
 				return
 			}
-			
+
 			// Обновляем границы скролла перед вычислением позиции
 			momentumScrollRef.value.updateBounds()
-			
+
 			// Получаем позицию касания относительно индикатора
 			const rect = indicatorElement.getBoundingClientRect()
 			const touchY = startY - rect.top
 			const indicatorHeight = rect.height
-			
+
 			// Вычисляем процент от верха индикатора (0 = верх, 1 = низ)
 			const touchPercent = Math.max(0, Math.min(1, touchY / indicatorHeight))
-			
+
 			// Получаем состояние скролла
 			const scrollState = momentumScrollRef.value.getScrollState()
 			const maxScroll = scrollState?.maxY ?? 0
-			
+
 			// Вычисляем целевую позицию скролла на основе процента касания
 			const targetScroll = touchPercent * maxScroll
-			
+
 			// Выполняем плавный скролл с анимацией
 			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
 		})
@@ -1054,7 +1105,9 @@ const formattedTime = computed(() => {
 	return `${String(Math.floor(time / 60)).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 })
 
-const gridHeight = computed(() => gameStore.grid?.length ?? gameStore.getHeight())
+const gridHeight = computed(
+	() => gameStore.grid?.length ?? gameStore.getHeight(),
+)
 // Индикатор «сколько рядов до верха сосуда»: верхняя занятая строка (0 = у края, game over)
 const topmostRow = computed(() => {
 	const g = gameStore.grid
@@ -1082,32 +1135,36 @@ const levelBarColor = computed(() => {
 /** При расширении сосуда: только переразмер канваса и Pixi. Скролл (updateBounds, scrollToBottom) — в MomentumScroll по ResizeObserver. */
 async function handleVesselExpanded(): Promise<void> {
 	if (!renderer) return
-	
+
 	// КРИТИЧНО: Получаем canvas из PixiService
 	const pixiCanvas = getPixiCanvas()
 	if (!pixiCanvas) return
-	
+
 	initCanvas()
-	
+
 	// Получаем актуальную высоту grid для правильного расчета позиций
 	const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
-	
+
 	// Обновляем размер плитки в renderer (на случай если ширина контейнера изменилась)
 	const container = pixiCanvas.parentElement
 	// Инвалидируем кэш перед получением новых размеров
 	cachedContainerRect = null
-	const containerWidth = (container?.getBoundingClientRect().width ?? parseInt(pixiCanvas.style.width)) || 320
+	const containerWidth =
+		(container?.getBoundingClientRect().width ??
+			parseInt(pixiCanvas.style.width)) ||
+		320
 	const newTileSize = Math.max(containerWidth, 320) / WIDTH
-	
+
 	// Получаем логические размеры из CSS стилей (не внутренние размеры canvas!)
 	const logicalWidth = parseInt(pixiCanvas.style.width) || containerWidth
-	const logicalHeight = parseInt(pixiCanvas.style.height) || (gridHeight * newTileSize)
-	
+	const logicalHeight =
+		parseInt(pixiCanvas.style.height) || gridHeight * newTileSize
+
 	// forceUpdatePositions = true гарантирует, что все позиции будут пересчитаны даже если tileSize не изменился
 	// Передаем gridHeight для правильного расчета позиций снизу
 	// Это важно при расширении сосуда, когда canvas становится выше, но tileSize остается тем же
 	renderer.updateTileSize(newTileSize, true, gridHeight)
-	
+
 	// Передаем логические размеры для правильного расчета позиций при изменении размера canvas
 	renderer.resizeCanvas(logicalWidth, logicalHeight, gridHeight)
 	// Синхронизируем позиции блоков после изменения размера canvas
@@ -1118,7 +1175,9 @@ async function handleVesselExpanded(): Promise<void> {
 
 function initCanvas(): void {
 	// КРИТИЧНО: Получаем контейнер из canvas ref или из DOM
-	const container = canvas.value?.parentElement || document.querySelector('.game-page__canvas-container')
+	const container =
+		canvas.value?.parentElement ||
+		document.querySelector('.game-page__canvas-container')
 	if (!container) {
 		console.warn('[GamePage] initCanvas: container not found')
 		return
@@ -1134,19 +1193,23 @@ function initCanvas(): void {
 	// Принудительно используем полную ширину контейнера для 8 кубиков
 	// Получаем актуальные размеры контейнера
 	let containerRect = container.getBoundingClientRect()
-	
+
 	// Если размеры нулевые, пытаемся получить их из computed styles или используем кэш
 	if (containerRect.width === 0 || containerRect.height === 0) {
 		const computedStyle = window.getComputedStyle(container)
 		const parentRect = container.parentElement?.getBoundingClientRect()
-		
+
 		// Пытаемся использовать ширину родителя или computed width
 		if (parentRect && parentRect.width > 0) {
 			containerRect = {
 				...containerRect,
 				width: parentRect.width,
 			} as DOMRect
-		} else if (computedStyle.width && computedStyle.width !== 'auto' && computedStyle.width !== '0px') {
+		} else if (
+			computedStyle.width &&
+			computedStyle.width !== 'auto' &&
+			computedStyle.width !== '0px'
+		) {
 			const width = parseFloat(computedStyle.width)
 			if (width > 0) {
 				containerRect = {
@@ -1155,7 +1218,7 @@ function initCanvas(): void {
 				} as DOMRect
 			}
 		}
-		
+
 		// Если все еще нулевые, используем кэш или минимальные значения
 		if (containerRect.width === 0) {
 			if (cachedContainerRect && cachedContainerRect.width > 0) {
@@ -1168,7 +1231,7 @@ function initCanvas(): void {
 			}
 		}
 	}
-	
+
 	cachedContainerRect = containerRect
 	const maxWidth = Math.max(containerRect.width, 320) // Минимум 320px для мобильных
 	// Используем фактическую высоту grid, а не gameStore.getHeight()
@@ -1184,14 +1247,16 @@ function initCanvas(): void {
 	pixiCanvas.style.width = `${maxWidth}px`
 	pixiCanvas.style.height = `${canvasHeight}px`
 	pixiCanvas.style.display = 'block'
-	
+
 	// НЕ устанавливаем внутренние размеры canvas вручную!
 	// PixiJS с autoDensity: true сам управляет внутренними размерами
 	// на основе CSS размеров и devicePixelRatio
 	// Установка внутренних размеров вручную может вызвать проблемы на Android
 }
 
-function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: number; c: number } | null {
+function getPositionFromEvent(
+	e: MouseEvent | TouchEvent | PointerEvent,
+): { r: number; c: number } | null {
 	// КРИТИЧНО: Используем canvas из PixiService
 	const pixiCanvas = getPixiCanvas()
 	if (!pixiCanvas || !renderer) return null
@@ -1199,7 +1264,7 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 	// Получаем координаты в зависимости от типа события
 	let clientX: number
 	let clientY: number
-	
+
 	if (e instanceof PointerEvent) {
 		clientX = e.clientX
 		clientY = e.clientY
@@ -1217,7 +1282,7 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 
 	// Получаем bounding rect для расчета относительных координат
 	const rect = pixiCanvas.getBoundingClientRect()
-	
+
 	// Координаты относительно canvas (getBoundingClientRect учитывает все трансформации и скролл)
 	const x = clientX - rect.left
 	const y = clientY - rect.top
@@ -1226,21 +1291,21 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 	// Это важно на Android, где могут быть проблемы с devicePixelRatio
 	const screenSize = renderer.getScreenSize()
 	if (!screenSize) return null
-	
+
 	// Масштабируем координаты с учетом реальных размеров canvas на экране
 	// и логических размеров в PixiJS
 	const scaleX = screenSize.width / rect.width
 	const scaleY = screenSize.height / rect.height
-	
+
 	const canvasX = x * scaleX
 	const canvasY = y * scaleY
-	
+
 	// Используем tileSize из renderer для точного расчета позиции
 	const tileSize = screenSize.width / WIDTH
-	
+
 	const c = Math.floor(canvasX / tileSize)
 	const r = Math.floor(canvasY / tileSize)
-	
+
 	// Используем фактическую высоту grid для проверки границ
 	const h = gameStore.grid?.length ?? gameStore.getHeight()
 
@@ -1254,14 +1319,21 @@ function getPositionFromEvent(e: MouseEvent | TouchEvent | PointerEvent): { r: n
 function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// КРИТИЧНО: Блокируем ввод до тех пор, пока игра не запущена
 	if (!gameStore.isGameStarted) {
-		console.log('[GamePage] handlePointerDown: input blocked, game not started yet')
+		console.log(
+			'[GamePage] handlePointerDown: input blocked, game not started yet',
+		)
 		return
 	}
 	if (gameStore.isLocked || gameStore.isGameOver) return
 
 	// Защита от двойной обработки событий на мобильных устройствах
 	// На мобильных устройствах pointerdown и touchstart могут срабатывать одновременно
-	const eventType = e instanceof TouchEvent ? 'touch' : e instanceof PointerEvent ? 'pointer' : 'mouse'
+	const eventType =
+		e instanceof TouchEvent
+			? 'touch'
+			: e instanceof PointerEvent
+				? 'pointer'
+				: 'mouse'
 	const now = Date.now()
 	if (now - lastEventTime < 50 && lastEventType !== eventType) {
 		// Игнорируем событие, если недавно было обработано событие другого типа
@@ -1273,17 +1345,17 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// Unlock audio context on first interaction (iOS/Android)
 	AudioManager.unlock()
 
-		// Предотвращаем скролл при взаимодействии с canvas
-		// КРИТИЧНО: Используем canvas из PixiService
-		const pixiCanvas = getPixiCanvas()
-		
-		if (e instanceof PointerEvent) {
-			e.preventDefault()
-			e.stopPropagation()
-			// Захватываем pointer для отслеживания движения
-			if (pixiCanvas && e.pointerId !== undefined) {
-				pixiCanvas.setPointerCapture(e.pointerId)
-			}
+	// Предотвращаем скролл при взаимодействии с canvas
+	// КРИТИЧНО: Используем canvas из PixiService
+	const pixiCanvas = getPixiCanvas()
+
+	if (e instanceof PointerEvent) {
+		e.preventDefault()
+		e.stopPropagation()
+		// Захватываем pointer для отслеживания движения
+		if (pixiCanvas && e.pointerId !== undefined) {
+			pixiCanvas.setPointerCapture(e.pointerId)
+		}
 	} else if (e instanceof TouchEvent) {
 		// Для touch событий также предотвращаем скролл
 		e.preventDefault()
@@ -1336,17 +1408,17 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		momentumScrollRef.value.endDrag()
 		canvasDragScrolling = false
 	}
-	
+
 	// Освобождаем pointer, если был захвачен
 	// КРИТИЧНО: Используем canvas из PixiService
 	const pixiCanvas = getPixiCanvas()
-	
+
 	if (e instanceof PointerEvent && pixiCanvas && e.pointerId !== undefined) {
 		if (pixiCanvas.hasPointerCapture(e.pointerId)) {
 			pixiCanvas.releasePointerCapture(e.pointerId)
 		}
 	}
-	
+
 	if (!dragStart || gameStore.isLocked || gameStore.isGameOver) {
 		dragStart = null
 		dragStartClient = null
@@ -1401,7 +1473,8 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// Если был свайп (isDragging = true), обрабатываем его
 	if (isDragging) {
 		// Check if adjacent
-		const isAdjacent = (Math.abs(dr) === 1 && dc === 0) || (dr === 0 && Math.abs(dc) === 1)
+		const isAdjacent =
+			(Math.abs(dr) === 1 && dc === 0) || (dr === 0 && Math.abs(dc) === 1)
 
 		if (isAdjacent) {
 			// Check if target has cube for swap, or empty for slide
@@ -1412,7 +1485,13 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 			if (targetCube && fromCube && fromCube.moves > 0) {
 				// Both have cubes - swap
 				gameController?.applyUserAction('swap', dragStart, pos)
-			} else if (!targetCube && fromCube && fromCube.moves > 0 && Math.abs(dc) === 1 && dr === 0) {
+			} else if (
+				!targetCube &&
+				fromCube &&
+				fromCube.moves > 0 &&
+				Math.abs(dc) === 1 &&
+				dr === 0
+			) {
 				// Target empty and horizontal move - slide
 				gameController?.applyUserAction('slide', dragStart, pos)
 			}
@@ -1459,8 +1538,10 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 			return
 		}
 		// Second click on another block
-		const adjR = Math.abs(pos.r - selectedForSwap.r) === 1 && pos.c === selectedForSwap.c
-		const adjC = pos.r === selectedForSwap.r && Math.abs(pos.c - selectedForSwap.c) === 1
+		const adjR =
+			Math.abs(pos.r - selectedForSwap.r) === 1 && pos.c === selectedForSwap.c
+		const adjC =
+			pos.r === selectedForSwap.r && Math.abs(pos.c - selectedForSwap.c) === 1
 		const isAdjacentClick = adjR || adjC
 		const targetCube = gameStore.grid[pos.r]?.[pos.c]
 		const fromCubeSel = gameStore.grid[selectedForSwap.r]?.[selectedForSwap.c]
@@ -1472,7 +1553,14 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 			dragStart = null
 			return
 		}
-		if (isAdjacentClick && !targetCube && fromCubeSel && fromCubeSel.moves > 0 && Math.abs(pos.c - selectedForSwap.c) === 1 && pos.r === selectedForSwap.r) {
+		if (
+			isAdjacentClick &&
+			!targetCube &&
+			fromCubeSel &&
+			fromCubeSel.moves > 0 &&
+			Math.abs(pos.c - selectedForSwap.c) === 1 &&
+			pos.r === selectedForSwap.r
+		) {
 			// Horizontal slide into empty
 			gameController?.applyUserAction('slide', selectedForSwap, pos)
 			selectedForSwap = null
@@ -1497,11 +1585,48 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		dragStart = null
 		dragStartClient = null
 	}
-	
+
 	// Очищаем состояние drag scrolling
 	canvasDragStartTime = 0
 	canvasDragScrolling = false
 	canvasDragStartedOnBlock = false
+}
+
+// Функция для запуска игры с проверкой рекламы
+async function startGameWithAds(): Promise<void> {
+	if (!gameController) return
+
+	// Увеличиваем счетчик игр
+	gameStore.incrementGamesPlayed()
+
+	// Проверяем, нужно ли показать interstitial рекламу
+	const shouldShowAd = gameStore.shouldShowInterstitial()
+
+	if (shouldShowAd) {
+		console.log('[GamePage] Showing interstitial ad before game start')
+		isGenerating.value = true
+
+		// Показываем interstitial рекламу и ждем её закрытия
+		await new Promise<void>((resolve) => {
+			admob.interstitial({
+				isFirst: false,
+				onInterstitialAdClosed: () => {
+					console.log('[GamePage] Interstitial ad closed, starting game')
+					resolve()
+				},
+			})
+		})
+	}
+
+	// Запускаем игру после закрытия рекламы (или если реклама не нужна)
+	await gameController.startGame()
+
+	const tilesAddedTime = performance.now()
+	gameStore.setDiagnostic('tilesAdded', tilesAddedTime)
+	console.log(`[GamePage] tiles added at ${tilesAddedTime.toFixed(2)}ms`)
+
+	// Запускаем boot-цепочку
+	await gameController.bootGame()
 }
 
 onMounted(async () => {
@@ -1516,29 +1641,42 @@ onMounted(async () => {
 	// Ждем, пока DOM полностью отрендерится
 	await nextTick()
 	await new Promise((resolve) => requestAnimationFrame(resolve))
-	
-	let container = canvas.value?.parentElement || document.querySelector('.game-page__canvas-container') as HTMLElement
-	
+
+	let container =
+		canvas.value?.parentElement ||
+		(document.querySelector('.game-page__canvas-container') as HTMLElement)
+
 	// Если контейнер не найден, пытаемся найти его через playAreaRef
 	if (!container && playAreaRef.value) {
-		container = playAreaRef.value.querySelector('.game-page__canvas-container') as HTMLElement
+		container = playAreaRef.value.querySelector(
+			'.game-page__canvas-container',
+		) as HTMLElement
 	}
-	
+
 	// Если все еще не найден, ждем еще немного и ищем снова
 	if (!container) {
 		await new Promise((resolve) => setTimeout(resolve, 100))
-		container = canvas.value?.parentElement || document.querySelector('.game-page__canvas-container') as HTMLElement
+		container =
+			canvas.value?.parentElement ||
+			(document.querySelector('.game-page__canvas-container') as HTMLElement)
 	}
-	
+
 	if (!container) {
-		console.error('[GamePage] onMounted: Canvas container not found after waiting')
+		console.error(
+			'[GamePage] onMounted: Canvas container not found after waiting',
+		)
 		return
 	}
-	
+
 	// КРИТИЧНО: Проверяем, что контейнер не скрыт (display: none)
 	const containerStyle = window.getComputedStyle(container)
-	if (containerStyle.display === 'none' || containerStyle.visibility === 'hidden') {
-		console.warn('[GamePage] onMounted: Canvas container is hidden, waiting for visibility...')
+	if (
+		containerStyle.display === 'none' ||
+		containerStyle.visibility === 'hidden'
+	) {
+		console.warn(
+			'[GamePage] onMounted: Canvas container is hidden, waiting for visibility...',
+		)
 		// Ждем, пока контейнер станет видимым
 		await new Promise((resolve) => {
 			const checkVisibility = () => {
@@ -1555,7 +1693,9 @@ onMounted(async () => {
 
 	// КРИТИЧНО: Проверяем, что PixiService инициализирован
 	if (!PixiService.isReady()) {
-		console.error('[GamePage] onMounted: PixiService not initialized. Please initialize on StartPage first.')
+		console.error(
+			'[GamePage] onMounted: PixiService not initialized. Please initialize on StartPage first.',
+		)
 		// Попытка инициализировать в экстренном случае (не должно происходить)
 		await PixiService.init(container, { width: 320, height: 400 })
 	}
@@ -1567,14 +1707,14 @@ onMounted(async () => {
 
 	// КРИТИЧНО: Прикрепляем canvas из PixiService к нашему контейнеру
 	PixiService.attachToHost(container)
-	
+
 	// Получаем canvas из PixiService
 	const pixiCanvas = getPixiCanvas()
 	if (!pixiCanvas) {
 		console.error('[GamePage] onMounted: Failed to get canvas from PixiService')
 		return
 	}
-	
+
 	// КРИТИЧНО: Убеждаемся, что canvas видим после прикрепления
 	pixiCanvas.style.display = 'block'
 	pixiCanvas.style.visibility = 'visible'
@@ -1585,31 +1725,39 @@ onMounted(async () => {
 	let containerRect = container.getBoundingClientRect()
 	let attempts = 0
 	const maxAttempts = 20 // Максимум 20 попыток (примерно 1 секунда при 50ms задержке)
-	
-	while ((containerRect.width === 0 || containerRect.height === 0) && attempts < maxAttempts) {
+
+	while (
+		(containerRect.width === 0 || containerRect.height === 0) &&
+		attempts < maxAttempts
+	) {
 		attempts++
-		console.log(`[GamePage] onMounted: Waiting for container dimensions (attempt ${attempts}/${maxAttempts})...`)
-		
+		console.log(
+			`[GamePage] onMounted: Waiting for container dimensions (attempt ${attempts}/${maxAttempts})...`,
+		)
+
 		// Ждем несколько кадров для расчета layout
 		await nextTick()
 		await new Promise((resolve) => requestAnimationFrame(resolve))
 		await new Promise((resolve) => requestAnimationFrame(resolve))
 		await new Promise((resolve) => setTimeout(resolve, 50)) // Дополнительная задержка для flexbox
-		
+
 		containerRect = container.getBoundingClientRect()
 	}
-	
+
 	if (containerRect.width === 0 || containerRect.height === 0) {
-		console.error('[GamePage] onMounted: Canvas container has zero dimensions after waiting:', {
-			width: containerRect.width,
-			height: containerRect.height,
-			styleWidth: container.style.width,
-			styleHeight: container.style.height,
-			computedWidth: window.getComputedStyle(container).width,
-			computedHeight: window.getComputedStyle(container).height,
-			parentWidth: container.parentElement?.getBoundingClientRect().width,
-			parentHeight: container.parentElement?.getBoundingClientRect().height
-		})
+		console.error(
+			'[GamePage] onMounted: Canvas container has zero dimensions after waiting:',
+			{
+				width: containerRect.width,
+				height: containerRect.height,
+				styleWidth: container.style.width,
+				styleHeight: container.style.height,
+				computedWidth: window.getComputedStyle(container).width,
+				computedHeight: window.getComputedStyle(container).height,
+				parentWidth: container.parentElement?.getBoundingClientRect().width,
+				parentHeight: container.parentElement?.getBoundingClientRect().height,
+			},
+		)
 		// Продолжаем с минимальными размерами вместо ошибки
 		console.warn('[GamePage] onMounted: Using fallback dimensions (320x400)')
 		containerRect = { width: 320, height: 400 } as DOMRect
@@ -1617,11 +1765,11 @@ onMounted(async () => {
 
 	// Инициализируем canvas с правильными размерами
 	initCanvas()
-	
+
 	// Ждем еще один кадр после initCanvas для гарантии, что размеры установлены
 	await nextTick()
 	await new Promise((resolve) => requestAnimationFrame(resolve))
-	
+
 	// КРИТИЧНО: Проверяем видимость canvas после инициализации
 	const pixiCanvasAfterInit = getPixiCanvas()
 	if (pixiCanvasAfterInit) {
@@ -1634,18 +1782,20 @@ onMounted(async () => {
 			width: canvasRect.width,
 			height: canvasRect.height,
 			styleWidth: pixiCanvasAfterInit.style.width,
-			styleHeight: pixiCanvasAfterInit.style.height
+			styleHeight: pixiCanvasAfterInit.style.height,
 		})
-		
+
 		// Принудительно устанавливаем видимость если нужно
 		if (canvasStyle.display === 'none' || canvasRect.width === 0) {
-			console.warn('[GamePage] onMounted: Canvas is hidden or has zero width, forcing visibility')
+			console.warn(
+				'[GamePage] onMounted: Canvas is hidden or has zero width, forcing visibility',
+			)
 			pixiCanvasAfterInit.style.display = 'block'
 			pixiCanvasAfterInit.style.visibility = 'visible'
 			pixiCanvasAfterInit.style.opacity = '1'
 		}
 	}
-	
+
 	// КРИТИЧНО: Обновляем bounds для MomentumScroll после установки размеров canvas
 	if (momentumScrollRef.value) {
 		await nextTick()
@@ -1655,59 +1805,69 @@ onMounted(async () => {
 
 	// Create renderer с правильным tileSize (всегда ширина / 8)
 	// Используем кэшированное значение из initCanvas
-	const containerWidth = cachedContainerRect?.width ?? containerRect.width ?? pixiCanvas.width
+	const containerWidth =
+		cachedContainerRect?.width ?? containerRect.width ?? pixiCanvas.width
 	const tileSize = Math.max(containerWidth, 320) / WIDTH // Минимум 320px для мобильных
-	
+
 	const rendererInitStartTime = performance.now()
 	console.log('[GamePage] onMounted: creating GameRenderer')
-	
+
 	renderer = new GameRenderer({
 		canvas: pixiCanvas, // Используем canvas из PixiService
 		tileSize,
 	})
 
 	await renderer.init()
-	
-	console.log(`[GamePage] onMounted: GameRenderer initialized in ${(performance.now() - rendererInitStartTime).toFixed(2)}ms`)
-	
+
+	console.log(
+		`[GamePage] onMounted: GameRenderer initialized in ${(performance.now() - rendererInitStartTime).toFixed(2)}ms`,
+	)
+
 	// КРИТИЧНО: Проверяем видимость canvas после инициализации renderer
 	const pixiCanvasAfterRenderer = getPixiCanvas()
 	if (pixiCanvasAfterRenderer) {
 		pixiCanvasAfterRenderer.style.display = 'block'
 		pixiCanvasAfterRenderer.style.visibility = 'visible'
 		pixiCanvasAfterRenderer.style.opacity = '1'
-		
-		const canvasRectAfterRenderer = pixiCanvasAfterRenderer.getBoundingClientRect()
+
+		const canvasRectAfterRenderer =
+			pixiCanvasAfterRenderer.getBoundingClientRect()
 		console.log('[GamePage] onMounted: Canvas after renderer init:', {
 			display: pixiCanvasAfterRenderer.style.display,
 			width: canvasRectAfterRenderer.width,
 			height: canvasRectAfterRenderer.height,
 			styleWidth: pixiCanvasAfterRenderer.style.width,
-			styleHeight: pixiCanvasAfterRenderer.style.height
+			styleHeight: pixiCanvasAfterRenderer.style.height,
 		})
 	}
-	
+
 	// После инициализации PixiJS нужно убедиться, что размеры canvas правильные
 	// Получаем актуальные размеры из CSS (они уже установлены в initCanvas)
 	const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
-	
+
 	const finalPixiCanvas = getPixiCanvas()
-	const canvasWidth = finalPixiCanvas ? (parseInt(finalPixiCanvas.style.width) || containerWidth) : containerWidth
-	const canvasHeight = finalPixiCanvas ? (parseInt(finalPixiCanvas.style.height) || (gridHeight * tileSize)) : (gridHeight * tileSize)
+	const canvasWidth = finalPixiCanvas
+		? parseInt(finalPixiCanvas.style.width) || containerWidth
+		: containerWidth
+	const canvasHeight = finalPixiCanvas
+		? parseInt(finalPixiCanvas.style.height) || gridHeight * tileSize
+		: gridHeight * tileSize
 	// Обновляем размеры через renderer, чтобы PixiJS правильно их обработал
 	renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
-	
+
 	// КРИТИЧНО: Обновляем bounds для MomentumScroll после установки размеров canvas
 	await nextTick()
 	await new Promise((resolve) => requestAnimationFrame(resolve))
 	if (momentumScrollRef.value) {
 		momentumScrollRef.value.updateBounds()
-		console.log('[GamePage] onMounted: MomentumScroll bounds updated after renderer resize')
+		console.log(
+			'[GamePage] onMounted: MomentumScroll bounds updated after renderer resize',
+		)
 	}
 
 	const controllerInitStartTime = performance.now()
 	console.log('[GamePage] onMounted: creating GameController')
-	
+
 	// Create game controller с callback'ами для boot-цепочки
 	gameController = new GameController(renderer, {
 		onVesselExpanded: handleVesselExpanded,
@@ -1715,30 +1875,38 @@ onMounted(async () => {
 			// Callback для скрытия loading overlay
 			const hideLoadingTime = performance.now()
 			gameStore.setDiagnostic('loaderHidden', hideLoadingTime)
-			console.log(`[GamePage] onHideLoading: loader hidden at ${hideLoadingTime.toFixed(2)}ms`)
+			console.log(
+				`[GamePage] onHideLoading: loader hidden at ${hideLoadingTime.toFixed(2)}ms`,
+			)
 			isGenerating.value = false
 		},
 		onStartScrollAnimation: async () => {
 			// Callback для запуска анимации скроллинга
 			const scrollStartTime = performance.now()
 			gameStore.setDiagnostic('scrollStarted', scrollStartTime)
-			console.log(`[GamePage] onStartScrollAnimation: scroll started at ${scrollStartTime.toFixed(2)}ms`)
-			
+			console.log(
+				`[GamePage] onStartScrollAnimation: scroll started at ${scrollStartTime.toFixed(2)}ms`,
+			)
+
 			// Update scroll bounds после того, как игра запущена
 			momentumScrollRef.value?.updateBounds()
 
 			// Animate scroll to bottom
 			await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
-			
+
 			const scrollEndTime = performance.now()
-			console.log(`[GamePage] onStartScrollAnimation: scroll completed in ${(scrollEndTime - scrollStartTime).toFixed(2)}ms`)
-		}
+			console.log(
+				`[GamePage] onStartScrollAnimation: scroll completed in ${(scrollEndTime - scrollStartTime).toFixed(2)}ms`,
+			)
+		},
 	})
 
 	// Initialize controller - текстуры уже загружены в PixiService
 	await gameController.init()
-	
-	console.log(`[GamePage] onMounted: GameController initialized in ${(performance.now() - controllerInitStartTime).toFixed(2)}ms`)
+
+	console.log(
+		`[GamePage] onMounted: GameController initialized in ${(performance.now() - controllerInitStartTime).toFixed(2)}ms`,
+	)
 
 	// Set initial scroll position to top
 	momentumScrollRef.value?.scrollToTop()
@@ -1747,62 +1915,171 @@ onMounted(async () => {
 	const levelParam = route.query.level
 	const level = levelParam ? parseInt(String(levelParam), 10) : 1
 	if (isNaN(level) || level < 1) {
-		console.warn(`[GamePage] Invalid level parameter: ${levelParam}, using default level 1`)
+		console.warn(
+			`[GamePage] Invalid level parameter: ${levelParam}, using default level 1`,
+		)
 		gameStore.setCurrentLevel(1)
 	} else {
 		gameStore.setCurrentLevel(level)
 		console.log(`[GamePage] Starting game at level ${level}`)
 	}
 
+	// Показываем баннерную рекламу снизу экрана
+	try {
+		await admob.showBanner()
+		console.log('[GamePage] Banner ad shown')
+	} catch (error) {
+		console.warn('[GamePage] Failed to show banner ad:', error)
+	}
+
 	const gameStartTime = performance.now()
 	console.log('[GamePage] onMounted: starting game')
-	
-	// Start game (generation happens here)
-	// startGame() теперь:
-	// 1. Устанавливает isAssetsReady, isSceneReady, isTilesAdded
-	// 2. Вызывает renderGrid(), который ждет первого рендера через app.ticker.addOnce()
-	// 3. После первого рендера вызывает onFirstFrameRendered(), который устанавливает isFirstFrameRendered = true
-	await gameController.startGame()
-	
-	const tilesAddedTime = performance.now()
-	gameStore.setDiagnostic('tilesAdded', tilesAddedTime)
-	console.log(`[GamePage] onMounted: tiles added at ${tilesAddedTime.toFixed(2)}ms`)
 
-	// КРИТИЧНО: Запускаем единую boot-цепочку после того, как плитки готовы
-	// Порядок: tiles visible -> hide loader -> start scroll -> start timer
-	await gameController.bootGame()
-	
-	console.log(`[GamePage] onMounted: game boot completed in ${(performance.now() - gameStartTime).toFixed(2)}ms`)
-	console.log(`[GamePage] onMounted: total initialization completed in ${(performance.now() - gamePageStartTime).toFixed(2)}ms`)
+	// Используем функцию с проверкой рекламы для запуска игры
+	await startGameWithAds()
 
-		// Setup input handlers
-		// КРИТИЧНО: Используем canvas из PixiService
-		const pixiCanvasForHandlers = getPixiCanvas()
-		if (!pixiCanvasForHandlers) {
-			console.error('[GamePage] onMounted: Failed to get canvas for event handlers')
+	console.log(
+		`[GamePage] onMounted: game boot completed in ${(performance.now() - gameStartTime).toFixed(2)}ms`,
+	)
+	console.log(
+		`[GamePage] onMounted: total initialization completed in ${(performance.now() - gamePageStartTime).toFixed(2)}ms`,
+	)
+
+	// Setup input handlers
+	// КРИТИЧНО: Используем canvas из PixiService
+	const pixiCanvasForHandlers = getPixiCanvas()
+	if (!pixiCanvasForHandlers) {
+		console.error(
+			'[GamePage] onMounted: Failed to get canvas for event handlers',
+		)
+		return
+	}
+
+	// Используем pointer events с preventDefault для предотвращения скролла
+	pixiCanvasForHandlers.addEventListener('pointerdown', handlePointerDown, {
+		passive: false,
+	})
+	pixiCanvasForHandlers.addEventListener('pointerup', handlePointerUp, {
+		passive: false,
+	})
+	pixiCanvasForHandlers.addEventListener('pointercancel', handlePointerUp, {
+		passive: false,
+	})
+
+	// Обработчик для pointermove - отслеживаем свайп
+	pointerMoveHandler = (e: PointerEvent) => {
+		if (
+			!dragStart ||
+			!dragStartClient ||
+			gameStore.isLocked ||
+			gameStore.isGameOver
+		) {
 			return
 		}
-		
-		// Используем pointer events с preventDefault для предотвращения скролла
-		pixiCanvasForHandlers.addEventListener('pointerdown', handlePointerDown, { passive: false })
-		pixiCanvasForHandlers.addEventListener('pointerup', handlePointerUp, { passive: false })
-		pixiCanvasForHandlers.addEventListener('pointercancel', handlePointerUp, { passive: false })
-		
-		// Обработчик для pointermove - отслеживаем свайп
-		pointerMoveHandler = (e: PointerEvent) => {
-			if (!dragStart || !dragStartClient || gameStore.isLocked || gameStore.isGameOver) {
-				return
-			}
 
+		// Проверяем, было ли движение достаточно большим
+		const dx = Math.abs(e.clientX - dragStartClient.x)
+		const dy = Math.abs(e.clientY - dragStartClient.y)
+		const threshold = 10 // Порог в пикселях для определения свайпа
+		const moved = Math.sqrt(dx * dx + dy * dy)
+
+		// Определяем задержку в зависимости от того, было ли начальное касание на блоке
+		const pressDelay = canvasDragStartedOnBlock
+			? CANVAS_PRESS_DELAY_BLOCK
+			: CANVAS_PRESS_DELAY_EMPTY
+
+		// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
+		const elapsedTime = performance.now() - canvasDragStartTime
+		const isFastSwipe = elapsedTime < pressDelay
+
+		// Если движение достаточно большое
+		if (moved > threshold || moved > CANVAS_PRESS_MOVE_TOLERANCE) {
+			// Если движение быстрое - обрабатываем как игру (свайп блоков)
+			// Но только если касание было на блоке - на пустом месте быстрый свайп тоже может быть скроллом
+			if (isFastSwipe && !canvasDragScrolling && canvasDragStartedOnBlock) {
+				isDragging = true
+
+				// Предотвращаем скролл при движении по canvas
+				e.preventDefault()
+				e.stopPropagation()
+
+				// Обновляем выделение при движении
+				const pos = getPositionFromEvent(e)
+				if (pos) {
+					// Highlight tile under pointer (only if it has moves > 0)
+					const cube = gameStore.grid[pos.r]?.[pos.c]
+					if (cube && cube.moves > 0) {
+						renderer?.setSelectedPosition(pos.r, pos.c)
+					} else {
+						// Highlight starting tile if it has moves > 0
+						const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
+						if (startCube && startCube.moves > 0) {
+							renderer?.setSelectedPosition(dragStart.r, dragStart.c)
+						} else {
+							renderer?.setSelectedPosition(null, null)
+						}
+					}
+				}
+			} else {
+				// Долгое удержание + движение - активируем drag scrolling
+				if (!canvasDragScrolling && momentumScrollRef.value) {
+					canvasDragScrolling = true
+					momentumScrollRef.value.updateBounds()
+					momentumScrollRef.value.startDrag(performance.now())
+				}
+
+				if (canvasDragScrolling && momentumScrollRef.value) {
+					// Предотвращаем скролл и обрабатываем drag scrolling
+					e.preventDefault()
+					e.stopPropagation()
+
+					const deltaY = dragStartClient.y - e.clientY
+					momentumScrollRef.value.drag(deltaY, performance.now())
+					// Обновляем dragStartClient для следующего движения
+					dragStartClient.y = e.clientY
+				}
+			}
+		}
+	}
+	pixiCanvasForHandlers.addEventListener('pointermove', pointerMoveHandler, {
+		passive: false,
+	})
+
+	// Touch events для мобильных устройств
+	pixiCanvasForHandlers.addEventListener('touchstart', handlePointerDown, {
+		passive: false,
+	})
+	pixiCanvasForHandlers.addEventListener('touchend', handlePointerUp, {
+		passive: false,
+	})
+	pixiCanvasForHandlers.addEventListener('touchcancel', handlePointerUp, {
+		passive: false,
+	})
+
+	// Обработчик для touchmove - отслеживаем свайп
+	touchMoveHandler = (e: TouchEvent) => {
+		if (
+			!dragStart ||
+			!dragStartClient ||
+			gameStore.isLocked ||
+			gameStore.isGameOver
+		) {
+			return
+		}
+
+		if (e.touches.length > 0) {
+			const touch = e.touches[0]
 			// Проверяем, было ли движение достаточно большим
-			const dx = Math.abs(e.clientX - dragStartClient.x)
-			const dy = Math.abs(e.clientY - dragStartClient.y)
+			const dx = Math.abs(touch.clientX - dragStartClient!.x)
+			const dy = Math.abs(touch.clientY - dragStartClient!.y)
 			const threshold = 10 // Порог в пикселях для определения свайпа
 			const moved = Math.sqrt(dx * dx + dy * dy)
-			
+
 			// Определяем задержку в зависимости от того, было ли начальное касание на блоке
-			const pressDelay = canvasDragStartedOnBlock ? CANVAS_PRESS_DELAY_BLOCK : CANVAS_PRESS_DELAY_EMPTY
-			
+			const pressDelay = canvasDragStartedOnBlock
+				? CANVAS_PRESS_DELAY_BLOCK
+				: CANVAS_PRESS_DELAY_EMPTY
+
 			// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
 			const elapsedTime = performance.now() - canvasDragStartTime
 			const isFastSwipe = elapsedTime < pressDelay
@@ -1813,11 +2090,11 @@ onMounted(async () => {
 				// Но только если касание было на блоке - на пустом месте быстрый свайп тоже может быть скроллом
 				if (isFastSwipe && !canvasDragScrolling && canvasDragStartedOnBlock) {
 					isDragging = true
-					
+
 					// Предотвращаем скролл при движении по canvas
 					e.preventDefault()
 					e.stopPropagation()
-					
+
 					// Обновляем выделение при движении
 					const pos = getPositionFromEvent(e)
 					if (pos) {
@@ -1842,192 +2119,125 @@ onMounted(async () => {
 						momentumScrollRef.value.updateBounds()
 						momentumScrollRef.value.startDrag(performance.now())
 					}
-					
+
 					if (canvasDragScrolling && momentumScrollRef.value) {
 						// Предотвращаем скролл и обрабатываем drag scrolling
 						e.preventDefault()
 						e.stopPropagation()
-						
-						const deltaY = dragStartClient.y - e.clientY
+
+						const deltaY = dragStartClient.y - touch.clientY
 						momentumScrollRef.value.drag(deltaY, performance.now())
 						// Обновляем dragStartClient для следующего движения
-						dragStartClient.y = e.clientY
+						dragStartClient.y = touch.clientY
 					}
 				}
 			}
 		}
-		pixiCanvasForHandlers.addEventListener('pointermove', pointerMoveHandler, { passive: false })
-		
-		// Touch events для мобильных устройств
-		pixiCanvasForHandlers.addEventListener('touchstart', handlePointerDown, { passive: false })
-		pixiCanvasForHandlers.addEventListener('touchend', handlePointerUp, { passive: false })
-		pixiCanvasForHandlers.addEventListener('touchcancel', handlePointerUp, { passive: false })
-		
-		// Обработчик для touchmove - отслеживаем свайп
-		touchMoveHandler = (e: TouchEvent) => {
-			if (!dragStart || !dragStartClient || gameStore.isLocked || gameStore.isGameOver) {
-				return
-			}
-
-			if (e.touches.length > 0) {
-				const touch = e.touches[0]
-				// Проверяем, было ли движение достаточно большим
-				const dx = Math.abs(touch.clientX - dragStartClient!.x)
-				const dy = Math.abs(touch.clientY - dragStartClient!.y)
-				const threshold = 10 // Порог в пикселях для определения свайпа
-				const moved = Math.sqrt(dx * dx + dy * dy)
-				
-				// Определяем задержку в зависимости от того, было ли начальное касание на блоке
-				const pressDelay = canvasDragStartedOnBlock ? CANVAS_PRESS_DELAY_BLOCK : CANVAS_PRESS_DELAY_EMPTY
-				
-				// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
-				const elapsedTime = performance.now() - canvasDragStartTime
-				const isFastSwipe = elapsedTime < pressDelay
-
-				// Если движение достаточно большое
-				if (moved > threshold || moved > CANVAS_PRESS_MOVE_TOLERANCE) {
-					// Если движение быстрое - обрабатываем как игру (свайп блоков)
-					// Но только если касание было на блоке - на пустом месте быстрый свайп тоже может быть скроллом
-					if (isFastSwipe && !canvasDragScrolling && canvasDragStartedOnBlock) {
-						isDragging = true
-						
-						// Предотвращаем скролл при движении по canvas
-						e.preventDefault()
-						e.stopPropagation()
-						
-						// Обновляем выделение при движении
-						const pos = getPositionFromEvent(e)
-						if (pos) {
-							// Highlight tile under pointer (only if it has moves > 0)
-							const cube = gameStore.grid[pos.r]?.[pos.c]
-							if (cube && cube.moves > 0) {
-								renderer?.setSelectedPosition(pos.r, pos.c)
-							} else {
-								// Highlight starting tile if it has moves > 0
-								const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
-								if (startCube && startCube.moves > 0) {
-									renderer?.setSelectedPosition(dragStart.r, dragStart.c)
-								} else {
-									renderer?.setSelectedPosition(null, null)
-								}
-							}
-						}
-					} else {
-						// Долгое удержание + движение - активируем drag scrolling
-						if (!canvasDragScrolling && momentumScrollRef.value) {
-							canvasDragScrolling = true
-							momentumScrollRef.value.updateBounds()
-							momentumScrollRef.value.startDrag(performance.now())
-						}
-						
-						if (canvasDragScrolling && momentumScrollRef.value) {
-							// Предотвращаем скролл и обрабатываем drag scrolling
-							e.preventDefault()
-							e.stopPropagation()
-							
-							const deltaY = dragStartClient.y - touch.clientY
-							momentumScrollRef.value.drag(deltaY, performance.now())
-							// Обновляем dragStartClient для следующего движения
-							dragStartClient.y = touch.clientY
-						}
-					}
-				}
-			}
-		}
-		pixiCanvasForHandlers.addEventListener('touchmove', touchMoveHandler, { passive: false })
-
-		// Скролл теперь запускается через bootGame() в правильном порядке
-
-		// Handle resize - функция для обновления размера с debounce
-		const handleResize = async () => {
-			// КРИТИЧНО: Получаем canvas из PixiService
-			const pixiCanvas = getPixiCanvas()
-			if (!pixiCanvas) return
-			
-			// Debounce: отменяем предыдущий вызов, если он еще не выполнился
-			if (resizeTimeout) {
-				clearTimeout(resizeTimeout)
-			}
-			
-			resizeTimeout = setTimeout(async () => {
-				if (!pixiCanvas) return
-				
-				// Инвалидируем кэш перед изменением размеров
-				cachedContainerRect = null
-				
-				// Для мобильных устройств нужно дать время браузеру обновить размеры после изменения ориентации
-				// Используем requestAnimationFrame для получения актуальных размеров
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-				await new Promise((resolve) => setTimeout(resolve, 50))
-				
-				// Пересчитываем canvas с правильной шириной
-				initCanvas()
-				
-				// Получаем логические размеры из CSS стилей (не внутренние размеры canvas!)
-				const logicalWidth = parseInt(pixiCanvas.style.width) || pixiCanvas.getBoundingClientRect().width
-				const logicalHeight = parseInt(pixiCanvas.style.height) || pixiCanvas.getBoundingClientRect().height
-				const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
-				
-				// Всегда используем логическую ширину / WIDTH для размера плитки
-				const newTileSize = logicalWidth / WIDTH
-				if (renderer && newTileSize > 0) {
-					renderer.updateTileSize(newTileSize)
-					renderer.resizeCanvas(logicalWidth, logicalHeight, gridHeight)
-					// Синхронизировать позиции после изменения размера
-					await renderer.syncGridPositions(gameStore.grid)
-				}
-				momentumScrollRef.value?.updateBounds()
-			}, 150)
-		}
-
-		// Обработчик для window resize
-		resizeHandler = handleResize
-		window.addEventListener('resize', resizeHandler, { passive: true })
-
-		// Обработчик для изменения ориентации (важно для мобильных)
-		orientationHandler = handleResize
-		window.addEventListener('orientationchange', orientationHandler, { passive: true })
-		
-		// Блокируем альбомный режим на мобильных устройствах
-		if (Capacitor.isNativePlatform()) {
-			// Блокируем ориентацию в портретном режиме
-			ScreenOrientation.lock({ orientation: 'portrait' }).catch((err) => {
-				console.warn('Failed to lock orientation:', err)
-			})
-			
-			// Слушаем изменения ориентации
-			ScreenOrientation.addListener('screenOrientationChange', () => {
-				handleResize()
-			}).then((listener) => {
-				orientationListener = listener
-			})
-		}
-		
-		// Также используем ResizeObserver для контейнера canvas (более надежно на мобильных)
-		const pixiCanvasForResize = getPixiCanvas()
-		const canvasContainer = pixiCanvasForResize?.parentElement || document.querySelector('.game-page__canvas-container')
-		if (canvasContainer) {
-			resizeObserver = new ResizeObserver(() => {
-				handleResize()
-			})
-			resizeObserver.observe(canvasContainer)
-		}
+	}
+	pixiCanvasForHandlers.addEventListener('touchmove', touchMoveHandler, {
+		passive: false,
 	})
 
-onBeforeUnmount(() => {
+	// Скролл теперь запускается через bootGame() в правильном порядке
+
+	// Handle resize - функция для обновления размера с debounce
+	const handleResize = async () => {
+		// КРИТИЧНО: Получаем canvas из PixiService
+		const pixiCanvas = getPixiCanvas()
+		if (!pixiCanvas) return
+
+		// Debounce: отменяем предыдущий вызов, если он еще не выполнился
+		if (resizeTimeout) {
+			clearTimeout(resizeTimeout)
+		}
+
+		resizeTimeout = setTimeout(async () => {
+			if (!pixiCanvas) return
+
+			// Инвалидируем кэш перед изменением размеров
+			cachedContainerRect = null
+
+			// Для мобильных устройств нужно дать время браузеру обновить размеры после изменения ориентации
+			// Используем requestAnimationFrame для получения актуальных размеров
+			await new Promise((resolve) => requestAnimationFrame(resolve))
+			await new Promise((resolve) => requestAnimationFrame(resolve))
+			await new Promise((resolve) => setTimeout(resolve, 50))
+
+			// Пересчитываем canvas с правильной шириной
+			initCanvas()
+
+			// Получаем логические размеры из CSS стилей (не внутренние размеры canvas!)
+			const logicalWidth =
+				parseInt(pixiCanvas.style.width) ||
+				pixiCanvas.getBoundingClientRect().width
+			const logicalHeight =
+				parseInt(pixiCanvas.style.height) ||
+				pixiCanvas.getBoundingClientRect().height
+			const gridHeight = gameStore.grid?.length ?? gameStore.getHeight()
+
+			// Всегда используем логическую ширину / WIDTH для размера плитки
+			const newTileSize = logicalWidth / WIDTH
+			if (renderer && newTileSize > 0) {
+				renderer.updateTileSize(newTileSize)
+				renderer.resizeCanvas(logicalWidth, logicalHeight, gridHeight)
+				// Синхронизировать позиции после изменения размера
+				await renderer.syncGridPositions(gameStore.grid)
+			}
+			momentumScrollRef.value?.updateBounds()
+		}, 150)
+	}
+
+	// Обработчик для window resize
+	resizeHandler = handleResize
+	window.addEventListener('resize', resizeHandler, { passive: true })
+
+	// Обработчик для изменения ориентации (важно для мобильных)
+	orientationHandler = handleResize
+	window.addEventListener('orientationchange', orientationHandler, {
+		passive: true,
+	})
+
+	// Блокируем альбомный режим на мобильных устройствах
+	if (Capacitor.isNativePlatform()) {
+		// Блокируем ориентацию в портретном режиме
+		ScreenOrientation.lock({ orientation: 'portrait' }).catch((err) => {
+			console.warn('Failed to lock orientation:', err)
+		})
+
+		// Слушаем изменения ориентации
+		ScreenOrientation.addListener('screenOrientationChange', () => {
+			handleResize()
+		}).then((listener) => {
+			orientationListener = listener
+		})
+	}
+
+	// Также используем ResizeObserver для контейнера canvas (более надежно на мобильных)
+	const pixiCanvasForResize = getPixiCanvas()
+	const canvasContainer =
+		pixiCanvasForResize?.parentElement ||
+		document.querySelector('.game-page__canvas-container')
+	if (canvasContainer) {
+		resizeObserver = new ResizeObserver(() => {
+			handleResize()
+		})
+		resizeObserver.observe(canvasContainer)
+	}
+})
+
+onBeforeUnmount(async () => {
 	console.log('[GamePage] onBeforeUnmount: cleaning up')
-	
+
 	// Очищаем таймеры play-area
 	clearPlayAreaPressTimer()
-	
+
 	// Разблокируем ориентацию при размонтировании
 	if (Capacitor.isNativePlatform()) {
 		ScreenOrientation.unlock().catch((err) => {
 			console.warn('Failed to unlock orientation:', err)
 		})
 	}
-	
+
 	if (resizeHandler) {
 		window.removeEventListener('resize', resizeHandler)
 		resizeHandler = null
@@ -2049,10 +2259,10 @@ onBeforeUnmount(() => {
 		resizeTimeout = null
 	}
 
-		// КРИТИЧНО: Получаем canvas из PixiService для удаления обработчиков
-		const pixiCanvas = getPixiCanvas()
+	// КРИТИЧНО: Получаем canvas из PixiService для удаления обработчиков
+	const pixiCanvas = getPixiCanvas()
 
-		if (pixiCanvas) {
+	if (pixiCanvas) {
 		pixiCanvas.removeEventListener('pointerdown', handlePointerDown)
 		pixiCanvas.removeEventListener('pointerup', handlePointerUp)
 		pixiCanvas.removeEventListener('pointercancel', handlePointerUp)
@@ -2069,14 +2279,22 @@ onBeforeUnmount(() => {
 
 	// КРИТИЧНО: Открепляем canvas от хоста (возвращаем в скрытое состояние)
 	PixiService.detach()
-	
+
 	// Переключаемся обратно на стартовую сцену
 	PixiService.switchToStartScene()
+
+	// Скрываем баннерную рекламу при выходе со страницы
+	try {
+		await admob.hideBanner()
+		console.log('[GamePage] Banner ad hidden')
+	} catch (error) {
+		console.warn('[GamePage] Failed to hide banner ad:', error)
+	}
 
 	gameController?.destroy()
 	gameController = null
 	renderer = null
-	
+
 	console.log('[GamePage] onBeforeUnmount: cleanup completed')
 })
 
@@ -2100,10 +2318,9 @@ async function restart(): Promise<void> {
 	if (gameController) {
 		gameController.stop()
 		isGenerating.value = true
-		
-		// Запускаем игру и boot-цепочку в правильном порядке
-		await gameController.startGame()
-		await gameController.bootGame()
+
+		// Используем функцию с проверкой рекламы
+		await startGameWithAds()
 	}
 }
 </script>
@@ -2155,7 +2372,7 @@ async function restart(): Promise<void> {
 		// Высота нижней секции: кнопка (~48px) + баннер (~50px) + отступы (~16px)
 		// Итого примерно 114px + safe-area-inset-bottom
 		min-height: fit-content;
-		
+
 		@media (max-width: 640px) {
 			gap: 0.4rem;
 			padding: 0.4rem 0;
@@ -2175,12 +2392,12 @@ async function restart(): Promise<void> {
 		border: 1px solid rgba(255, 255, 255, 0.1);
 		// Резервируем место для рекламного баннера
 		// Стандартная высота баннера обычно 50px на мобильных
-		
+
 		@media (max-width: 640px) {
 			min-height: 50px;
 			max-height: 50px;
 		}
-		
+
 		// Стили для будущего рекламного баннера
 		&::before {
 			content: 'Ad';
@@ -2194,7 +2411,8 @@ async function restart(): Promise<void> {
 		flex: 1;
 		min-height: 0; // Важно для правильной работы flex
 		backdrop-filter: blur(20px);
-		box-shadow: inset 0 4px 32px rgba(0, 0, 0, 0.5),
+		box-shadow:
+			inset 0 4px 32px rgba(0, 0, 0, 0.5),
 			0 8px 32px rgba(0, 0, 0, 0.3);
 		border: 2px solid rgba(255, 255, 255, 0.3);
 		position: relative;
@@ -2236,7 +2454,7 @@ async function restart(): Promise<void> {
 	gap: 0.25rem;
 	// Позволяем скроллить через индикатор
 	cursor: grab;
-	
+
 	&:active {
 		cursor: grabbing;
 	}
@@ -2274,7 +2492,9 @@ async function restart(): Promise<void> {
 		left: 0;
 		right: 0;
 		border-radius: 0 0 5px 5px;
-		transition: height 0.25s ease, background-color 0.2s ease;
+		transition:
+			height 0.25s ease,
+			background-color 0.2s ease;
 	}
 }
 

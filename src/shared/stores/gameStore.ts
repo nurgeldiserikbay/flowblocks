@@ -10,7 +10,10 @@ const NUM_COLORS = 8
 
 /** Длительность волны в секундах: с ростом уровня уменьшается (мин. MIN_WAVE_DURATION) */
 export function getWaveDuration(level: number): number {
-	return Math.max(MIN_WAVE_DURATION, Math.floor(BASE_WAVE_DURATION - level * WAVE_DURATION_DECREASE))
+	return Math.max(
+		MIN_WAVE_DURATION,
+		Math.floor(BASE_WAVE_DURATION - level * WAVE_DURATION_DECREASE),
+	)
 }
 
 /** Строк спавна за волну: с ростом уровня растёт (макс. 10) - более плавный рост */
@@ -46,7 +49,8 @@ export const useGameStore = defineStore('game', () => {
 	const currentLevel = ref(1) // Текущий уровень (1-based)
 	const isLocked = ref(false)
 	const isGameOver = ref(false)
-	
+	const gamesPlayed = ref(0) // Счетчик запущенных игр для показа рекламы
+
 	// Состояния готовности для правильного старта игры
 	const isAssetsReady = ref(false)
 	const isSceneReady = ref(false)
@@ -54,7 +58,7 @@ export const useGameStore = defineStore('game', () => {
 	const isTilesAdded = ref(false)
 	const isFirstFrameRendered = ref(false)
 	const isGameStarted = ref(false)
-	
+
 	// Диагностические метки времени для отслеживания задержек
 	const diagnostics = ref<{
 		assetsLoaded?: number
@@ -93,55 +97,68 @@ export const useGameStore = defineStore('game', () => {
 		isFirstFrameRendered.value = false
 		isGameStarted.value = false
 		diagnostics.value = {}
+		// Не сбрасываем gamesPlayed - он должен сохраняться между играми
 	}
-	
+
+	function incrementGamesPlayed() {
+		gamesPlayed.value++
+	}
+
+	function shouldShowInterstitial(): boolean {
+		// Показываем рекламу каждые 3 игры (на 3-й, 6-й, 9-й и т.д.)
+		return gamesPlayed.value > 0 && gamesPlayed.value % 3 === 0
+	}
+
 	function setCurrentLevel(level: number) {
 		currentLevel.value = level
 	}
-	
+
 	function setAssetsReady(ready: boolean) {
 		isAssetsReady.value = ready
 	}
-	
+
 	function setSceneReady(ready: boolean) {
 		isSceneReady.value = ready
 	}
-	
+
 	function setTilesAdded(added: boolean) {
 		isTilesAdded.value = added
 	}
-	
+
 	function setFirstFrameRendered(rendered: boolean) {
 		isFirstFrameRendered.value = rendered
 	}
-	
+
 	function setGameStarted(started: boolean) {
 		isGameStarted.value = started
 	}
-	
+
 	function setTexturesWarmed(warmed: boolean) {
 		isTexturesWarmed.value = warmed
 	}
-	
-	function setDiagnostic(key: keyof typeof diagnostics.value, timestamp: number) {
+
+	function setDiagnostic(
+		key: keyof typeof diagnostics.value,
+		timestamp: number,
+	) {
 		diagnostics.value[key] = timestamp
 	}
-	
+
 	function logDiagnostics(onHideLoading?: () => void) {
 		const d = diagnostics.value
 		const baseTime = d.assetsLoaded || 0
-		
+
 		if (!baseTime) {
 			console.warn('[GameStore] Diagnostics: assetsLoaded timestamp not found')
 			return
 		}
-		
+
 		const formatTime = (timestamp?: number): string => {
 			if (!timestamp) return 'N/A'
 			const diff = timestamp - baseTime
 			return `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}ms`
 		}
-		
+
 		console.log('[GameStore] Diagnostics (relative to assetsLoaded):', {
 			assetsLoaded: '0.00ms (base)',
 			texturesWarmed: formatTime(d.texturesWarmed),
@@ -152,7 +169,7 @@ export const useGameStore = defineStore('game', () => {
 			scrollStarted: formatTime(d.scrollStarted),
 			timerStarted: formatTime(d.timerStarted),
 		})
-		
+
 		// Дополнительная информация о критических интервалах
 		// КРИТИЧНО: Скрываем loader только внутри этого условия
 		if (d.firstFrameRendered && !d.loaderHidden) {
@@ -161,10 +178,12 @@ export const useGameStore = defineStore('game', () => {
 				setDiagnostic('loaderHidden', performance.now())
 				onHideLoading()
 			} else {
-				console.warn('[GameStore] Critical: firstFrameRendered is set but loaderHidden is not - onHideLoading callback not provided!')
+				console.warn(
+					'[GameStore] Critical: firstFrameRendered is set but loaderHidden is not - onHideLoading callback not provided!',
+				)
 			}
 		}
-		
+
 		if (d.firstFrameRendered && d.loaderHidden) {
 			const tilesToLoader = d.loaderHidden - d.firstFrameRendered
 			console.log('[GameStore] Critical interval:', {
@@ -212,6 +231,7 @@ export const useGameStore = defineStore('game', () => {
 		currentLevel,
 		isLocked,
 		isGameOver,
+		gamesPlayed,
 		// Readiness states
 		isAssetsReady,
 		isSceneReady,
@@ -244,6 +264,8 @@ export const useGameStore = defineStore('game', () => {
 		setTexturesWarmed,
 		setDiagnostic,
 		logDiagnostics,
+		incrementGamesPlayed,
+		shouldShowInterstitial,
 		getWaveDuration,
 		getSpawnRowsForLevel,
 		getHeightForLevel,
