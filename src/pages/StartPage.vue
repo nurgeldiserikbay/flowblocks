@@ -259,7 +259,8 @@ const patternStyles = computed(() =>
 	display: flex;
 	flex-direction: column;
 	position: relative;
-	overflow: hidden;
+	overflow-x: hidden;
+	overflow-y: auto;
 	background: linear-gradient(180deg, #1e1f3a 0%, #2b2f6c 50%, #1e1f3a 100%);
 	background-attachment: fixed;
 	padding-top: env(safe-area-inset-top, 0px);
@@ -300,7 +301,7 @@ const patternStyles = computed(() =>
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		justify-content: flex-start;
+		justify-content: space-between;
 		padding: calc(clamp(6rem, 14vw, 8rem) + env(safe-area-inset-top, 0px)) clamp(1.5rem, 5vw, 2.5rem)
 			clamp(2rem, 6vw, 4rem);
 		gap: 0;
@@ -386,7 +387,8 @@ const patternStyles = computed(() =>
 	display: flex;
 	justify-content: center;
 	align-items: center;
-	margin-bottom: clamp(5rem, 6vw, 4rem);
+	margin-bottom: clamp(3rem, 6vw, 4rem);
+	flex-shrink: 0;
 }
 
 .logo {
@@ -445,6 +447,7 @@ const patternStyles = computed(() =>
 	display: flex;
 	justify-content: center;
 	margin: clamp(1.5rem, 5vw, 2.5rem) 0;
+	flex-shrink: 0;
 }
 
 // Play button
@@ -514,15 +517,18 @@ const patternStyles = computed(() =>
 
 // Privacy link
 .privacy-link {
-	font-size: clamp(1.2rem, 3vw, 0.875rem);
+	font-size: clamp(0.875rem, 3vw, 1rem);
 	color: rgba(255, 255, 255, 0.6);
 	text-decoration: none;
 	transition: all 0.2s ease;
 	margin-top: auto;
+	margin-bottom: clamp(1rem, 3vw, 2rem);
 	padding: clamp(0.75rem, 2vw, 1rem) clamp(1rem, 3vw, 1.5rem);
 	position: relative;
 	z-index: 1;
 	text-align: center;
+	flex-shrink: 0;
+	min-height: fit-content;
 
 	&:hover {
 		color: rgba(255, 255, 255, 0.9);

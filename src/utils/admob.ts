@@ -47,11 +47,11 @@ class Admob {
 			(size: AdMobBannerSize) => {
 				console.log(size)
 				// Subscribe Change Banner Size
-			}
+			},
 		)
 
 		const options: BannerAdOptions = {
-			adId: 'ca-app-pub-9702825788968948/8861989887',
+			adId: 'ca-app-pub-9702825788968948/2833006189',
 			adSize: BannerAdSize.BANNER,
 			position: BannerAdPosition.BOTTOM_CENTER,
 			margin: 0,
@@ -104,7 +104,7 @@ class Admob {
 		})
 
 		const options: AdOptions = {
-			adId: 'ca-app-pub-9702825788968948/8766196081',
+			adId: 'ca-app-pub-9702825788968948/2487732691',
 			isTesting: import.meta.env.VITE_APP_MODE === 'TEST',
 			// npa: true
 		}
