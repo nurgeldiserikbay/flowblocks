@@ -1,8 +1,19 @@
 <template>
 	<div class="start-page">
 		<!-- Hidden container for Pixi canvas (background initialization) -->
-		<div ref="pixiHostRef" class="pixi-host" style="position: absolute; left: -9999px; top: 0; width: 1px; height: 1px; overflow: hidden;"></div>
-		
+		<div
+			ref="pixiHostRef"
+			class="pixi-host"
+			style="
+				position: absolute;
+				left: -9999px;
+				top: 0;
+				width: 1px;
+				height: 1px;
+				overflow: hidden;
+			"
+		></div>
+
 		<!-- Sound button (top right) -->
 		<button
 			class="sound-button"
@@ -141,17 +152,18 @@
 					<span class="play-button__text">Play</span>
 				</RouterLink>
 			</div>
-
-			<!-- Privacy policy link -->
-			<a
-				href="https://docs.google.com/document/d/1wVNC5viI2q87nb30MPS2Yuj3hhk6C7shM94OI15SIG0/edit?usp=sharing"
-				target="_blank"
-				rel="noopener noreferrer"
-				class="privacy-link"
-			>
-				Privacy Policy
-			</a>
 		</div>
+
+		<!-- Privacy policy link - вынесен за пределы content для гарантированной видимости -->
+		<a
+			href="https://docs.google.com/document/d/1wVNC5viI2q87nb30MPS2Yuj3hhk6C7shM94OI15SIG0/edit?usp=sharing"
+			target="_blank"
+			rel="noopener noreferrer"
+			class="privacy-link"
+			@click="openPrivacyPolicy"
+		>
+			Privacy Policy
+		</a>
 
 		<!-- Decorative pattern overlay -->
 		<div class="pattern-overlay">
@@ -171,6 +183,8 @@ import { useAudioStore } from '@/shared/stores/audioStore'
 import { AudioManager } from '@/game/audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
 import { useGameStore } from '@/shared/stores/gameStore'
+import { App } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 
 const audioStore = useAudioStore()
 const gameStore = useGameStore()
@@ -180,13 +194,27 @@ function toggleSound() {
 	audioStore.toggleMute()
 }
 
+async function openPrivacyPolicy(e: Event) {
+	e.preventDefault()
+	const url =
+		'https://docs.google.com/document/d/1wVNC5viI2q87nb30MPS2Yuj3hhk6C7shM94OI15SIG0/edit?usp=sharing'
+
+	// В мобильной сборке используем Capacitor App для открытия URL
+	if (Capacitor.isNativePlatform()) {
+		await App.openUrl({ url })
+	} else {
+		// В веб-версии открываем в новой вкладке
+		window.open(url, '_blank', 'noopener,noreferrer')
+	}
+}
+
 onMounted(async () => {
 	const startTime = performance.now()
 	console.log('[StartPage] onMounted: starting initialization')
 
 	// Initialize AudioManager on start page
 	await AudioManager.init()
-	
+
 	// КРИТИЧНО: Инициализируем PixiService на StartPage
 	// Это создаст Pixi Application, загрузит текстуры и прогреет GPU в фоне
 	if (!pixiHostRef.value) {
@@ -197,29 +225,36 @@ onMounted(async () => {
 	try {
 		const pixiInitStartTime = performance.now()
 		console.log('[StartPage] onMounted: initializing PixiService')
-		
+
 		// Инициализируем PixiService с базовыми размерами
 		// Canvas будет создан и добавлен в DOM в фоне (скрытый)
 		await PixiService.init(pixiHostRef.value, {
 			width: 320,
-			height: 400
+			height: 400,
 		})
-		
+
 		gameStore.setDiagnostic('pixiInit', performance.now())
-		console.log(`[StartPage] onMounted: PixiService initialized in ${(performance.now() - pixiInitStartTime).toFixed(2)}ms`)
+		console.log(
+			`[StartPage] onMounted: PixiService initialized in ${(performance.now() - pixiInitStartTime).toFixed(2)}ms`,
+		)
 
 		// Текстуры уже загружены и прогреты в PixiService.init()
 		gameStore.setAssetsReady(true)
 		gameStore.setDiagnostic('assetsLoaded', performance.now())
 		gameStore.setTexturesWarmed(true)
 		gameStore.setDiagnostic('texturesWarmed', performance.now())
-		
-		console.log(`[StartPage] onMounted: all initialization completed in ${(performance.now() - startTime).toFixed(2)}ms`)
+
+		console.log(
+			`[StartPage] onMounted: all initialization completed in ${(performance.now() - startTime).toFixed(2)}ms`,
+		)
 	} catch (error) {
-		console.error('[StartPage] onMounted: failed to initialize PixiService', error)
+		console.error(
+			'[StartPage] onMounted: failed to initialize PixiService',
+			error,
+		)
 		// Продолжаем выполнение - игра попытается инициализировать при старте
 	}
-	
+
 	// Sync AudioManager with store state
 	AudioManager.setEnabled(audioStore.isEnabled)
 })
@@ -249,13 +284,15 @@ const patternStyles = computed(() =>
 		top: `${pos.y}%`,
 		opacity: pos.opacity.toString(),
 		transform: `rotate(${pos.rotation}deg)`,
-	}))
+	})),
 )
 </script>
 
 <style lang="scss" scoped>
 .start-page {
-	min-height: calc(100dvh + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px));
+	min-height: calc(
+		100dvh + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px)
+	);
 	display: flex;
 	flex-direction: column;
 	position: relative;
@@ -276,7 +313,8 @@ const patternStyles = computed(() =>
 		left: -50%;
 		width: 200%;
 		height: 200%;
-		background: radial-gradient(
+		background:
+			radial-gradient(
 				circle at 30% 40%,
 				rgba(107, 207, 127, 0.15) 0%,
 				transparent 50%
@@ -301,17 +339,20 @@ const patternStyles = computed(() =>
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		justify-content: space-between;
-		padding: calc(clamp(6rem, 14vw, 8rem) + env(safe-area-inset-top, 0px)) clamp(1.5rem, 5vw, 2.5rem)
-			clamp(2rem, 6vw, 4rem);
-		gap: 0;
+		justify-content: flex-start;
+		padding: calc(clamp(6rem, 14vw, 8rem) + env(safe-area-inset-top, 0px))
+			clamp(1.5rem, 5vw, 2.5rem) 0;
+		gap: clamp(1.5rem, 5vw, 2.5rem);
 		position: relative;
 		z-index: 1;
-		min-height: calc(100dvh - 80px);
+		min-height: 100%;
 		max-width: 100%;
 		margin: 0 auto;
 		width: 100%;
 		box-sizing: border-box;
+		overflow-y: auto;
+		overflow-x: hidden;
+		padding-bottom: calc(clamp(6rem, 12vw, 8rem) + env(safe-area-inset-bottom, 0px));
 	}
 }
 
@@ -412,9 +453,15 @@ const patternStyles = computed(() =>
 		color: white;
 		text-align: center;
 		letter-spacing: -0.02em;
-		text-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+		text-shadow:
+			0 4px 20px rgba(0, 0, 0, 0.5),
+			0 2px 8px rgba(0, 0, 0, 0.3);
 		margin: 0;
-		font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+		font-family:
+			'Inter',
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
 			sans-serif;
 		line-height: 1.1;
 	}
@@ -465,7 +512,8 @@ const patternStyles = computed(() =>
 	touch-action: manipulation;
 	position: relative;
 	overflow: hidden;
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3),
+	box-shadow:
+		0 8px 32px rgba(0, 0, 0, 0.3),
 		inset 0 2px 4px rgba(255, 255, 255, 0.2);
 	min-height: clamp(70px, 11vw, 90px);
 	box-sizing: border-box;
@@ -491,8 +539,10 @@ const patternStyles = computed(() =>
 	&:hover {
 		transform: translateY(-6px) scale(1.02);
 		background: linear-gradient(135deg, #f472b6 0%, #e879f9 50%, #c084fc 100%);
-		box-shadow: 0 12px 40px rgba(236, 72, 153, 0.5),
-			0 6px 20px rgba(0, 0, 0, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+		box-shadow:
+			0 12px 40px rgba(236, 72, 153, 0.5),
+			0 6px 20px rgba(0, 0, 0, 0.3),
+			inset 0 2px 4px rgba(255, 255, 255, 0.4);
 		border-color: rgba(249, 168, 212, 0.6);
 
 		&::before {
@@ -515,24 +565,38 @@ const patternStyles = computed(() =>
 	}
 }
 
-// Privacy link
+// Privacy link - вынесен за пределы content для гарантированной видимости
 .privacy-link {
 	font-size: clamp(0.875rem, 3vw, 1rem);
 	color: rgba(255, 255, 255, 0.6);
 	text-decoration: none;
 	transition: all 0.2s ease;
-	margin-top: auto;
-	margin-bottom: clamp(1rem, 3vw, 2rem);
 	padding: clamp(0.75rem, 2vw, 1rem) clamp(1rem, 3vw, 1.5rem);
 	position: relative;
-	z-index: 1;
+	z-index: 10;
 	text-align: center;
 	flex-shrink: 0;
 	min-height: fit-content;
+	display: block !important;
+	cursor: pointer;
+	touch-action: manipulation;
+	width: 100%;
+	max-width: 100%;
+	opacity: 1 !important;
+	visibility: visible !important;
+	pointer-events: auto !important;
+	-webkit-tap-highlight-color: rgba(255, 255, 255, 0.1);
+	margin-bottom: calc(clamp(1rem, 3vw, 2rem) + env(safe-area-inset-bottom, 0px));
+	box-sizing: border-box;
 
 	&:hover {
 		color: rgba(255, 255, 255, 0.9);
 		text-decoration: underline;
+	}
+
+	&:active {
+		color: rgba(255, 255, 255, 1);
+		opacity: 0.8;
 	}
 }
 

@@ -3,8 +3,14 @@
 		<template #title>
 			<div class="game-header">
 				<div class="game-header__time">{{ formattedTime }}</div>
-				<div class="game-header__score">Score: {{ gameStore.score }}</div>
-				<div class="game-header__wave">Wave: {{ gameStore.waveIndex }}</div>
+				<div class="game-header__score">
+					<span class="game-header__icon">⭐</span>
+					{{ gameStore.score }}
+				</div>
+				<div class="game-header__wave">
+					<span class="game-header__icon">🌊</span>
+					{{ gameStore.waveIndex }}
+				</div>
 			</div>
 		</template>
 
@@ -57,7 +63,6 @@
 					@touchend="handleLevelIndicatorTouchEnd"
 					@touchcancel="handleLevelIndicatorTouchEnd"
 				>
-					<div class="level-indicator__label">{{ rowsToTop }}</div>
 					<div
 						class="level-indicator__bar"
 						@pointerdown.stop="handleLevelIndicatorBarPointerDown"
@@ -83,11 +88,6 @@
 				<button class="btn btn--back btn--game" @click="showExitDialog">
 					← Exit
 				</button>
-
-				<!-- Контейнер для рекламного баннера -->
-				<div class="game-page__ad-banner" id="ad-banner">
-					<!-- Здесь будет размещен рекламный баннер -->
-				</div>
 			</div>
 
 			<ConfirmDialog
@@ -2354,7 +2354,7 @@ async function restart(): Promise<void> {
 	&__play-area {
 		display: flex;
 		align-items: stretch;
-		gap: 0.5rem;
+		gap: 0.375rem;
 		flex: 1;
 		min-height: 0; // Важно для flex-контейнеров, чтобы они правильно ограничивали высоту
 		overflow: hidden; // Предотвращаем выход контента за пределы
@@ -2367,7 +2367,7 @@ async function restart(): Promise<void> {
 		flex-direction: column;
 		gap: 0.5rem;
 		flex-shrink: 0;
-		padding: 0.5rem 0;
+		padding: 0.5rem 0 1rem;
 		padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
 		// Высота нижней секции: кнопка (~48px) + баннер (~50px) + отступы (~16px)
 		// Итого примерно 114px + safe-area-inset-bottom
@@ -2375,35 +2375,8 @@ async function restart(): Promise<void> {
 
 		@media (max-width: 640px) {
 			gap: 0.4rem;
-			padding: 0.4rem 0;
+			padding: 0.4rem 0 1rem;
 			padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
-		}
-	}
-
-	&__ad-banner {
-		width: 100%;
-		min-height: 50px;
-		max-height: 50px;
-		background: rgba(0, 0, 0, 0.3);
-		border-radius: 8px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		// Резервируем место для рекламного баннера
-		// Стандартная высота баннера обычно 50px на мобильных
-
-		@media (max-width: 640px) {
-			min-height: 50px;
-			max-height: 50px;
-		}
-
-		// Стили для будущего рекламного баннера
-		&::before {
-			content: 'Ad';
-			color: rgba(255, 255, 255, 0.3);
-			font-size: 0.75rem;
-			font-weight: 600;
 		}
 	}
 
@@ -2449,7 +2422,7 @@ async function restart(): Promise<void> {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	width: 1.25rem;
+	width: 0.4rem;
 	flex-shrink: 0;
 	gap: 0.25rem;
 	// Позволяем скроллить через индикатор
@@ -2460,7 +2433,7 @@ async function restart(): Promise<void> {
 	}
 
 	&__label {
-		font-size: 0.7rem;
+		font-size: 0.65rem;
 		font-weight: 700;
 		color: rgba(255, 255, 255, 0.95);
 		background: linear-gradient(
@@ -2469,8 +2442,8 @@ async function restart(): Promise<void> {
 			rgba(118, 75, 162, 0.5) 100%
 		);
 		backdrop-filter: blur(8px);
-		border-radius: 6px;
-		padding: 0.15rem 0.35rem;
+		border-radius: 5px;
+		padding: 0.125rem 0.25rem;
 		line-height: 1;
 		border: 1px solid rgba(255, 255, 255, 0.25);
 	}
@@ -2546,17 +2519,37 @@ async function restart(): Promise<void> {
 		will-change: transform;
 		/* Изоляция от изменений layout родителя */
 		contain: layout style paint;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
 
 		@media (max-width: 360px) {
 			font-size: clamp(0.75rem, 2.5vw, 0.875rem);
 			padding: 0.4rem 0.6rem;
 			border-radius: 8px;
+			gap: 0.3rem;
 		}
 
 		@media (max-width: 320px) {
 			font-size: clamp(0.7rem, 2vw, 0.8rem);
 			padding: 0.35rem 0.5rem;
 			border-radius: 6px;
+			gap: 0.25rem;
+		}
+	}
+
+	&__icon {
+		font-size: 1.1em;
+		line-height: 1;
+		display: inline-block;
+		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+
+		@media (max-width: 360px) {
+			font-size: 1em;
+		}
+
+		@media (max-width: 320px) {
+			font-size: 0.95em;
 		}
 	}
 }
@@ -2722,10 +2715,6 @@ async function restart(): Promise<void> {
 
 	&:active {
 		transform: translateY(-1px) scale(1);
-	}
-
-	&--game {
-		// Стили уже применены выше
 	}
 }
 

@@ -38,7 +38,8 @@ import TopBar from './TopBar.vue'
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background: radial-gradient(
+		background:
+			radial-gradient(
 				circle at 20% 30%,
 				rgba(59, 130, 246, 0.4) 0%,
 				transparent 50%
@@ -65,7 +66,10 @@ import TopBar from './TopBar.vue'
 		overflow: hidden;
 		z-index: 1;
 		min-height: 0; // Важно для flex-контейнеров, чтобы они правильно ограничивали высоту
-		padding-bottom: env(safe-area-inset-bottom, 0px); // Учитываем нижнюю safe-area
+		padding-bottom: env(
+			safe-area-inset-bottom,
+			0px
+		); // Учитываем нижнюю safe-area
 	}
 }
 </style>
