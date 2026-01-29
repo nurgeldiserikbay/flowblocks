@@ -2,6 +2,25 @@
 	<AppLayout>
 		<template #title>
 			<div class="game-header">
+				<button
+					class="game-header__exit"
+					@click="showExitDialog"
+					aria-label="Exit"
+				>
+					<svg
+						class="game-header__exit-icon"
+						viewBox="0 0 20 20"
+						xmlns="http://www.w3.org/2000/svg"
+					>
+						<rect x="0" fill="none" width="20" height="20" />
+						<g>
+							<path
+								d="M13 3v2h2v10h-2v2h4V3h-4zm0 8V9H5.4l4.3-4.3-1.4-1.4L1.6 10l6.7 6.7 1.4-1.4L5.4 11H13z"
+								fill="currentColor"
+							/>
+						</g>
+					</svg>
+				</button>
 				<div class="game-header__time">{{ formattedTime }}</div>
 				<div class="game-header__score">
 					<span class="game-header__icon">⭐</span>
@@ -84,11 +103,7 @@
 				</div>
 			</div>
 
-			<div class="game-page__bottom-section">
-				<button class="btn btn--back btn--game" @click="showExitDialog">
-					← Exit
-				</button>
-			</div>
+			<div class="game-page__bottom-section"></div>
 
 			<ConfirmDialog
 				v-model="isExitDialogOpen"
@@ -333,7 +348,9 @@ function handlePlayAreaPointerMove(e: PointerEvent) {
 	}
 
 	// drag активирован => скроллим
-	e.preventDefault()
+	if (e.cancelable) {
+		e.preventDefault()
+	}
 	e.stopPropagation()
 	momentumScrollRef.value.drag(deltaY, performance.now())
 }
@@ -381,8 +398,9 @@ function handlePlayAreaTouchStart(e: TouchEvent) {
 	}
 
 	// Если событие происходит на MomentumScroll (не на интерактивных элементах),
-	// позволяем MomentumScroll обработать его самому
+	// позволяем MomentumScroll обработать его самому - не обрабатываем здесь вообще
 	if (isInsideMomentumScroll(target)) {
+		// Не вызываем preventDefault или stopPropagation, чтобы событие дошло до MomentumScroll
 		return
 	}
 
@@ -405,7 +423,13 @@ function handlePlayAreaTouchStart(e: TouchEvent) {
 }
 
 function handlePlayAreaTouchMove(e: TouchEvent) {
-	if (!momentumScrollRef.value || !playAreaRef.value || !playAreaTouchId) return
+	if (!momentumScrollRef.value || !playAreaRef.value) return
+
+	// Если playAreaTouchId не установлен, значит событие началось не на playArea
+	// (оно началось на canvas или MomentumScroll) - не обрабатываем здесь вообще
+	if (!playAreaTouchId) {
+		return
+	}
 
 	const touch = Array.from(e.touches).find(
 		(t) => t.identifier === playAreaTouchId,
@@ -439,8 +463,11 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 	// позволяем MomentumScroll обработать его самому
 	if (isInsideMomentumScroll(target)) {
 		if (!playAreaDragStarted) {
+			// Если drag не был активирован, просто прекращаем обработку здесь
+			// и позволяем событию всплыть к MomentumScroll
 			playAreaTouchId = null
 			clearPlayAreaPressTimer()
+			// Не вызываем preventDefault или stopPropagation, чтобы событие дошло до MomentumScroll
 			return
 		} else {
 			// Если drag уже активирован, прекращаем скролл
@@ -465,7 +492,9 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 		if (isVerticalSwipe && movedY > minSwipeDistance) {
 			clearPlayAreaPressTimer()
 			activatePlayAreaDrag()
-			e.preventDefault()
+			if (e.cancelable) {
+				e.preventDefault()
+			}
 			e.stopPropagation()
 		} else if (movedX > minSwipeDistance && !isVerticalSwipe) {
 			// Горизонтальный свайп - отменяем обработку скролла
@@ -478,7 +507,9 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 	}
 
 	// drag активирован => скроллим только по вертикали
-	e.preventDefault()
+	if (e.cancelable) {
+		e.preventDefault()
+	}
 	e.stopPropagation()
 	momentumScrollRef.value.drag(deltaY, performance.now())
 }
@@ -1101,8 +1132,8 @@ const CANVAS_PRESS_MOVE_TOLERANCE = 6 // px - порог движения для
 
 const formattedTime = computed(() => {
 	const time = Math.max(0, Math.floor(gameStore.remainingTime))
-	const seconds = time % 60
-	return `${String(Math.floor(time / 60)).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+	const seconds = time % 100 // Показываем только последние 2 цифры
+	return String(seconds).padStart(2, '0')
 })
 
 const gridHeight = computed(
@@ -1319,9 +1350,6 @@ function getPositionFromEvent(
 function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// КРИТИЧНО: Блокируем ввод до тех пор, пока игра не запущена
 	if (!gameStore.isGameStarted) {
-		console.log(
-			'[GamePage] handlePointerDown: input blocked, game not started yet',
-		)
 		return
 	}
 	if (gameStore.isLocked || gameStore.isGameOver) return
@@ -1603,7 +1631,6 @@ async function startGameWithAds(): Promise<void> {
 	const shouldShowAd = gameStore.shouldShowInterstitial()
 
 	if (shouldShowAd) {
-		console.log('[GamePage] Showing interstitial ad before game start')
 		isGenerating.value = true
 
 		// Показываем interstitial рекламу и ждем её закрытия
@@ -1611,7 +1638,6 @@ async function startGameWithAds(): Promise<void> {
 			admob.interstitial({
 				isFirst: false,
 				onInterstitialAdClosed: () => {
-					console.log('[GamePage] Interstitial ad closed, starting game')
 					resolve()
 				},
 			})
@@ -1623,7 +1649,6 @@ async function startGameWithAds(): Promise<void> {
 
 	const tilesAddedTime = performance.now()
 	gameStore.setDiagnostic('tilesAdded', tilesAddedTime)
-	console.log(`[GamePage] tiles added at ${tilesAddedTime.toFixed(2)}ms`)
 
 	// Запускаем boot-цепочку
 	await gameController.bootGame()
@@ -1631,7 +1656,6 @@ async function startGameWithAds(): Promise<void> {
 
 onMounted(async () => {
 	const gamePageStartTime = performance.now()
-	console.log('[GamePage] onMounted: starting game initialization')
 
 	// Initialize AudioManager
 	await AudioManager.init()
@@ -1731,9 +1755,6 @@ onMounted(async () => {
 		attempts < maxAttempts
 	) {
 		attempts++
-		console.log(
-			`[GamePage] onMounted: Waiting for container dimensions (attempt ${attempts}/${maxAttempts})...`,
-		)
 
 		// Ждем несколько кадров для расчета layout
 		await nextTick()
@@ -1775,15 +1796,6 @@ onMounted(async () => {
 	if (pixiCanvasAfterInit) {
 		const canvasRect = pixiCanvasAfterInit.getBoundingClientRect()
 		const canvasStyle = window.getComputedStyle(pixiCanvasAfterInit)
-		console.log('[GamePage] onMounted: Canvas visibility check:', {
-			display: canvasStyle.display,
-			visibility: canvasStyle.visibility,
-			opacity: canvasStyle.opacity,
-			width: canvasRect.width,
-			height: canvasRect.height,
-			styleWidth: pixiCanvasAfterInit.style.width,
-			styleHeight: pixiCanvasAfterInit.style.height,
-		})
 
 		// Принудительно устанавливаем видимость если нужно
 		if (canvasStyle.display === 'none' || canvasRect.width === 0) {
@@ -1800,7 +1812,6 @@ onMounted(async () => {
 	if (momentumScrollRef.value) {
 		await nextTick()
 		momentumScrollRef.value.updateBounds()
-		console.log('[GamePage] onMounted: MomentumScroll bounds updated')
 	}
 
 	// Create renderer с правильным tileSize (всегда ширина / 8)
@@ -1810,7 +1821,6 @@ onMounted(async () => {
 	const tileSize = Math.max(containerWidth, 320) / WIDTH // Минимум 320px для мобильных
 
 	const rendererInitStartTime = performance.now()
-	console.log('[GamePage] onMounted: creating GameRenderer')
 
 	renderer = new GameRenderer({
 		canvas: pixiCanvas, // Используем canvas из PixiService
@@ -1819,26 +1829,12 @@ onMounted(async () => {
 
 	await renderer.init()
 
-	console.log(
-		`[GamePage] onMounted: GameRenderer initialized in ${(performance.now() - rendererInitStartTime).toFixed(2)}ms`,
-	)
-
 	// КРИТИЧНО: Проверяем видимость canvas после инициализации renderer
 	const pixiCanvasAfterRenderer = getPixiCanvas()
 	if (pixiCanvasAfterRenderer) {
 		pixiCanvasAfterRenderer.style.display = 'block'
 		pixiCanvasAfterRenderer.style.visibility = 'visible'
 		pixiCanvasAfterRenderer.style.opacity = '1'
-
-		const canvasRectAfterRenderer =
-			pixiCanvasAfterRenderer.getBoundingClientRect()
-		console.log('[GamePage] onMounted: Canvas after renderer init:', {
-			display: pixiCanvasAfterRenderer.style.display,
-			width: canvasRectAfterRenderer.width,
-			height: canvasRectAfterRenderer.height,
-			styleWidth: pixiCanvasAfterRenderer.style.width,
-			styleHeight: pixiCanvasAfterRenderer.style.height,
-		})
 	}
 
 	// После инициализации PixiJS нужно убедиться, что размеры canvas правильные
@@ -1860,13 +1856,9 @@ onMounted(async () => {
 	await new Promise((resolve) => requestAnimationFrame(resolve))
 	if (momentumScrollRef.value) {
 		momentumScrollRef.value.updateBounds()
-		console.log(
-			'[GamePage] onMounted: MomentumScroll bounds updated after renderer resize',
-		)
 	}
 
 	const controllerInitStartTime = performance.now()
-	console.log('[GamePage] onMounted: creating GameController')
 
 	// Create game controller с callback'ами для boot-цепочки
 	gameController = new GameController(renderer, {
@@ -1875,38 +1867,23 @@ onMounted(async () => {
 			// Callback для скрытия loading overlay
 			const hideLoadingTime = performance.now()
 			gameStore.setDiagnostic('loaderHidden', hideLoadingTime)
-			console.log(
-				`[GamePage] onHideLoading: loader hidden at ${hideLoadingTime.toFixed(2)}ms`,
-			)
 			isGenerating.value = false
 		},
 		onStartScrollAnimation: async () => {
 			// Callback для запуска анимации скроллинга
 			const scrollStartTime = performance.now()
 			gameStore.setDiagnostic('scrollStarted', scrollStartTime)
-			console.log(
-				`[GamePage] onStartScrollAnimation: scroll started at ${scrollStartTime.toFixed(2)}ms`,
-			)
 
 			// Update scroll bounds после того, как игра запущена
 			momentumScrollRef.value?.updateBounds()
 
 			// Animate scroll to bottom
 			await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
-
-			const scrollEndTime = performance.now()
-			console.log(
-				`[GamePage] onStartScrollAnimation: scroll completed in ${(scrollEndTime - scrollStartTime).toFixed(2)}ms`,
-			)
 		},
 	})
 
 	// Initialize controller - текстуры уже загружены в PixiService
 	await gameController.init()
-
-	console.log(
-		`[GamePage] onMounted: GameController initialized in ${(performance.now() - controllerInitStartTime).toFixed(2)}ms`,
-	)
 
 	// Set initial scroll position to top
 	momentumScrollRef.value?.scrollToTop()
@@ -1921,29 +1898,19 @@ onMounted(async () => {
 		gameStore.setCurrentLevel(1)
 	} else {
 		gameStore.setCurrentLevel(level)
-		console.log(`[GamePage] Starting game at level ${level}`)
 	}
 
 	// Показываем баннерную рекламу снизу экрана
 	try {
 		await admob.showBanner()
-		console.log('[GamePage] Banner ad shown')
 	} catch (error) {
 		console.warn('[GamePage] Failed to show banner ad:', error)
 	}
 
 	const gameStartTime = performance.now()
-	console.log('[GamePage] onMounted: starting game')
 
 	// Используем функцию с проверкой рекламы для запуска игры
 	await startGameWithAds()
-
-	console.log(
-		`[GamePage] onMounted: game boot completed in ${(performance.now() - gameStartTime).toFixed(2)}ms`,
-	)
-	console.log(
-		`[GamePage] onMounted: total initialization completed in ${(performance.now() - gamePageStartTime).toFixed(2)}ms`,
-	)
 
 	// Setup input handlers
 	// КРИТИЧНО: Используем canvas из PixiService
@@ -2226,8 +2193,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(async () => {
-	console.log('[GamePage] onBeforeUnmount: cleaning up')
-
 	// Очищаем таймеры play-area
 	clearPlayAreaPressTimer()
 
@@ -2286,7 +2251,6 @@ onBeforeUnmount(async () => {
 	// Скрываем баннерную рекламу при выходе со страницы
 	try {
 		await admob.hideBanner()
-		console.log('[GamePage] Banner ad hidden')
 	} catch (error) {
 		console.warn('[GamePage] Failed to hide banner ad:', error)
 	}
@@ -2294,8 +2258,6 @@ onBeforeUnmount(async () => {
 	gameController?.destroy()
 	gameController = null
 	renderer = null
-
-	console.log('[GamePage] onBeforeUnmount: cleanup completed')
 })
 
 function showExitDialog(): void {
@@ -2344,6 +2306,10 @@ async function restart(): Promise<void> {
 	// Используем calc для учета высоты нижней секции и safe-area
 	max-height: 100%;
 	height: 100%;
+	max-width: 475px;
+	width: 100%;
+	margin: 0 auto;
+	box-sizing: border-box;
 
 	@media (max-width: 640px) {
 		padding-left: clamp(0.5rem, 1.5vw, 0.75rem);
@@ -2423,10 +2389,32 @@ async function restart(): Promise<void> {
 	flex-direction: column;
 	align-items: center;
 	width: 0.4rem;
+	min-width: 0.4rem; // Минимальная ширина для гарантии видимости
 	flex-shrink: 0;
 	gap: 0.25rem;
 	// Позволяем скроллить через индикатор
 	cursor: grab;
+	position: relative;
+	z-index: 2;
+	visibility: visible !important;
+	opacity: 1 !important;
+	pointer-events: auto !important;
+
+	// Увеличиваем ширину на мобильных устройствах для лучшей видимости
+	@media (max-width: 640px) {
+		width: 0.5rem;
+		min-width: 0.5rem;
+	}
+
+	@media (max-width: 480px) {
+		width: 0.6rem;
+		min-width: 0.6rem;
+	}
+
+	@media (max-width: 360px) {
+		width: 0.7rem;
+		min-width: 0.7rem;
+	}
 
 	&:active {
 		cursor: grabbing;
@@ -2451,12 +2439,29 @@ async function restart(): Promise<void> {
 	&__bar {
 		flex: 1;
 		width: 100%;
+		min-width: 100%; // Гарантируем полную ширину
 		min-height: 60px;
 		background: rgba(0, 0, 0, 0.4);
 		border-radius: 6px;
 		border: 1px solid rgba(255, 255, 255, 0.2);
 		position: relative;
-		overflow: hidden;
+		overflow: visible; // Изменено с hidden на visible для видимости на мобильных
+		box-shadow: 0 0 4px rgba(255, 255, 255, 0.1); // Добавляем тень для лучшей видимости
+		visibility: visible !important;
+		opacity: 1 !important;
+
+		// Улучшаем видимость на мобильных устройствах
+		@media (max-width: 640px) {
+			border-width: 1.5px;
+			background: rgba(0, 0, 0, 0.5);
+			box-shadow: 0 0 6px rgba(255, 255, 255, 0.15);
+		}
+
+		@media (max-width: 480px) {
+			border-width: 2px;
+			background: rgba(0, 0, 0, 0.6);
+			box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
+		}
 	}
 
 	&__fill {
@@ -2464,10 +2469,27 @@ async function restart(): Promise<void> {
 		bottom: 0;
 		left: 0;
 		right: 0;
+		width: 100%;
 		border-radius: 0 0 5px 5px;
 		transition:
 			height 0.25s ease,
 			background-color 0.2s ease;
+		// Улучшаем видимость заполнения на мобильных устройствах
+		box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.3);
+		visibility: visible !important;
+		opacity: 1 !important;
+		// Минимальная высота для видимости даже при малом заполнении
+		min-height: 2px;
+
+		@media (max-width: 640px) {
+			box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.4);
+			min-height: 3px;
+		}
+
+		@media (max-width: 480px) {
+			box-shadow: 0 -3px 8px rgba(0, 0, 0, 0.5);
+			min-height: 4px;
+		}
 	}
 }
 
@@ -2476,6 +2498,8 @@ async function restart(): Promise<void> {
 	justify-content: space-between;
 	align-items: center;
 	width: 100%;
+	max-width: 475px;
+	margin: 0 auto;
 	gap: 5px;
 	/* Убираем flex-wrap, чтобы элементы не переносились на новую строку */
 	flex-wrap: nowrap;
@@ -2491,6 +2515,82 @@ async function restart(): Promise<void> {
 
 	@media (max-width: 320px) {
 		gap: 2px;
+	}
+
+	&__exit {
+		width: 44px;
+		height: 44px;
+		border-radius: 12px;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		background: linear-gradient(
+			135deg,
+			rgba(255, 255, 255, 0.2) 0%,
+			rgba(255, 255, 255, 0.1) 100%
+		);
+		backdrop-filter: blur(10px);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		touch-action: manipulation;
+		flex-shrink: 0;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+		padding: 0;
+
+		&:hover {
+			background: linear-gradient(
+				135deg,
+				rgba(255, 255, 255, 0.3) 0%,
+				rgba(255, 255, 255, 0.2) 100%
+			);
+			transform: scale(1.1);
+			box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+			border-color: rgba(255, 255, 255, 0.5);
+		}
+
+		&:active {
+			transform: scale(0.95);
+		}
+
+		@media (max-width: 640px) {
+			width: 40px;
+			height: 40px;
+		}
+
+		@media (max-width: 360px) {
+			width: 36px;
+			height: 36px;
+			border-radius: 10px;
+		}
+
+		@media (max-width: 320px) {
+			width: 32px;
+			height: 32px;
+			border-radius: 8px;
+		}
+	}
+
+	&__exit-icon {
+		width: 24px;
+		height: 24px;
+		color: white;
+		filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+
+		@media (max-width: 640px) {
+			width: 20px;
+			height: 20px;
+		}
+
+		@media (max-width: 360px) {
+			width: 18px;
+			height: 18px;
+		}
+
+		@media (max-width: 320px) {
+			width: 16px;
+			height: 16px;
+		}
 	}
 
 	&__time,

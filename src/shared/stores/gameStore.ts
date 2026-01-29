@@ -159,17 +159,6 @@ export const useGameStore = defineStore('game', () => {
 			return `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}ms`
 		}
 
-		console.log('[GameStore] Diagnostics (relative to assetsLoaded):', {
-			assetsLoaded: '0.00ms (base)',
-			texturesWarmed: formatTime(d.texturesWarmed),
-			pixiInit: formatTime(d.pixiInit),
-			tilesAdded: formatTime(d.tilesAdded),
-			firstFrameRendered: formatTime(d.firstFrameRendered),
-			loaderHidden: formatTime(d.loaderHidden),
-			scrollStarted: formatTime(d.scrollStarted),
-			timerStarted: formatTime(d.timerStarted),
-		})
-
 		// Дополнительная информация о критических интервалах
 		// КРИТИЧНО: Скрываем loader только внутри этого условия
 		if (d.firstFrameRendered && !d.loaderHidden) {
@@ -182,13 +171,6 @@ export const useGameStore = defineStore('game', () => {
 					'[GameStore] Critical: firstFrameRendered is set but loaderHidden is not - onHideLoading callback not provided!',
 				)
 			}
-		}
-
-		if (d.firstFrameRendered && d.loaderHidden) {
-			const tilesToLoader = d.loaderHidden - d.firstFrameRendered
-			console.log('[GameStore] Critical interval:', {
-				'tiles visible → loader hidden': `${tilesToLoader.toFixed(2)}ms`,
-			})
 		}
 	}
 

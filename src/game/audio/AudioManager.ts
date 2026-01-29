@@ -172,7 +172,12 @@ class AudioManagerClass {
 	 */
 	private play(
 		id: SoundId,
-		options?: { volume?: number; speed?: number; once?: boolean; skipThrottle?: boolean }
+		options?: {
+			volume?: number
+			speed?: number
+			once?: boolean
+			skipThrottle?: boolean
+		},
 	): void {
 		if (!this.initialized || !this.enabled) return
 
@@ -221,7 +226,7 @@ class AudioManagerClass {
 				loop: false,
 				singleInstance: false, // Позволяем воспроизводить несколько экземпляров одновременно
 			})
-			
+
 			// Проверяем результат воспроизведения
 			if (!soundInstance) {
 				return
@@ -242,7 +247,6 @@ class AudioManagerClass {
 			console.warn(`Failed to play sound ${id}:`, error)
 			// Если звук комбо не воспроизвелся, пытаемся использовать match как fallback
 			if (id.startsWith('combo') && sound.exists('match')) {
-				console.log(`Falling back to match sound for ${id}`)
 				this.play('match', { ...options, speed: options?.speed ?? 1.1 })
 			}
 		}
@@ -266,7 +270,7 @@ class AudioManagerClass {
 	/**
 	 * Воспроизведение звука матча/комбо
 	 * skipThrottle: true для каскадных исчезновений, чтобы звуки не блокировались throttle
-	 * 
+	 *
 	 * Логика звуков:
 	 * - chainIndex 1: MATCH (первое исчезновение от действия игрока)
 	 * - chainIndex 2-4: MATCH с уменьшенной громкостью (первые три каскадных)
@@ -284,7 +288,7 @@ class AudioManagerClass {
 		} else {
 			// Последующие каскадные исчезновения - COMBO звуки
 			let comboId: SoundId = 'combo5'
-			
+
 			if (chainIndex === 5) {
 				comboId = sound.exists('combo2') ? 'combo2' : 'match'
 			} else if (chainIndex === 6) {
@@ -297,7 +301,7 @@ class AudioManagerClass {
 				// chainIndex >= 9 - максимальный комбо
 				comboId = sound.exists('combo5') ? 'combo5' : 'match'
 			}
-			
+
 			// Воспроизводим звук сразу, без задержек - пусть звучат параллельно если нужно
 			this.play(comboId, { skipThrottle })
 		}

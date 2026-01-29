@@ -32,14 +32,13 @@ class PixiServiceClass {
 		}
 
 		const initStartTime = performance.now()
-		console.log('[PixiService] init: starting initialization')
 
 		// Создаем canvas элемент
 		this.canvas = document.createElement('canvas')
 		this.canvas.style.display = 'block'
 		this.canvas.style.width = `${options?.width || 320}px`
 		this.canvas.style.height = `${options?.height || 400}px`
-		
+
 		// Добавляем canvas в DOM (скрытый, в фоне)
 		this.hostElement = hostEl
 		this.canvas.style.position = 'absolute'
@@ -77,18 +76,13 @@ class PixiServiceClass {
 
 		// Загружаем и создаем текстуры
 		const assetsLoadedTime = performance.now()
-		console.log('[PixiService] init: loading assets')
 		this.tileTextures = await createTileTextures()
-		console.log(`[PixiService] init: assets loaded in ${(performance.now() - assetsLoadedTime).toFixed(2)}ms`)
 
 		// Прогреваем текстуры GPU
 		const warmupStartTime = performance.now()
-		console.log('[PixiService] init: warming up textures')
 		await warmTextures(this.app, this.tileTextures)
-		console.log(`[PixiService] init: textures warmed in ${(performance.now() - warmupStartTime).toFixed(2)}ms`)
 
 		this.isInitialized = true
-		console.log(`[PixiService] init: completed in ${(performance.now() - initStartTime).toFixed(2)}ms`)
 	}
 
 	/**
@@ -113,8 +107,6 @@ class PixiServiceClass {
 		this.canvas.style.pointerEvents = 'auto'
 		this.canvas.style.display = 'block'
 		newHostEl.appendChild(this.canvas)
-		
-		console.log('[PixiService] attachToHost: canvas attached to new host')
 	}
 
 	/**

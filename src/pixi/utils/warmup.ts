@@ -11,9 +11,11 @@ const TILE_PADDING = 2
  * Прогреть текстуры GPU - создать невидимые спрайты и отрендерить их
  * Это заставляет GPU загрузить текстуры в память и подготовить их к быстрому отображению
  */
-export async function warmTextures(app: Application, tileTextures: TileTextures): Promise<void> {
+export async function warmTextures(
+	app: Application,
+	tileTextures: TileTextures,
+): Promise<void> {
 	const warmUpStartTime = performance.now()
-	console.log('[Warmup] warmTextures: starting GPU warm-up')
 
 	// Создаем временный контейнер для тестовых спрайтов (вне видимой области)
 	const warmUpContainer = new Container()
@@ -49,14 +51,12 @@ export async function warmTextures(app: Application, tileTextures: TileTextures)
 		return
 	}
 
-	console.log(`[Warmup] warmTextures: created ${testSprites.length} test sprites`)
-
 	// КРИТИЧНО: Рендерим несколько кадров для прогрева GPU
 	// Это гарантирует, что текстуры загружены в GPU память
 	for (let i = 0; i < 3; i++) {
 		// Принудительно рендерим кадр
 		app.renderer.render(app.stage)
-		
+
 		// Ждем следующий кадр ticker для гарантии рендера
 		await new Promise<void>((resolve) => {
 			if (!app.ticker) {
@@ -70,7 +70,7 @@ export async function warmTextures(app: Application, tileTextures: TileTextures)
 	}
 
 	// Удаляем тестовые спрайты
-	testSprites.forEach(sprite => {
+	testSprites.forEach((sprite) => {
 		if (sprite.parent) {
 			sprite.parent.removeChild(sprite)
 		}
@@ -81,7 +81,4 @@ export async function warmTextures(app: Application, tileTextures: TileTextures)
 		warmUpContainer.parent.removeChild(warmUpContainer)
 	}
 	warmUpContainer.destroy({ children: true })
-
-	const warmUpDuration = performance.now() - warmUpStartTime
-	console.log(`[Warmup] warmTextures: completed in ${warmUpDuration.toFixed(2)}ms`)
 }

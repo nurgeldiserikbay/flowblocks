@@ -23,13 +23,18 @@ import TopBar from './TopBar.vue'
 <style lang="scss" scoped>
 .app-layout {
 	height: 100dvh;
+	min-height: 100dvh;
+	max-height: 100dvh;
 	display: flex;
 	flex-direction: column;
-	background: linear-gradient(180deg, #1e1f3a 0%, #2b2f6c 50%, #1e1f3a 100%);
+	background: linear-gradient(180deg, #0f1019 0%, #1a1c3a 50%, #0f1019 100%);
 	background-attachment: fixed;
 	position: relative;
 	overflow: hidden;
 	padding-top: env(safe-area-inset-top, 0px);
+	padding-bottom: 0;
+	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
+	margin-bottom: 0;
 
 	&::before {
 		content: '';
@@ -66,10 +71,6 @@ import TopBar from './TopBar.vue'
 		overflow: hidden;
 		z-index: 1;
 		min-height: 0; // Важно для flex-контейнеров, чтобы они правильно ограничивали высоту
-		padding-bottom: env(
-			safe-area-inset-bottom,
-			0px
-		); // Учитываем нижнюю safe-area
 	}
 }
 </style>

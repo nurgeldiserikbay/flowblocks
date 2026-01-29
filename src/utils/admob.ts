@@ -45,7 +45,6 @@ class Admob {
 		AdMob.addListener(
 			BannerAdPluginEvents.SizeChanged,
 			(size: AdMobBannerSize) => {
-				console.log(size)
 				// Subscribe Change Banner Size
 			},
 		)
@@ -87,19 +86,17 @@ class Admob {
 			isClosed = true
 		}
 
-		AdMob.addListener(InterstitialAdPluginEvents.Loaded, (info: AdLoadInfo) => {
-			console.log(info)
-		})
+		AdMob.addListener(
+			InterstitialAdPluginEvents.Loaded,
+			(info: AdLoadInfo) => {},
+		)
 		AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
-			console.log('Dismissed')
 			if (!isClosed) closeAds()
 		})
 		AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, () => {
-			console.log('FailedToLoad')
 			if (!isClosed) closeAds()
 		})
 		AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, () => {
-			console.log('FailedToShow')
 			if (!isClosed) closeAds()
 		})
 

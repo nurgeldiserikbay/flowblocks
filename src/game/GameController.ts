@@ -70,22 +70,20 @@ export class GameController {
 		// КРИТИЧНО: Текстуры уже загружены в PixiService.init() на StartPage
 		// Просто проверяем готовность
 		if (!PixiService.isReady()) {
-			console.warn('[GameController] init: PixiService not ready, attempting to load textures')
+			console.warn(
+				'[GameController] init: PixiService not ready, attempting to load textures',
+			)
 			// Fallback: пытаемся загрузить текстуры (не должно происходить)
 			await loadBlockTextures()
 			await waitForTexturesReady(5000)
-		} else {
-			// Текстуры уже готовы, просто проверяем
-			console.log('[GameController] init: PixiService ready, textures already loaded')
 		}
-		
+
 		// Ассеты загружены (уже установлено в StartPage, но устанавливаем для совместимости)
 		this.store.setAssetsReady(true)
 	}
 
 	async startGame(): Promise<void> {
 		const startGameTime = performance.now()
-		console.log('[GameController] startGame: starting game')
 
 		// Очищаем кэш при старте игры
 		this.lastHasMovesCheck = null
@@ -108,7 +106,6 @@ export class GameController {
 		// Просто устанавливаем флаги готовности
 		this.store.setAssetsReady(true)
 		this.store.setDiagnostic('assetsLoaded', performance.now())
-		console.log('[GameController] startGame: assets ready (already loaded in PixiService)')
 
 		// Проверяем, что сцена готова (Pixi Application инициализирован)
 		if (!this.renderer || !this.renderer.isInitialized()) {
@@ -116,20 +113,27 @@ export class GameController {
 		}
 		this.store.setSceneReady(true)
 		this.store.setDiagnostic('pixiInit', performance.now())
-		console.log('[GameController] startGame: pixi initialized')
 
 		// КРИТИЧНО: Текстуры уже прогреты в PixiService.init() на StartPage
 		this.store.setTexturesWarmed(true)
 		this.store.setDiagnostic('texturesWarmed', performance.now())
-		console.log('[GameController] startGame: textures warmed (already warmed in PixiService)')  
 
 		// Create initial grid
-		const { grid, nextId } = createInitialGrid(this.store.getHeight(), 1, this.store.currentLevel)
+		const { grid, nextId } = createInitialGrid(
+			this.store.getHeight(),
+			1,
+			this.store.currentLevel,
+		)
 		this.nextCubeId = nextId
 		this.store.setGrid(grid)
 
 		// Собираем все начальные плитки для анимации появления
-		const initialCubes: Array<{ id: number; r: number; c: number; color: number }> = []
+		const initialCubes: Array<{
+			id: number
+			r: number
+			c: number
+			color: number
+		}> = []
 		for (let r = 0; r < grid.length; r++) {
 			for (let c = 0; c < WIDTH; c++) {
 				const cube = grid[r]?.[c]
@@ -162,7 +166,6 @@ export class GameController {
 		const tilesAddedTime = performance.now()
 		this.store.setTilesAdded(true)
 		this.store.setDiagnostic('tilesAdded', tilesAddedTime)
-		console.log(`[GameController] startGame: tiles added at ${tilesAddedTime.toFixed(2)}ms`)
 		await this.renderer?.renderGrid(grid, this.nextCubeId, initialCubeIds)
 
 		// КРИТИЧНО: Ждем дополнительный кадр перед запуском анимации
@@ -175,7 +178,7 @@ export class GameController {
 		// Анимируем появление начальных плиток
 		if (this.renderer && initialCubes.length > 0) {
 			await this.renderer.applyEvents([initialSpawnEvent])
-			
+
 			// Обновляем moves для начальных плиток (они были созданы с moves=0)
 			for (const cube of initialCubes) {
 				const actualCube = grid[cube.r]?.[cube.c]
@@ -184,26 +187,26 @@ export class GameController {
 				}
 			}
 		}
-		
+
 		// КРИТИЧНО: Ждем, пока плитки реально видны на экране ПОСЛЕ завершения анимации
 		// Это гарантирует, что первый кадр с видимыми плитками уже отрендерен
 		// Только после этого можно скрывать loading overlay и запускать таймер
 		if (this.renderer) {
 			try {
 				const waitForVisibleStartTime = performance.now()
-				console.log('[GameController] startGame: waiting for tiles visible')
-				
+
 				// Ждем видимости плиток (детерминированное ожидание первого видимого кадра)
 				// КРИТИЧНО: Вызывается ПОСЛЕ завершения анимации spawn
 				await this.renderer.waitForTilesVisible()
-				
-				console.log(`[GameController] startGame: tiles visible after ${(performance.now() - waitForVisibleStartTime).toFixed(2)}ms`)
-				
+
 				// После реального рендера первого кадра с видимыми плитками
 				// Устанавливаем флаг готовности
 				this.onFirstFrameRendered()
 			} catch (error) {
-				console.error('[GameController] startGame: failed to wait for tiles visible', error)
+				console.error(
+					'[GameController] startGame: failed to wait for tiles visible',
+					error,
+				)
 				// Продолжаем выполнение, но это может привести к проблемам с отображением
 				// Устанавливаем флаг в любом случае, чтобы не заблокировать игру
 				this.onFirstFrameRendered()
@@ -212,8 +215,6 @@ export class GameController {
 			// Если renderer отсутствует, все равно устанавливаем флаг
 			this.onFirstFrameRendered()
 		}
-		
-		console.log(`[GameController] startGame: completed in ${(performance.now() - startGameTime).toFixed(2)}ms`)
 	}
 
 	/**
@@ -223,7 +224,7 @@ export class GameController {
 	 * 2) Лоадинг исчезает
 	 * 3) Запускается анимация скроллинга (auto-scroll / scrollToBottomAnimated)
 	 * 4) Стартует таймер обратного отсчёта (wave timer)
-	 * 
+	 *
 	 * КРИТИЧНО: startGame() должен быть вызван ДО этой функции
 	 */
 	async bootGame(): Promise<void> {
@@ -232,7 +233,7 @@ export class GameController {
 			// Ждем готовности
 			let attempts = 0
 			while (!this.store.isFirstFrameRendered && attempts < 50) {
-				await new Promise(resolve => setTimeout(resolve, 100))
+				await new Promise((resolve) => setTimeout(resolve, 100))
 				attempts++
 			}
 			if (!this.store.isFirstFrameRendered) {
@@ -249,7 +250,7 @@ export class GameController {
 		} else {
 			// Fallback: ждем через requestAnimationFrame
 			for (let i = 0; i < 2; i++) {
-				await new Promise(resolve => requestAnimationFrame(resolve))
+				await new Promise((resolve) => requestAnimationFrame(resolve))
 			}
 		}
 
@@ -262,26 +263,29 @@ export class GameController {
 				this.store.setDiagnostic('scrollStarted', performance.now())
 				await this.opts.onStartScrollAnimation()
 			} catch (error) {
-				console.error('[GameController] bootGame: scroll animation failed', error)
+				console.error(
+					'[GameController] bootGame: scroll animation failed',
+					error,
+				)
 				// Продолжаем выполнение даже если скролл не удался
 			}
 		} else {
-			console.warn('[GameController] bootGame: onStartScrollAnimation callback not provided')
+			console.warn(
+				'[GameController] bootGame: onStartScrollAnimation callback not provided',
+			)
 		}
 
 		// 4. Запускаем таймер обратного отсчёта
 		const timerStartTime = performance.now()
 		this.store.setDiagnostic('timerStarted', timerStartTime)
-		console.log(`[GameController] bootGame: timer started at ${timerStartTime.toFixed(2)}ms`)
 		this.startTimer()
-		
+
 		// Логируем диагностику после завершения boot-цепочки
 		// КРИТИЧНО: Скрытие loader происходит внутри logDiagnostics() при условии firstFrameRendered
 		this.store.logDiagnostics(this.opts.onHideLoading)
 
 		// Игра запущена
 		this.store.setGameStarted(true)
-		console.log('[GameController] bootGame: game started')
 	}
 
 	/**
@@ -295,7 +299,6 @@ export class GameController {
 		const firstFrameTime = performance.now()
 		this.store.setFirstFrameRendered(true)
 		this.store.setDiagnostic('firstFrameRendered', firstFrameTime)
-		console.log(`[GameController] onFirstFrameRendered: first frame rendered at ${firstFrameTime.toFixed(2)}ms`)
 	}
 
 	private startTimer(): void {
@@ -312,7 +315,9 @@ export class GameController {
 		if (this.timerTimeout !== null) {
 			// Не логируем предупреждение, если это нормальный вызов (не force)
 			if (force) {
-				console.warn('[GameController] scheduleNextTick: timer already scheduled, clearing and rescheduling')
+				console.warn(
+					'[GameController] scheduleNextTick: timer already scheduled, clearing and rescheduling',
+				)
 				clearTimeout(this.timerTimeout)
 				this.timerTimeout = null
 			} else {
@@ -322,18 +327,23 @@ export class GameController {
 
 		const now = Date.now()
 		const delay = Math.max(0, this.expectedNextTick - now)
-		
+
 		// Если задержка слишком большая (больше 2 секунд), значит что-то пошло не так
 		// В этом случае сбрасываем ожидаемое время
 		if (delay > 2000) {
-			console.warn(`[GameController] scheduleNextTick: large delay detected: ${delay}ms, resetting timer`)
+			console.warn(
+				`[GameController] scheduleNextTick: large delay detected: ${delay}ms, resetting timer`,
+			)
 			this.expectedNextTick = now + 1000
 		}
 
-		this.timerTimeout = window.setTimeout(() => {
-			this.timerTimeout = null // Очищаем перед вызовом tick
-			this.tick()
-		}, Math.max(0, this.expectedNextTick - Date.now()))
+		this.timerTimeout = window.setTimeout(
+			() => {
+				this.timerTimeout = null // Очищаем перед вызовом tick
+				this.tick()
+			},
+			Math.max(0, this.expectedNextTick - Date.now()),
+		)
 	}
 
 	private tick(): void {
@@ -358,7 +368,7 @@ export class GameController {
 		}
 
 		const now = Date.now()
-		
+
 		// Всегда вычитаем ровно 1 секунду для точности
 		// Это гарантирует, что таймер уменьшается равномерно
 		const newTime = this.store.remainingTime - 1
@@ -372,7 +382,7 @@ export class GameController {
 		} else {
 			// Планируем следующий тик
 			this.scheduleNextTick()
-			
+
 			// Check game state between ticks (only if not locked to avoid concurrent checks)
 			// КРИТИЧНО: Проверяем состояние только если кубиков <= 32 для оптимизации
 			// Также ограничиваем частоту проверок - не чаще чем раз в STATE_CHECK_INTERVAL
@@ -380,7 +390,7 @@ export class GameController {
 			if (!this.store.isLocked) {
 				const now = Date.now()
 				const timeSinceLastCheck = now - this.lastStateCheckTime
-				
+
 				// Проверяем состояние только если прошло достаточно времени с последней проверки
 				if (timeSinceLastCheck >= this.STATE_CHECK_INTERVAL) {
 					setTimeout(() => {
@@ -415,7 +425,12 @@ export class GameController {
 
 		// Spawn wave - это изменяет grid синхронно и создает события для анимации
 		const grid = cloneGrid(this.store.grid)
-		const result = spawnWave(grid, this.store.spawnRows, this.nextCubeId, this.store.currentLevel)
+		const result = spawnWave(
+			grid,
+			this.store.spawnRows,
+			this.nextCubeId,
+			this.store.currentLevel,
+		)
 		this.nextCubeId = result.nextId
 
 		// КРИТИЧНО: Обновляем grid в store СРАЗУ после spawnWave
@@ -436,7 +451,11 @@ export class GameController {
 		// Re-render grid, исключая новые кубы (они будут созданы в animateSpawn)
 		// КРИТИЧНО: renderGrid вызывается с финальным grid, но исключает новые кубы
 		// Это гарантирует, что существующие кубы отображаются в правильных позициях
-		await this.renderer?.renderGrid(grid, this.nextCubeId, newCubeIds.size > 0 ? newCubeIds : undefined)
+		await this.renderer?.renderGrid(
+			grid,
+			this.nextCubeId,
+			newCubeIds.size > 0 ? newCubeIds : undefined,
+		)
 
 		// КРИТИЧНО: НЕ разблокируем игру до завершения всех анимаций
 		// Это гарантирует правильную последовательность: сначала все анимации завершаются, потом игра разблокируется
@@ -448,7 +467,7 @@ export class GameController {
 		if (this.renderer && result.events.length > 0) {
 			// Ждем завершения всех анимаций перед разблокировкой игры
 			await this.renderer.applyEvents(result.events)
-			
+
 			// Обновляем moves для новых плиток после завершения анимаций
 			const newCubeIdsAfterAnim = new Set<number>()
 			for (const event of result.events) {
@@ -458,7 +477,7 @@ export class GameController {
 					}
 				}
 			}
-			
+
 			// Находим кубы в grid по ID и обновляем их moves
 			// После гравитации позиции могут измениться, поэтому ищем по всему grid
 			for (let r = 0; r < grid.length; r++) {
@@ -469,7 +488,7 @@ export class GameController {
 					}
 				}
 			}
-			
+
 			// КРИТИЧНО: Синхронизируем позиции после всех анимаций
 			// Это гарантирует, что все спрайты находятся в правильных позициях
 			await this.renderer?.syncGridPositions(grid)
@@ -500,7 +519,7 @@ export class GameController {
 			// Play game over sound
 			AudioManager.playGameOver()
 		}
-		
+
 		// КРИТИЧНО: Перезапускаем таймер ПОСЛЕ разблокировки игры, чтобы избежать скачков
 		// Таймер должен запуститься только если игра не завершена
 		if (!result.gameOver) {
@@ -511,7 +530,7 @@ export class GameController {
 	async applyUserAction(
 		action: 'swap' | 'slide',
 		from: Position,
-		to: Position
+		to: Position,
 	): Promise<void> {
 		if (this.store.isLocked || this.store.isGameOver) return
 
@@ -532,16 +551,18 @@ export class GameController {
 			if (success) {
 				// После swap: from = куб с которым меняли, to = куб которого двигали
 				const cubeReplaced = grid[from.r]?.[from.c] // бывший в to
-				const cubeMoved = grid[to.r]?.[to.c]       // бывший в from
+				const cubeMoved = grid[to.r]?.[to.c] // бывший в from
 				// Двигаемый: -1 обычно; -2 если блок с которым меняли не имел ходов
 				if (cubeMoved) {
 					const delta = replacedHadNoMoves ? 2 : 1
 					cubeMoved.moves = Math.max(0, cubeMoved.moves - delta)
-					if (this.renderer) this.renderer.updateCubeMoves(cubeMoved.id, cubeMoved.moves)
+					if (this.renderer)
+						this.renderer.updateCubeMoves(cubeMoved.id, cubeMoved.moves)
 				}
 				if (cubeReplaced) {
 					cubeReplaced.moves = Math.max(0, cubeReplaced.moves - 1)
-					if (this.renderer) this.renderer.updateCubeMoves(cubeReplaced.id, cubeReplaced.moves)
+					if (this.renderer)
+						this.renderer.updateCubeMoves(cubeReplaced.id, cubeReplaced.moves)
 				}
 				moveEvent = { type: 'swap', a: from, b: to }
 			}
@@ -600,7 +621,9 @@ export class GameController {
 			}
 
 			// For resolve: all landing positions; add to if the moved cube did not fall
-			const movedCubeFell = fallItems.some((f) => f.from.r === to.r && f.from.c === to.c)
+			const movedCubeFell = fallItems.some(
+				(f) => f.from.r === to.r && f.from.c === to.c,
+			)
 			checkPositions = fallItems.map((f) => f.to)
 			if (!movedCubeFell) checkPositions.push(to)
 		}
@@ -678,7 +701,6 @@ export class GameController {
 		this.store.setLocked(false)
 	}
 
-
 	/**
 	 * Check game state: cubes finished or no moves left
 	 * Called after resolveAfterMove (game is already locked)
@@ -723,21 +745,24 @@ export class GameController {
 		if (!isEmpty && remainingTime > 0) {
 			// Подсчитываем количество кубиков
 			const cubeCount = countCubes(currentGrid)
-			
+
 			// Проверяем наличие ходов только если кубиков <= 32
 			// Если кубиков больше, значит игра еще активна и ходы точно есть
 			if (cubeCount <= 32) {
 				// Используем кэш для оптимизации
 				const gridHash = this.getGridHash(currentGrid)
 				let hasMoves: boolean
-				
-				if (this.lastHasMovesCheck && this.lastHasMovesCheck.gridHash === gridHash) {
+
+				if (
+					this.lastHasMovesCheck &&
+					this.lastHasMovesCheck.gridHash === gridHash
+				) {
 					hasMoves = this.lastHasMovesCheck.result
 				} else {
 					hasMoves = hasPossibleMoves(currentGrid)
 					this.lastHasMovesCheck = { gridHash, result: hasMoves }
 				}
-				
+
 				if (!hasMoves) {
 					// Очищаем кэш перед спавном
 					this.lastHasMovesCheck = null
@@ -775,7 +800,7 @@ export class GameController {
 		if (isEmpty && remainingTime > 0) {
 			// Дополнительная проверка: убеждаемся что игра не заблокирована
 			if (this.store.isLocked || this.store.isGameOver) return
-			
+
 			this.store.setLocked(true)
 			try {
 				// Show "Great" message and add bonus
@@ -799,7 +824,7 @@ export class GameController {
 		if (!isEmpty && remainingTime > 0) {
 			// Подсчитываем количество кубиков
 			const cubeCount = countCubes(currentGrid)
-			
+
 			// Оптимизация: если кубиков очень мало (меньше 8), скорее всего нет ходов
 			// Но все равно проверяем, чтобы быть уверенными
 			if (cubeCount <= 32) {
@@ -807,23 +832,26 @@ export class GameController {
 				// Это позволяет избежать повторных проверок одного и того же состояния
 				const gridHash = this.getGridHash(currentGrid)
 				let hasMoves: boolean
-				
+
 				// Проверяем кэш
-				if (this.lastHasMovesCheck && this.lastHasMovesCheck.gridHash === gridHash) {
+				if (
+					this.lastHasMovesCheck &&
+					this.lastHasMovesCheck.gridHash === gridHash
+				) {
 					hasMoves = this.lastHasMovesCheck.result
 				} else {
 					// Выполняем проверку только один раз
 					hasMoves = hasPossibleMoves(currentGrid)
 					this.lastHasMovesCheck = { gridHash, result: hasMoves }
 				}
-				
+
 				if (!hasMoves) {
 					// Перед блокировкой убеждаемся что игра не заблокирована
 					if (this.store.isLocked || this.store.isGameOver) return
-					
+
 					// Очищаем кэш перед спавном (grid изменится)
 					this.lastHasMovesCheck = null
-					
+
 					this.store.setLocked(true)
 					try {
 						// Show "No moves" message and add bonus based on remaining time
@@ -849,7 +877,10 @@ export class GameController {
 	 * Note: Game should already be locked when calling this
 	 * ОПТИМИЗИРОВАНО: Разблокируем игру сразу после обновления grid, анимации продолжаются в фоне
 	 */
-	private async spawnMidWave(grid: (Cube | null)[][], spawnRows: number): Promise<void> {
+	private async spawnMidWave(
+		grid: (Cube | null)[][],
+		spawnRows: number,
+	): Promise<void> {
 		if (this.store.isGameOver) return
 
 		// Очищаем кэш перед спавном (grid изменится)
@@ -857,7 +888,13 @@ export class GameController {
 
 		// Spawn wave with specified number of rows
 		// maxFilledRows ensures maximum filled rows equals half vessel height
-		const result = spawnWave(grid, spawnRows, this.nextCubeId, this.store.currentLevel, spawnRows)
+		const result = spawnWave(
+			grid,
+			spawnRows,
+			this.nextCubeId,
+			this.store.currentLevel,
+			spawnRows,
+		)
 		this.nextCubeId = result.nextId
 
 		// Update grid
@@ -874,7 +911,11 @@ export class GameController {
 		}
 
 		// Re-render grid, excluding new cubes
-		await this.renderer?.renderGrid(grid, this.nextCubeId, newCubeIds.size > 0 ? newCubeIds : undefined)
+		await this.renderer?.renderGrid(
+			grid,
+			this.nextCubeId,
+			newCubeIds.size > 0 ? newCubeIds : undefined,
+		)
 
 		// КРИТИЧНО: Разблокируем игру СРАЗУ после обновления grid
 		// Это позволяет пользователю двигать плитки даже во время анимации спавна
@@ -887,29 +928,32 @@ export class GameController {
 		// Animate spawn events (анимации продолжаются в фоне, игра уже разблокирована)
 		if (this.renderer && result.events.length > 0) {
 			// Запускаем анимации асинхронно, не блокируя игру
-			this.renderer.applyEvents(result.events).then(() => {
-				// После завершения анимаций обновляем moves для новых кубиков
-				for (const event of result.events) {
-					if (event.type === 'spawn') {
-						for (const cell of event.cells) {
-							// Находим кубик в grid по ID (после гравитации позиция может измениться)
-							for (let r = 0; r < grid.length; r++) {
-								for (let c = 0; c < WIDTH; c++) {
-									const cube = grid[r]?.[c]
-									if (cube && cube.id === cell.id && cube.moves > 0) {
-										this.renderer?.updateCubeMoves(cube.id, cube.moves)
-										break
+			this.renderer
+				.applyEvents(result.events)
+				.then(() => {
+					// После завершения анимаций обновляем moves для новых кубиков
+					for (const event of result.events) {
+						if (event.type === 'spawn') {
+							for (const cell of event.cells) {
+								// Находим кубик в grid по ID (после гравитации позиция может измениться)
+								for (let r = 0; r < grid.length; r++) {
+									for (let c = 0; c < WIDTH; c++) {
+										const cube = grid[r]?.[c]
+										if (cube && cube.id === cell.id && cube.moves > 0) {
+											this.renderer?.updateCubeMoves(cube.id, cube.moves)
+											break
+										}
 									}
 								}
 							}
 						}
 					}
-				}
-				// Sync positions after spawn animations
-				this.renderer?.syncGridPositions(grid)
-			}).catch((error) => {
-				console.error('[GameController] spawnMidWave: animation error', error)
-			})
+					// Sync positions after spawn animations
+					this.renderer?.syncGridPositions(grid)
+				})
+				.catch((error) => {
+					console.error('[GameController] spawnMidWave: animation error', error)
+				})
 		}
 
 		// Check game over

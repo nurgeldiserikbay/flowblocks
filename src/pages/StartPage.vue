@@ -156,11 +156,10 @@
 
 		<!-- Privacy policy link - вынесен за пределы content для гарантированной видимости -->
 		<a
-			href="https://docs.google.com/document/d/1wVNC5viI2q87nb30MPS2Yuj3hhk6C7shM94OI15SIG0/edit?usp=sharing"
+			href="https://docs.google.com/document/d/1A2E7klBs2qZlUOKxkYb4AbPQCaXbMhP0jQfw9B9DpMc/edit?usp=sharing"
 			target="_blank"
 			rel="noopener noreferrer"
 			class="privacy-link"
-			@click="openPrivacyPolicy"
 		>
 			Privacy Policy
 		</a>
@@ -183,8 +182,6 @@ import { useAudioStore } from '@/shared/stores/audioStore'
 import { AudioManager } from '@/game/audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
 import { useGameStore } from '@/shared/stores/gameStore'
-import { App } from '@capacitor/app'
-import { Capacitor } from '@capacitor/core'
 
 const audioStore = useAudioStore()
 const gameStore = useGameStore()
@@ -194,23 +191,8 @@ function toggleSound() {
 	audioStore.toggleMute()
 }
 
-async function openPrivacyPolicy(e: Event) {
-	e.preventDefault()
-	const url =
-		'https://docs.google.com/document/d/1wVNC5viI2q87nb30MPS2Yuj3hhk6C7shM94OI15SIG0/edit?usp=sharing'
-
-	// В мобильной сборке используем Capacitor App для открытия URL
-	if (Capacitor.isNativePlatform()) {
-		await App.openUrl({ url })
-	} else {
-		// В веб-версии открываем в новой вкладке
-		window.open(url, '_blank', 'noopener,noreferrer')
-	}
-}
-
 onMounted(async () => {
 	const startTime = performance.now()
-	console.log('[StartPage] onMounted: starting initialization')
 
 	// Initialize AudioManager on start page
 	await AudioManager.init()
@@ -224,7 +206,6 @@ onMounted(async () => {
 
 	try {
 		const pixiInitStartTime = performance.now()
-		console.log('[StartPage] onMounted: initializing PixiService')
 
 		// Инициализируем PixiService с базовыми размерами
 		// Canvas будет создан и добавлен в DOM в фоне (скрытый)
@@ -234,19 +215,12 @@ onMounted(async () => {
 		})
 
 		gameStore.setDiagnostic('pixiInit', performance.now())
-		console.log(
-			`[StartPage] onMounted: PixiService initialized in ${(performance.now() - pixiInitStartTime).toFixed(2)}ms`,
-		)
 
 		// Текстуры уже загружены и прогреты в PixiService.init()
 		gameStore.setAssetsReady(true)
 		gameStore.setDiagnostic('assetsLoaded', performance.now())
 		gameStore.setTexturesWarmed(true)
 		gameStore.setDiagnostic('texturesWarmed', performance.now())
-
-		console.log(
-			`[StartPage] onMounted: all initialization completed in ${(performance.now() - startTime).toFixed(2)}ms`,
-		)
 	} catch (error) {
 		console.error(
 			'[StartPage] onMounted: failed to initialize PixiService',
@@ -305,33 +279,32 @@ const patternStyles = computed(() =>
 	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
 	margin-bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
 
-	// Decorative soft shapes in background
+	// Decorative soft shapes in background (same as game)
 	&::before {
 		content: '';
 		position: fixed;
-		top: -50%;
-		left: -50%;
-		width: 200%;
-		height: 200%;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
 		background:
 			radial-gradient(
-				circle at 30% 40%,
-				rgba(107, 207, 127, 0.15) 0%,
+				circle at 20% 30%,
+				rgba(59, 130, 246, 0.4) 0%,
 				transparent 50%
 			),
 			radial-gradient(
-				circle at 70% 60%,
-				rgba(77, 150, 255, 0.15) 0%,
+				circle at 80% 70%,
+				rgba(139, 92, 246, 0.4) 0%,
 				transparent 50%
 			),
 			radial-gradient(
-				circle at 50% 80%,
-				rgba(196, 69, 255, 0.1) 0%,
+				circle at 50% 50%,
+				rgba(236, 72, 153, 0.3) 0%,
 				transparent 50%
 			);
 		pointer-events: none;
 		z-index: 0;
-		animation: float 20s ease-in-out infinite;
 	}
 
 	&__content {
@@ -346,13 +319,17 @@ const patternStyles = computed(() =>
 		position: relative;
 		z-index: 1;
 		min-height: 100%;
-		max-width: 100%;
+		max-width: 475px;
 		margin: 0 auto;
 		width: 100%;
 		box-sizing: border-box;
 		overflow-y: auto;
 		overflow-x: hidden;
-		padding-bottom: calc(clamp(6rem, 12vw, 8rem) + env(safe-area-inset-bottom, 0px));
+		// Добавляем отступ снизу для фиксированной кнопки Privacy Policy
+		padding-bottom: calc(
+			clamp(6rem, 12vw, 8rem) + clamp(3rem, 6vw, 4rem) +
+				env(safe-area-inset-bottom, 0px)
+		);
 	}
 }
 
@@ -369,11 +346,13 @@ const patternStyles = computed(() =>
 	}
 }
 
-// Sound button (top right)
+// Sound button (top right) - ограничен контейнером 475px
 .sound-button {
 	position: fixed;
 	top: calc(1rem + env(safe-area-inset-top, 0px));
-	right: calc(1rem + env(safe-area-inset-right, 0px));
+	// Позиционируем относительно правого края контейнера 475px
+	// Центр экрана (50%) + половина ширины контейнера (237.5px) - отступ (1rem) - ширина кнопки (48px)
+	left: calc(50% + 237.5px - 1rem - 48px);
 	width: 48px;
 	height: 48px;
 	border-radius: 14px;
@@ -388,6 +367,11 @@ const patternStyles = computed(() =>
 	touch-action: manipulation;
 	z-index: 10;
 	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+	// На маленьких экранах (меньше 475px) используем обычное позиционирование справа
+	@media (max-width: 475px) {
+		left: auto;
+		right: calc(1rem + env(safe-area-inset-right, 0px));
+	}
 
 	&:hover {
 		background: rgba(255, 255, 255, 0.2);
@@ -404,8 +388,13 @@ const patternStyles = computed(() =>
 		width: 44px;
 		height: 44px;
 		top: calc(0.75rem + env(safe-area-inset-top, 0px));
-		right: calc(0.75rem + env(safe-area-inset-right, 0px));
+		left: calc(50% + 237.5px - 0.75rem - 44px);
 		border-radius: 12px;
+
+		@media (max-width: 475px) {
+			left: auto;
+			right: calc(0.75rem + env(safe-area-inset-right, 0px));
+		}
 	}
 
 	&__icon {
@@ -565,18 +554,19 @@ const patternStyles = computed(() =>
 	}
 }
 
-// Privacy link - вынесен за пределы content для гарантированной видимости
+// Privacy link - фиксированная позиция снизу экрана для гарантированной видимости
 .privacy-link {
 	font-size: clamp(0.875rem, 3vw, 1rem);
 	color: rgba(255, 255, 255, 0.6);
 	text-decoration: none;
 	transition: all 0.2s ease;
 	padding: clamp(0.75rem, 2vw, 1rem) clamp(1rem, 3vw, 1.5rem);
-	position: relative;
+	position: fixed;
+	bottom: calc(clamp(0.75rem, 2vw, 1rem) + env(safe-area-inset-bottom, 0px));
+	left: 0;
+	right: 0;
 	z-index: 10;
 	text-align: center;
-	flex-shrink: 0;
-	min-height: fit-content;
 	display: block !important;
 	cursor: pointer;
 	touch-action: manipulation;
@@ -586,8 +576,8 @@ const patternStyles = computed(() =>
 	visibility: visible !important;
 	pointer-events: auto !important;
 	-webkit-tap-highlight-color: rgba(255, 255, 255, 0.1);
-	margin-bottom: calc(clamp(1rem, 3vw, 2rem) + env(safe-area-inset-bottom, 0px));
 	box-sizing: border-box;
+	background: transparent;
 
 	&:hover {
 		color: rgba(255, 255, 255, 0.9);
