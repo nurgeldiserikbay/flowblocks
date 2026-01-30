@@ -1189,12 +1189,6 @@ export class GameRenderer {
 		const maxTextWidth = Math.max(mainTextWidth, bonusTextWidth)
 		const totalTextHeight = mainTextHeight + bonusTextHeight + 10 // 10px отступ между текстами
 
-		// Позиционируем popup в центре экрана, учитывая размеры текстов
-		// Сдвигаем влево на половину ширины самого широкого текста
-		// Сдвигаем вниз на половину общей высоты текстов
-		popup.x = screenCenter.x - maxTextWidth / 2
-		popup.y = screenCenter.y - totalTextHeight / 2
-
 		// Ensure popup is on top by setting zIndex and enabling sortable children
 		popup.zIndex = 999999 // Maximum zIndex to be above all tiles
 		this.app.stage.sortableChildren = true
@@ -1204,6 +1198,12 @@ export class GameRenderer {
 		const padding = Math.max(16, window.innerWidth * 0.04)
 		const bgWidth = Math.max(maxTextWidth + padding * 2, 140)
 		const bgHeight = Math.max(totalTextHeight + padding * 2, 60)
+
+		// Позиционируем popup: центр экрана минус половина размера popup (сдвиг вверх и влево)
+		// Сдвигаем влево на половину ширины popup от центра
+		// Сдвигаем вверх на половину высоты popup от центра
+		popup.x = screenCenter.x - bgWidth
+		popup.y = screenCenter.y - bgHeight
 		bg.roundRect(0, 0, bgWidth, bgHeight, 12)
 		bg.fill({ color: 0x1e1f3a, alpha: 0.95 })
 		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.2 })
@@ -1333,12 +1333,6 @@ export class GameRenderer {
 		const maxTextWidth = Math.max(noMovesTextWidth, bonusTextWidth)
 		const totalTextHeight = noMovesTextHeight + bonusTextHeight + 10 // 10px отступ между текстами
 
-		// Позиционируем popup в центре экрана, учитывая размеры текстов
-		// Сдвигаем влево на половину ширины самого широкого текста
-		// Сдвигаем вниз на половину общей высоты текстов
-		popup.x = screenCenter.x - maxTextWidth / 2
-		popup.y = screenCenter.y - totalTextHeight / 2
-
 		// Ensure popup is on top by setting zIndex and enabling sortable children
 		popup.zIndex = 999999 // Maximum zIndex to be above all tiles
 		this.app.stage.sortableChildren = true
@@ -1348,6 +1342,12 @@ export class GameRenderer {
 		const padding = Math.max(16, window.innerWidth * 0.04)
 		const bgWidth = Math.max(maxTextWidth + padding * 2, 160)
 		const bgHeight = Math.max(totalTextHeight + padding * 2, 70)
+
+		// Позиционируем popup: центр экрана минус половина размера popup (сдвиг вверх и влево)
+		// Сдвигаем влево на половину ширины popup от центра
+		// Сдвигаем вверх на половину высоты popup от центра
+		popup.x = screenCenter.x - bgWidth
+		popup.y = screenCenter.y - bgHeight
 		bg.roundRect(0, 0, bgWidth, bgHeight, 12)
 		bg.fill({ color: 0x1e1f3a, alpha: 0.95 })
 		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.2 })
