@@ -272,14 +272,20 @@ const patternStyles = computed(() =>
 	position: relative;
 	overflow-x: hidden;
 	overflow-y: auto;
-	background: linear-gradient(180deg, #1e1f3a 0%, #2b2f6c 50%, #1e1f3a 100%);
+	// Background image is inherited from #app, but add subtle overlay for better contrast
+	background-image:
+		linear-gradient(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.15)),
+		url('./assets/img/bg-sky.png');
 	background-attachment: fixed;
+	background-size: cover;
+	background-position: center;
+	background-repeat: no-repeat;
 	padding-top: env(safe-area-inset-top, 0px);
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
 	margin-bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
 
-	// Decorative soft shapes in background (same as game)
+	// Subtle decorative overlay for depth (lighter than game screen)
 	&::before {
 		content: '';
 		position: fixed;
@@ -290,17 +296,17 @@ const patternStyles = computed(() =>
 		background:
 			radial-gradient(
 				circle at 20% 30%,
-				rgba(59, 130, 246, 0.4) 0%,
+				rgba(59, 130, 246, 0.25) 0%,
 				transparent 50%
 			),
 			radial-gradient(
 				circle at 80% 70%,
-				rgba(139, 92, 246, 0.4) 0%,
+				rgba(139, 92, 246, 0.25) 0%,
 				transparent 50%
 			),
 			radial-gradient(
 				circle at 50% 50%,
-				rgba(236, 72, 153, 0.3) 0%,
+				rgba(236, 72, 153, 0.2) 0%,
 				transparent 50%
 			);
 		pointer-events: none;
@@ -356,9 +362,10 @@ const patternStyles = computed(() =>
 	width: 48px;
 	height: 48px;
 	border-radius: 14px;
-	border: 2px solid rgba(255, 255, 255, 0.25);
-	background: rgba(255, 255, 255, 0.12);
-	backdrop-filter: blur(12px);
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	background: rgba(255, 255, 255, 0.15);
+	backdrop-filter: blur(16px);
+	-webkit-backdrop-filter: blur(16px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -366,7 +373,10 @@ const patternStyles = computed(() =>
 	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 	touch-action: manipulation;
 	z-index: 10;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+	box-shadow:
+		0 4px 16px rgba(0, 0, 0, 0.25),
+		0 0 0 1px rgba(255, 255, 255, 0.1),
+		inset 0 1px 2px rgba(255, 255, 255, 0.2);
 	// На маленьких экранах (меньше 475px) используем обычное позиционирование справа
 	@media (max-width: 475px) {
 		left: auto;
@@ -374,14 +384,20 @@ const patternStyles = computed(() =>
 	}
 
 	&:hover {
-		background: rgba(255, 255, 255, 0.2);
-		border-color: rgba(255, 255, 255, 0.4);
+		background: rgba(255, 255, 255, 0.25);
+		border-color: rgba(255, 255, 255, 0.5);
 		transform: scale(1.1) rotate(5deg);
-		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+		box-shadow:
+			0 6px 24px rgba(0, 0, 0, 0.35),
+			0 0 0 1px rgba(255, 255, 255, 0.15),
+			inset 0 1px 3px rgba(255, 255, 255, 0.3);
 	}
 
 	&:active {
 		transform: scale(0.95) rotate(0deg);
+		box-shadow:
+			0 2px 8px rgba(0, 0, 0, 0.25),
+			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 	}
 
 	@media (max-width: 480px) {
@@ -490,8 +506,8 @@ const patternStyles = computed(() =>
 .play-button {
 	width: 70%;
 	padding: clamp(1.25rem, 5vw, 1.75rem) clamp(1.5rem, 5vw, 2.5rem);
-	border-radius: clamp(20px, 5vw, 28px);
-	border: 2px solid rgba(255, 255, 255, 0.2);
+	border-radius: clamp(24px, 5vw, 28px);
+	border: 2px solid rgba(255, 255, 255, 0.25);
 	text-decoration: none;
 	display: flex;
 	align-items: center;
@@ -502,12 +518,15 @@ const patternStyles = computed(() =>
 	position: relative;
 	overflow: hidden;
 	box-shadow:
-		0 8px 32px rgba(0, 0, 0, 0.3),
-		inset 0 2px 4px rgba(255, 255, 255, 0.2);
+		0 8px 32px rgba(0, 0, 0, 0.4),
+		0 0 0 1px rgba(255, 255, 255, 0.1),
+		inset 0 2px 4px rgba(255, 255, 255, 0.25);
 	min-height: clamp(70px, 11vw, 90px);
 	box-sizing: border-box;
 	background: linear-gradient(135deg, #ec4899 0%, #d946ef 50%, #a855f7 100%);
-	border-color: rgba(249, 168, 212, 0.4);
+	border-color: rgba(249, 168, 212, 0.5);
+	backdrop-filter: blur(10px);
+	-webkit-backdrop-filter: blur(10px);
 
 	&::before {
 		content: '';
@@ -519,20 +538,21 @@ const patternStyles = computed(() =>
 		background: linear-gradient(
 			90deg,
 			transparent,
-			rgba(255, 255, 255, 0.3),
+			rgba(255, 255, 255, 0.35),
 			transparent
 		);
-		transition: left 0.5s ease;
+		transition: left 0.6s ease;
 	}
 
 	&:hover {
 		transform: translateY(-6px) scale(1.02);
 		background: linear-gradient(135deg, #f472b6 0%, #e879f9 50%, #c084fc 100%);
 		box-shadow:
-			0 12px 40px rgba(236, 72, 153, 0.5),
-			0 6px 20px rgba(0, 0, 0, 0.3),
-			inset 0 2px 4px rgba(255, 255, 255, 0.4);
-		border-color: rgba(249, 168, 212, 0.6);
+			0 12px 48px rgba(236, 72, 153, 0.6),
+			0 6px 24px rgba(0, 0, 0, 0.4),
+			0 0 0 1px rgba(255, 255, 255, 0.2),
+			inset 0 2px 6px rgba(255, 255, 255, 0.4);
+		border-color: rgba(249, 168, 212, 0.7);
 
 		&::before {
 			left: 100%;
@@ -540,7 +560,10 @@ const patternStyles = computed(() =>
 	}
 
 	&:active {
-		transform: translateY(-3px) scale(0.98);
+		transform: translateY(-3px) scale(0.97);
+		box-shadow:
+			0 4px 16px rgba(236, 72, 153, 0.4),
+			inset 0 2px 4px rgba(255, 255, 255, 0.3);
 	}
 
 	&__text {

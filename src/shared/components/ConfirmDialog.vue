@@ -59,7 +59,7 @@ watch(
 	() => props.modelValue,
 	(newValue) => {
 		isOpen.value = newValue
-	}
+	},
 )
 
 watch(isOpen, (newValue) => {
@@ -86,8 +86,9 @@ function handleCancel() {
 	left: 0;
 	right: 0;
 	bottom: 0;
-	background: rgba(0, 0, 0, 0.6);
-	backdrop-filter: blur(8px);
+	background: rgba(0, 0, 0, 0.7);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -97,17 +98,23 @@ function handleCancel() {
 
 .confirm-dialog {
 	background: linear-gradient(
-		135deg,
-		rgba(255, 255, 255, 0.2) 0%,
-		rgba(255, 255, 255, 0.1) 100%
+		145deg,
+		rgba(30, 31, 58, 0.95) 0%,
+		rgba(43, 47, 108, 0.9) 50%,
+		rgba(30, 31, 58, 0.95) 100%
 	);
-	backdrop-filter: blur(20px);
-	border-radius: 20px;
-	border: 2px solid rgba(255, 255, 255, 0.3);
+	backdrop-filter: blur(28px);
+	-webkit-backdrop-filter: blur(28px);
+	border-radius: 24px;
+	border: 2px solid rgba(255, 255, 255, 0.2);
 	padding: 2rem 1.5rem;
 	max-width: 400px;
 	width: 100%;
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.15),
+		0 0 0 1px rgba(139, 92, 246, 0.25),
+		0 24px 48px rgba(0, 0, 0, 0.6),
+		0 0 80px rgba(139, 92, 246, 0.2);
 	position: relative;
 	z-index: 10000;
 
@@ -150,15 +157,19 @@ function handleCancel() {
 		padding: clamp(0.875rem, 2.5vw, 1rem) clamp(1.25rem, 4vw, 1.75rem);
 		border-radius: clamp(14px, 3vw, 16px);
 		border: 2px solid rgba(255, 255, 255, 0.3);
-		background: rgba(255, 255, 255, 0.1);
-		backdrop-filter: blur(10px);
+		background: rgba(255, 255, 255, 0.12);
+		backdrop-filter: blur(16px);
+		-webkit-backdrop-filter: blur(16px);
 		color: white;
 		font-size: clamp(0.9375rem, 2.75vw, 1.0625rem);
 		font-weight: 600;
 		cursor: pointer;
-		transition: all 0.2s ease;
+		transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 		touch-action: manipulation;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+		box-shadow:
+			0 4px 16px rgba(0, 0, 0, 0.25),
+			0 0 0 1px rgba(255, 255, 255, 0.1),
+			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		flex: 1;
 		min-width: 120px;
 		text-align: center;
@@ -168,48 +179,39 @@ function handleCancel() {
 
 		&:hover {
 			background: rgba(255, 255, 255, 0.2);
-			transform: translateY(-2px);
-			box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+			transform: translateY(-2px) scale(1.02);
+			box-shadow:
+				0 6px 24px rgba(0, 0, 0, 0.35),
+				0 0 0 1px rgba(255, 255, 255, 0.15),
+				inset 0 1px 3px rgba(255, 255, 255, 0.3);
 			border-color: rgba(255, 255, 255, 0.5);
 		}
 
 		&:active {
-			transform: translateY(0);
+			transform: translateY(0) scale(0.98);
 		}
 
 		&--confirm {
 			background: linear-gradient(
 				135deg,
-				rgba(255, 255, 255, 0.2) 0%,
-				rgba(255, 255, 255, 0.1) 100%
+				#ec4899 0%,
+				#d946ef 50%,
+				#a855f7 100%
 			);
-
-			&::before {
-				content: '';
-				position: absolute;
-				top: 0;
-				left: 0;
-				right: 0;
-				bottom: 0;
-				background: linear-gradient(
-					135deg,
-					rgba(239, 68, 68, 0.3) 0%,
-					rgba(220, 38, 38, 0.3) 100%
-				);
-				opacity: 0;
-				transition: opacity 0.3s ease;
-			}
+			border-color: rgba(249, 168, 212, 0.5);
 
 			&:hover {
 				background: linear-gradient(
 					135deg,
-					rgba(255, 255, 255, 0.25) 0%,
-					rgba(255, 255, 255, 0.15) 100%
+					#f472b6 0%,
+					#e879f9 50%,
+					#c084fc 100%
 				);
-
-				&::before {
-					opacity: 1;
-				}
+				border-color: rgba(249, 168, 212, 0.7);
+				box-shadow:
+					0 8px 32px rgba(236, 72, 153, 0.5),
+					0 0 0 1px rgba(255, 255, 255, 0.15),
+					inset 0 1px 3px rgba(255, 255, 255, 0.3);
 			}
 		}
 
@@ -234,7 +236,9 @@ function handleCancel() {
 
 .dialog-enter-active .confirm-dialog,
 .dialog-leave-active .confirm-dialog {
-	transition: transform 0.3s ease, opacity 0.3s ease;
+	transition:
+		transform 0.3s ease,
+		opacity 0.3s ease;
 }
 
 .dialog-enter-from,
@@ -242,7 +246,7 @@ function handleCancel() {
 	opacity: 0;
 
 	.confirm-dialog {
-		transform: scale(0.9) translateY(-20px);
+		transform: scale(0.95) translateY(10px);
 		opacity: 0;
 	}
 }

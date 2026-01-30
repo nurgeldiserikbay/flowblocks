@@ -254,8 +254,12 @@ export class GameController {
 			}
 		}
 
-		// 2. Скрытие loader теперь происходит внутри logDiagnostics() при условии firstFrameRendered
-		// Это гарантирует, что loader скрывается только после того, как плитки реально видны
+		// 2. КРИТИЧНО: Скрываем loading overlay ПОСЛЕ того, как плитки видны, но ДО скролла
+		// Это гарантирует правильный порядок: tiles visible → loading disappears → scroll → timer
+		if (this.opts.onHideLoading) {
+			this.store.setDiagnostic('loaderHidden', performance.now())
+			this.opts.onHideLoading()
+		}
 
 		// 3. Запускаем анимацию скроллинга
 		if (this.opts.onStartScrollAnimation) {
@@ -281,8 +285,8 @@ export class GameController {
 		this.startTimer()
 
 		// Логируем диагностику после завершения boot-цепочки
-		// КРИТИЧНО: Скрытие loader происходит внутри logDiagnostics() при условии firstFrameRendered
-		this.store.logDiagnostics(this.opts.onHideLoading)
+		// Loading уже скрыт на шаге 2, поэтому просто логируем
+		this.store.logDiagnostics()
 
 		// Игра запущена
 		this.store.setGameStarted(true)
@@ -690,7 +694,7 @@ export class GameController {
 		if (isEmpty) {
 			const clearBonus = getVesselClearBonus(grid)
 			this.store.addScore(clearBonus)
-			await this.renderer?.showFullClearBonus(clearBonus)
+			await this.renderer?.showGreatMessage(clearBonus)
 			// Play clear sound
 			AudioManager.playClear()
 		}

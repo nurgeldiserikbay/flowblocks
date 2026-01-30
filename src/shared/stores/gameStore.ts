@@ -160,15 +160,16 @@ export const useGameStore = defineStore('game', () => {
 		}
 
 		// Дополнительная информация о критических интервалах
-		// КРИТИЧНО: Скрываем loader только внутри этого условия
+		// ОБНОВЛЕНО: Loading теперь скрывается в GameController.bootGame() перед scroll
+		// Этот код оставлен для обратной совместимости и fallback случаев
 		if (d.firstFrameRendered && !d.loaderHidden) {
-			// Плитки видны, но loader еще не скрыт - скрываем его сейчас
+			// Плитки видны, но loader еще не скрыт - скрываем его сейчас (fallback)
 			if (onHideLoading) {
 				setDiagnostic('loaderHidden', performance.now())
 				onHideLoading()
 			} else {
 				console.warn(
-					'[GameStore] Critical: firstFrameRendered is set but loaderHidden is not - onHideLoading callback not provided!',
+					'[GameStore] Warning: firstFrameRendered is set but loaderHidden is not - onHideLoading callback not provided!',
 				)
 			}
 		}

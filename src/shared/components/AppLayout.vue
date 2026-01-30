@@ -27,8 +27,8 @@ import TopBar from './TopBar.vue'
 	max-height: 100dvh;
 	display: flex;
 	flex-direction: column;
-	background: linear-gradient(180deg, #0f1019 0%, #1a1c3a 50%, #0f1019 100%);
-	background-attachment: fixed;
+	// Background image is inherited from #app, transparent to show it
+	background: transparent;
 	position: relative;
 	overflow: hidden;
 	padding-top: env(safe-area-inset-top, 0px);
@@ -36,6 +36,7 @@ import TopBar from './TopBar.vue'
 	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
 	margin-bottom: 0;
 
+	// Subtle decorative overlay for depth
 	&::before {
 		content: '';
 		position: fixed;
@@ -46,17 +47,17 @@ import TopBar from './TopBar.vue'
 		background:
 			radial-gradient(
 				circle at 20% 30%,
-				rgba(59, 130, 246, 0.4) 0%,
+				rgba(59, 130, 246, 0.3) 0%,
 				transparent 50%
 			),
 			radial-gradient(
 				circle at 80% 70%,
-				rgba(139, 92, 246, 0.4) 0%,
+				rgba(139, 92, 246, 0.3) 0%,
 				transparent 50%
 			),
 			radial-gradient(
 				circle at 50% 50%,
-				rgba(236, 72, 153, 0.3) 0%,
+				rgba(236, 72, 153, 0.25) 0%,
 				transparent 50%
 			);
 		pointer-events: none;

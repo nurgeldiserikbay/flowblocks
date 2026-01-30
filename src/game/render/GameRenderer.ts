@@ -2,7 +2,14 @@
  * Pixi.js game renderer - handles rendering and animations
  */
 
-import { Container, Sprite, Text, TextStyle, Graphics } from 'pixi.js'
+import {
+	Container,
+	Sprite,
+	Text,
+	TextStyle,
+	Graphics,
+	BlurFilter,
+} from 'pixi.js'
 import { gsap } from 'gsap'
 import type { GameEvent, Cube } from '../logic/types'
 import { getBlockTexture } from '../blockTextures'
@@ -184,6 +191,41 @@ export class GameRenderer {
 	private calculateYFromBottom(r: number): number {
 		// Выравниваем снизу: строка 0 (верх) внизу, строка gridHeight-1 (низ) вверху
 		return r * this.tileSize
+	}
+
+	/**
+	 * Преобразовать координаты центра экрана браузера в координаты канваса PixiJS
+	 * @returns объект с координатами {x, y} в системе координат канваса
+	 */
+	private getScreenCenterInCanvasCoordinates(): { x: number; y: number } {
+		if (!this.app || !this.canvas) {
+			// Fallback: возвращаем центр renderer
+			return {
+				x: this.app?.renderer.width / 2 ?? 0,
+				y: this.app?.renderer.height / 2 ?? 0,
+			}
+		}
+
+		// Получаем центр экрана браузера
+		const screenCenterX = window.innerWidth / 2
+		const screenCenterY = window.innerHeight / 2
+
+		// Получаем позицию канваса на экране
+		const canvasRect = this.canvas.getBoundingClientRect()
+
+		// Координаты центра экрана относительно канваса (в CSS пикселях)
+		const relativeX = screenCenterX - canvasRect.left
+		const relativeY = screenCenterY - canvasRect.top
+
+		// Преобразуем в координаты канваса PixiJS с учетом масштаба
+		// Используем соотношение между CSS размерами и логическими размерами PixiJS
+		const scaleX = this.app.renderer.width / canvasRect.width
+		const scaleY = this.app.renderer.height / canvasRect.height
+
+		const canvasX = relativeX * scaleX
+		const canvasY = relativeY * scaleY
+
+		return { x: canvasX, y: canvasY }
 	}
 
 	private createCubeSprite(
@@ -565,68 +607,120 @@ export class GameRenderer {
 
 		if (containers.length === 0) return
 
-		// Score popup at centroid of removed cells
+		// Score popup at center of screen
 		if (
-			this.gameContainer &&
+			this.app &&
 			cells.length > 0 &&
 			(baseScore !== undefined ||
 				(comboBonus !== undefined && (comboBonus ?? 0) > 0))
 		) {
-			const avgC = cells.reduce((s, c) => s + c.c, 0) / cells.length
-			const avgR = cells.reduce((s, c) => s + c.r, 0) / cells.length
-			const cx = (avgC + 0.5) * this.tileSize
-			const cy = this.calculateYFromBottom(avgR) + this.tileSize / 2
+			// Получаем центр экрана в координатах канваса
+			const screenCenter = this.getScreenCenterInCanvasCoordinates()
 
 			const popup = new Container()
-			popup.x = cx
-			popup.y = cy
+
+			// Создаем тексты для расчета размеров
+			// Адаптивный размер текста: не слишком большой, но видимый
+			const baseFontSize = Math.min(
+				Math.max(20, window.innerWidth * 0.05),
+				Math.max(20, this.tileSize * 1.0),
+			)
+			const comboFontSize = Math.min(
+				Math.max(16, window.innerWidth * 0.04),
+				Math.max(16, this.tileSize * 0.8),
+			)
 
 			const baseVal = baseScore ?? 0
+			let baseText: Text | null = null
 			if (baseVal > 0) {
-				const t = new Text({
+				baseText = new Text({
 					text: `+${baseVal}`,
 					style: new TextStyle({
 						fontFamily: 'Arial',
-						fontSize: Math.max(14, this.tileSize / 2),
+						fontSize: baseFontSize,
 						fill: 0x7cff7c,
 						align: 'center',
 						fontWeight: 'bold',
 					}),
 				})
-				t.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
-				t.anchor.set(0.5)
-				t.x = 0
-				t.y = 0
-				t.style.stroke = { color: 0x000000, width: 2 }
-				popup.addChild(t)
+				baseText.resolution = window.devicePixelRatio || 1
+				baseText.anchor.set(0.5)
+				baseText.style.stroke = { color: 0x000000, width: 2 }
+				popup.addChild(baseText)
 			}
+
 			const comboVal = comboBonus ?? 0
+			let comboText: Text | null = null
 			if (comboVal > 0) {
-				const t = new Text({
+				comboText = new Text({
 					text: `+${comboVal} COMBO`,
 					style: new TextStyle({
 						fontFamily: 'Arial',
-						fontSize: Math.max(12, this.tileSize / 2.5),
+						fontSize: comboFontSize,
 						fill: 0xffaa00,
 						align: 'center',
 						fontWeight: 'bold',
 					}),
 				})
-				t.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
-				t.anchor.set(0.5)
-				t.x = 0
-				t.y = baseVal > 0 ? -22 : 0
-				t.style.stroke = { color: 0x000000, width: 2 }
-				popup.addChild(t)
+				comboText.resolution = window.devicePixelRatio || 1
+				comboText.anchor.set(0.5)
+				comboText.style.stroke = { color: 0x000000, width: 2 }
+				popup.addChild(comboText)
 			}
 
-			this.gameContainer.addChild(popup)
+			// Рассчитываем размеры текстов для правильного позиционирования
+			const baseTextWidth = baseText?.width ?? 0
+			const baseTextHeight = baseText?.height ?? 0
+			const comboTextWidth = comboText?.width ?? 0
+			const comboTextHeight = comboText?.height ?? 0
+
+			// Максимальная ширина для расчета позиции
+			const maxTextWidth = Math.max(baseTextWidth, comboTextWidth)
+			const totalTextHeight =
+				(baseTextHeight > 0 ? baseTextHeight : 0) +
+				(comboTextHeight > 0 ? comboTextHeight + (baseTextHeight > 0 ? 10 : 0) : 0)
+
+			// Позиционируем popup в центре экрана, учитывая размеры текстов
+			// Сдвигаем влево на половину ширины самого широкого текста
+			// Сдвигаем вниз на половину общей высоты текстов
+			popup.x = screenCenter.x - maxTextWidth / 2
+			popup.y = screenCenter.y - totalTextHeight / 2
+
+			// Ensure popup is on top by setting zIndex
+			popup.zIndex = 999999
+			this.app.stage.sortableChildren = true
+
+			// Позиционируем тексты относительно popup
+			if (baseText) {
+				baseText.x = maxTextWidth / 2
+				baseText.y = baseTextHeight / 2
+			}
+			if (comboText) {
+				comboText.x = maxTextWidth / 2
+				comboText.y =
+					(baseTextHeight > 0 ? baseTextHeight + 10 : 0) + comboTextHeight / 2
+			}
+
+			// Добавляем на stage для отображения поверх всего
+			this.app.stage.addChild(popup)
+			this.app.stage.children.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
+
+			// Анимация появления и исчезновения
+			popup.alpha = 0
 			gsap.to(popup, {
-				y: cy - 45,
+				alpha: 1,
+				duration: 0.2,
+				ease: 'power2.out',
+			})
+			gsap.to(popup, {
+				y: popup.y - 45,
 				alpha: 0,
 				duration: 2.0,
+				delay: 0.3,
 				ease: 'power2.out',
 				onComplete: () => {
+					// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
+					gsap.killTweensOf(popup)
 					// КРИТИЧНО: Проверяем, что popup еще существует перед уничтожением
 					if (popup && popup.parent) {
 						popup.parent.removeChild(popup)
@@ -1042,34 +1136,103 @@ export class GameRenderer {
 		if (!this.app) return
 
 		const popup = new Container()
-		// Center on screen (viewport) instead of canvas
-		const screenWidth = this.app.screen.width || window.innerWidth
-		const screenHeight = this.app.screen.height || window.innerHeight
-		popup.x = screenWidth / 2
-		popup.y = screenHeight * 0.6 // Position lower than center
 
-		const t = new Text({
-			text: `Great! +${bonus}`,
+		// Получаем центр экрана в координатах канваса
+		const screenCenter = this.getScreenCenterInCanvasCoordinates()
+
+		// Создаем тексты для расчета размеров
+		// Адаптивный размер текста: не слишком большой, но видимый
+		const baseFontSize = Math.min(
+			Math.max(24, window.innerWidth * 0.06),
+			Math.max(24, this.tileSize * 1.2),
+		)
+		const bonusFontSize = Math.min(
+			Math.max(18, window.innerWidth * 0.045),
+			Math.max(18, this.tileSize * 0.9),
+		)
+
+		const mainText = new Text({
+			text: `Great!`,
 			style: new TextStyle({
-				fontFamily: 'Arial',
-				fontSize: Math.max(18, this.tileSize * 0.7),
-				fill: 0x00ff00,
+				fontFamily: 'Inter, Arial',
+				fontSize: baseFontSize,
+				fill: 0xc4b5fd, // Purple accent color from game theme
+				align: 'center',
+				fontWeight: 'bold',
+				letterSpacing: -0.3,
+			}),
+		})
+		mainText.resolution = window.devicePixelRatio || 1
+		mainText.anchor.set(0.5)
+
+		const bonusText = new Text({
+			text: `+${bonus}`,
+			style: new TextStyle({
+				fontFamily: 'Inter, Arial',
+				fontSize: bonusFontSize,
+				fill: 0x4ade80, // Green for bonus
 				align: 'center',
 				fontWeight: 'bold',
 			}),
 		})
-		t.resolution = window.devicePixelRatio || 1
-		t.anchor.set(0.5)
-		t.x = 0
-		t.y = 0
-		t.style.stroke = { color: 0x000000, width: 2 }
-		popup.addChild(t)
+		bonusText.resolution = window.devicePixelRatio || 1
+		bonusText.anchor.set(0.5)
+
+		// Рассчитываем размеры текстов для правильного позиционирования
+		// Размеры текста доступны сразу после создания
+		const mainTextWidth = mainText.width
+		const mainTextHeight = mainText.height
+		const bonusTextWidth = bonusText.width
+		const bonusTextHeight = bonusText.height
+
+		// Максимальная ширина для расчета позиции
+		const maxTextWidth = Math.max(mainTextWidth, bonusTextWidth)
+		const totalTextHeight = mainTextHeight + bonusTextHeight + 10 // 10px отступ между текстами
+
+		// Позиционируем popup в центре экрана, учитывая размеры текстов
+		// Сдвигаем влево на половину ширины самого широкого текста
+		// Сдвигаем вниз на половину общей высоты текстов
+		popup.x = screenCenter.x - maxTextWidth / 2
+		popup.y = screenCenter.y - totalTextHeight / 2
+
+		// Ensure popup is on top by setting zIndex and enabling sortable children
+		popup.zIndex = 999999 // Maximum zIndex to be above all tiles
+		this.app.stage.sortableChildren = true
+
+		// Create background with blur effect (адаптивный размер)
+		const bg = new Graphics()
+		const padding = Math.max(16, window.innerWidth * 0.04)
+		const bgWidth = Math.max(maxTextWidth + padding * 2, 140)
+		const bgHeight = Math.max(totalTextHeight + padding * 2, 60)
+		bg.roundRect(0, 0, bgWidth, bgHeight, 12)
+		bg.fill({ color: 0x1e1f3a, alpha: 0.95 })
+		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.2 })
+		popup.addChild(bg)
+
+		// Add blur filter to background
+		const blurFilter = new BlurFilter({ strength: 8 })
+		bg.filters = [blurFilter]
+
+		// Позиционируем тексты относительно popup (учитывая размеры)
+		mainText.x = bgWidth / 2
+		mainText.y = padding + mainTextHeight / 2
+		mainText.style.stroke = { color: 0x8b5cf6, width: 2, alpha: 0.5 }
+		popup.addChild(mainText)
+
+		bonusText.x = bgWidth / 2
+		bonusText.y = padding + mainTextHeight + 10 + bonusTextHeight / 2
+		bonusText.style.stroke = { color: 0x22c55e, width: 1.5, alpha: 0.6 }
+		popup.addChild(bonusText)
 
 		popup.alpha = 0
 		if (popup.scale) {
 			popup.scale.set(0.5)
 		}
+		// Add to stage last to ensure it's on top of all tiles
 		this.app.stage.addChild(popup)
+		// Force sort by zIndex to ensure popup renders on top
+		this.app.stage.sortableChildren = true
+		this.app.stage.children.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
 
 		// Воспроизводим звук combo5 в момент появления надписи
 		AudioManager.playCombo5()
@@ -1117,53 +1280,103 @@ export class GameRenderer {
 		if (!this.app) return
 
 		const popup = new Container()
-		// Center on screen (viewport) instead of canvas
-		const screenWidth = this.app.screen.width || window.innerWidth
-		const screenHeight = this.app.screen.height || window.innerHeight
-		popup.x = screenWidth / 2
-		popup.y = screenHeight * 0.6 // Position lower than center
 
-		// "No Moves" text
+		// Получаем центр экрана в координатах канваса
+		const screenCenter = this.getScreenCenterInCanvasCoordinates()
+
+		// Создаем тексты для расчета размеров
+		// Адаптивный размер текста: не слишком большой, но видимый
+		const baseFontSize = Math.min(
+			Math.max(24, window.innerWidth * 0.06),
+			Math.max(24, this.tileSize * 1.2),
+		)
+		const bonusFontSize = Math.min(
+			Math.max(18, window.innerWidth * 0.045),
+			Math.max(18, this.tileSize * 0.9),
+		)
+
 		const noMovesText = new Text({
 			text: 'No Moves',
 			style: new TextStyle({
-				fontFamily: 'Arial',
-				fontSize: Math.max(18, this.tileSize * 0.7),
-				fill: 0xffaa00,
+				fontFamily: 'Inter, Arial',
+				fontSize: baseFontSize,
+				fill: 0xf8f4ff, // Light purple/white from game theme
 				align: 'center',
 				fontWeight: 'bold',
+				letterSpacing: -0.3,
 			}),
 		})
 		noMovesText.resolution = window.devicePixelRatio || 1
 		noMovesText.anchor.set(0.5)
-		noMovesText.x = 0
-		noMovesText.y = -12 // Position above bonus text
-		noMovesText.style.stroke = { color: 0x000000, width: 2 }
-		popup.addChild(noMovesText)
 
-		// Timer bonus text (separate, below "No Moves")
 		const bonusText = new Text({
 			text: `+${bonus}`,
 			style: new TextStyle({
-				fontFamily: 'Arial',
-				fontSize: Math.max(16, this.tileSize * 0.6),
-				fill: 0x00ff00,
+				fontFamily: 'Inter, Arial',
+				fontSize: bonusFontSize,
+				fill: 0x4ade80, // Green for bonus
 				align: 'center',
 				fontWeight: 'bold',
 			}),
 		})
 		bonusText.resolution = window.devicePixelRatio || 1
 		bonusText.anchor.set(0.5)
-		bonusText.x = 0
-		bonusText.y = 12 // Position below "No Moves" text
-		bonusText.style.stroke = { color: 0x000000, width: 2 }
+
+		// Рассчитываем размеры текстов для правильного позиционирования
+		// Размеры текста доступны сразу после создания
+		const noMovesTextWidth = noMovesText.width
+		const noMovesTextHeight = noMovesText.height
+		const bonusTextWidth = bonusText.width
+		const bonusTextHeight = bonusText.height
+
+		// Максимальная ширина для расчета позиции
+		const maxTextWidth = Math.max(noMovesTextWidth, bonusTextWidth)
+		const totalTextHeight = noMovesTextHeight + bonusTextHeight + 10 // 10px отступ между текстами
+
+		// Позиционируем popup в центре экрана, учитывая размеры текстов
+		// Сдвигаем влево на половину ширины самого широкого текста
+		// Сдвигаем вниз на половину общей высоты текстов
+		popup.x = screenCenter.x - maxTextWidth / 2
+		popup.y = screenCenter.y - totalTextHeight / 2
+
+		// Ensure popup is on top by setting zIndex and enabling sortable children
+		popup.zIndex = 999999 // Maximum zIndex to be above all tiles
+		this.app.stage.sortableChildren = true
+
+		// Create background with blur effect (адаптивный размер)
+		const bg = new Graphics()
+		const padding = Math.max(16, window.innerWidth * 0.04)
+		const bgWidth = Math.max(maxTextWidth + padding * 2, 160)
+		const bgHeight = Math.max(totalTextHeight + padding * 2, 70)
+		bg.roundRect(0, 0, bgWidth, bgHeight, 12)
+		bg.fill({ color: 0x1e1f3a, alpha: 0.95 })
+		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.2 })
+		popup.addChild(bg)
+
+		// Add blur filter to background
+		const blurFilter = new BlurFilter({ strength: 8 })
+		bg.filters = [blurFilter]
+
+		// Позиционируем тексты относительно popup (учитывая размеры)
+		noMovesText.x = bgWidth / 2
+		noMovesText.y = padding + noMovesTextHeight / 2
+		noMovesText.style.stroke = { color: 0xc4b5fd, width: 2, alpha: 0.5 }
+		popup.addChild(noMovesText)
+
+		bonusText.x = bgWidth / 2
+		bonusText.y = padding + noMovesTextHeight + 10 + bonusTextHeight / 2
+		bonusText.style.stroke = { color: 0x22c55e, width: 1.5, alpha: 0.6 }
 		popup.addChild(bonusText)
 
 		popup.alpha = 0
 		if (popup.scale) {
 			popup.scale.set(0.5)
 		}
+		// Add to stage last to ensure it's on top of all tiles
 		this.app.stage.addChild(popup)
+		// Force sort by zIndex to ensure popup renders on top
+		this.app.stage.sortableChildren = true
+		this.app.stage.children.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
 
 		// Воспроизводим звук combo4 в момент появления надписи
 		AudioManager.playCombo4()

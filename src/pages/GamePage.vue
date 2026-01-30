@@ -33,7 +33,7 @@
 			</div>
 		</template>
 
-		<div class="game-page">
+		<div class="game-page" :class="{ 'game-page--danger': isDangerState }">
 			<div
 				ref="playAreaRef"
 				class="game-page__play-area"
@@ -1162,6 +1162,9 @@ const levelBarColor = computed(() => {
 	if (p >= 50) return 'rgb(250, 204, 21)' // amber
 	return 'rgb(74, 222, 128)' // green
 })
+
+// Danger state: tiles are near the top (less than 20% remaining)
+const isDangerState = computed(() => levelFillPercent.value >= 80)
 
 /** При расширении сосуда: только переразмер канваса и Pixi. Скролл (updateBounds, scrollToBottom) — в MomentumScroll по ResizeObserver. */
 async function handleVesselExpanded(): Promise<void> {
@@ -2310,6 +2313,44 @@ async function restart(): Promise<void> {
 	width: 100%;
 	margin: 0 auto;
 	box-sizing: border-box;
+	transition: all 0.3s ease;
+
+	// Danger state: tiles near top
+	&--danger {
+		// Subtle red tint overlay
+		&::before {
+			content: '';
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: radial-gradient(
+				circle at 50% 0%,
+				rgba(239, 68, 68, 0.15) 0%,
+				transparent 60%
+			);
+			pointer-events: none;
+			z-index: 0;
+			animation: danger-pulse 2s ease-in-out infinite;
+		}
+
+		.game-header {
+			&__time {
+				background: linear-gradient(
+					135deg,
+					rgba(239, 68, 68, 0.6) 0%,
+					rgba(220, 38, 38, 0.6) 100%
+				);
+				border-color: rgba(239, 68, 68, 0.5);
+				box-shadow:
+					0 4px 16px rgba(239, 68, 68, 0.4),
+					0 0 0 1px rgba(255, 255, 255, 0.1),
+					inset 0 1px 2px rgba(255, 255, 255, 0.2);
+				animation: danger-glow 1.5s ease-in-out infinite;
+			}
+		}
+	}
 
 	@media (max-width: 640px) {
 		padding-left: clamp(0.5rem, 1.5vw, 0.75rem);
@@ -2349,11 +2390,15 @@ async function restart(): Promise<void> {
 	&__scroll-container {
 		flex: 1;
 		min-height: 0; // Важно для правильной работы flex
-		backdrop-filter: blur(20px);
+		backdrop-filter: blur(24px);
+		-webkit-backdrop-filter: blur(24px);
 		box-shadow:
 			inset 0 4px 32px rgba(0, 0, 0, 0.5),
-			0 8px 32px rgba(0, 0, 0, 0.3);
-		border: 2px solid rgba(255, 255, 255, 0.3);
+			0 8px 32px rgba(0, 0, 0, 0.4),
+			0 0 0 1px rgba(255, 255, 255, 0.1);
+		border: 2px solid rgba(255, 255, 255, 0.25);
+		background: rgba(255, 255, 255, 0.05);
+		border-radius: 20px;
 		position: relative;
 		z-index: 1;
 		// MomentumScroll сам управляет overflow
@@ -2366,6 +2411,7 @@ async function restart(): Promise<void> {
 		// Гарантируем видимость
 		visibility: visible;
 		opacity: 1;
+		overflow: hidden;
 	}
 
 	&__canvas-container {
@@ -2527,7 +2573,8 @@ async function restart(): Promise<void> {
 			rgba(255, 255, 255, 0.2) 0%,
 			rgba(255, 255, 255, 0.1) 100%
 		);
-		backdrop-filter: blur(10px);
+		backdrop-filter: blur(16px);
+		-webkit-backdrop-filter: blur(16px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -2535,7 +2582,10 @@ async function restart(): Promise<void> {
 		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 		touch-action: manipulation;
 		flex-shrink: 0;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+		box-shadow:
+			0 4px 12px rgba(0, 0, 0, 0.25),
+			0 0 0 1px rgba(255, 255, 255, 0.1),
+			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		padding: 0;
 
 		&:hover {
@@ -2545,12 +2595,18 @@ async function restart(): Promise<void> {
 				rgba(255, 255, 255, 0.2) 100%
 			);
 			transform: scale(1.1);
-			box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+			box-shadow:
+				0 6px 20px rgba(0, 0, 0, 0.35),
+				0 0 0 1px rgba(255, 255, 255, 0.15),
+				inset 0 1px 3px rgba(255, 255, 255, 0.3);
 			border-color: rgba(255, 255, 255, 0.5);
 		}
 
 		&:active {
 			transform: scale(0.95);
+			box-shadow:
+				0 2px 8px rgba(0, 0, 0, 0.25),
+				inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		}
 
 		@media (max-width: 640px) {
@@ -2602,14 +2658,18 @@ async function restart(): Promise<void> {
 		padding: 0.5rem 1rem;
 		background: linear-gradient(
 			135deg,
-			rgba(102, 126, 234, 0.4) 0%,
-			rgba(118, 75, 162, 0.4) 100%
+			rgba(102, 126, 234, 0.5) 0%,
+			rgba(118, 75, 162, 0.5) 100%
 		);
-		backdrop-filter: blur(10px);
-		border-radius: 12px;
+		backdrop-filter: blur(16px);
+		-webkit-backdrop-filter: blur(16px);
+		border-radius: 14px;
 		border: 1px solid rgba(255, 255, 255, 0.3);
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+		box-shadow:
+			0 4px 16px rgba(0, 0, 0, 0.35),
+			0 0 0 1px rgba(255, 255, 255, 0.1),
+			inset 0 1px 2px rgba(255, 255, 255, 0.2);
+		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 		white-space: nowrap;
 		/* Оптимизация для предотвращения пересчета layout */
 		flex-shrink: 0;
@@ -2622,6 +2682,7 @@ async function restart(): Promise<void> {
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
+		transition: all 0.3s ease;
 
 		@media (max-width: 360px) {
 			font-size: clamp(0.75rem, 2.5vw, 0.875rem);
@@ -2683,8 +2744,8 @@ async function restart(): Promise<void> {
 	right: 0;
 	bottom: 0;
 	background: rgba(0, 0, 0, 0.75);
-	backdrop-filter: blur(8px);
-	-webkit-backdrop-filter: blur(8px);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -2698,20 +2759,20 @@ async function restart(): Promise<void> {
 			rgba(43, 47, 108, 0.9) 50%,
 			rgba(30, 31, 58, 0.95) 100%
 		);
-		backdrop-filter: blur(24px);
-		-webkit-backdrop-filter: blur(24px);
+		backdrop-filter: blur(28px);
+		-webkit-backdrop-filter: blur(28px);
 		padding: clamp(2rem, 5vw, 2.75rem) clamp(2rem, 5vw, 3rem);
-		border-radius: 28px;
+		border-radius: 24px;
 		max-width: min(500px, 80vw);
 		width: 70%;
 		text-align: center;
 		color: white;
-		border: 2px solid rgba(255, 255, 255, 0.15);
+		border: 2px solid rgba(255, 255, 255, 0.2);
 		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.12),
-			0 0 0 1px rgba(139, 92, 246, 0.2),
-			0 24px 48px rgba(0, 0, 0, 0.5),
-			0 0 80px rgba(139, 92, 246, 0.15);
+			inset 0 1px 0 rgba(255, 255, 255, 0.15),
+			0 0 0 1px rgba(139, 92, 246, 0.25),
+			0 24px 48px rgba(0, 0, 0, 0.6),
+			0 0 80px rgba(139, 92, 246, 0.2);
 		animation: game-overlay-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
 	}
 
@@ -2770,7 +2831,7 @@ async function restart(): Promise<void> {
 @keyframes game-overlay-pop {
 	from {
 		opacity: 0;
-		transform: scale(0.85) translateY(10px);
+		transform: scale(0.95) translateY(10px);
 	}
 	to {
 		opacity: 1;
@@ -2905,6 +2966,32 @@ async function restart(): Promise<void> {
 @keyframes generation-loading-spin {
 	to {
 		transform: rotate(360deg);
+	}
+}
+
+@keyframes danger-pulse {
+	0%,
+	100% {
+		opacity: 0.15;
+	}
+	50% {
+		opacity: 0.25;
+	}
+}
+
+@keyframes danger-glow {
+	0%,
+	100% {
+		box-shadow:
+			0 4px 16px rgba(239, 68, 68, 0.4),
+			0 0 0 1px rgba(255, 255, 255, 0.1),
+			inset 0 1px 2px rgba(255, 255, 255, 0.2);
+	}
+	50% {
+		box-shadow:
+			0 6px 24px rgba(239, 68, 68, 0.6),
+			0 0 0 1px rgba(255, 255, 255, 0.15),
+			inset 0 1px 3px rgba(255, 255, 255, 0.3);
 	}
 }
 </style>

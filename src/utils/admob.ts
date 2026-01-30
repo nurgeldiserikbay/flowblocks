@@ -33,7 +33,14 @@ class Admob {
 			consentInfo.isConsentFormAvailable &&
 			consentInfo.status === AdmobConsentStatus.REQUIRED
 		) {
-			await AdMob.showConsentForm()
+			// Показываем форму согласия и ждем её закрытия после отправки запроса
+			try {
+				await AdMob.showConsentForm()
+				// Форма автоматически закроется после того, как пользователь отправит запрос на подписание
+				// Promise резолвится после закрытия формы
+			} catch (error) {
+				console.warn('[AdMob] Error showing consent form:', error)
+			}
 		}
 	}
 
