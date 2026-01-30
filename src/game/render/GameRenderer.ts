@@ -1199,11 +1199,11 @@ export class GameRenderer {
 		const bgWidth = Math.max(maxTextWidth + padding * 2, 140)
 		const bgHeight = Math.max(totalTextHeight + padding * 2, 60)
 
-		// Позиционируем popup: центр экрана минус половина размера popup (сдвиг вверх и влево)
-		// Сдвигаем влево на половину ширины popup от центра
+		// Позиционируем popup: центр экрана по X, сдвиг вверх на половину высоты popup
+		// Центрируем по горизонтали
 		// Сдвигаем вверх на половину высоты popup от центра
-		popup.x = screenCenter.x - bgWidth
-		popup.y = screenCenter.y - bgHeight
+		popup.x = screenCenter.x - bgWidth / 2
+		popup.y = screenCenter.y - bgHeight / 2
 		bg.roundRect(0, 0, bgWidth, bgHeight, 12)
 		bg.fill({ color: 0x1e1f3a, alpha: 0.95 })
 		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.2 })
@@ -1343,11 +1343,11 @@ export class GameRenderer {
 		const bgWidth = Math.max(maxTextWidth + padding * 2, 160)
 		const bgHeight = Math.max(totalTextHeight + padding * 2, 70)
 
-		// Позиционируем popup: центр экрана минус половина размера popup (сдвиг вверх и влево)
-		// Сдвигаем влево на половину ширины popup от центра
+		// Позиционируем popup: центр экрана по X, сдвиг вверх на половину высоты popup
+		// Центрируем по горизонтали
 		// Сдвигаем вверх на половину высоты popup от центра
-		popup.x = screenCenter.x - bgWidth
-		popup.y = screenCenter.y - bgHeight
+		popup.x = screenCenter.x - bgWidth / 2
+		popup.y = screenCenter.y - bgHeight / 2
 		bg.roundRect(0, 0, bgWidth, bgHeight, 12)
 		bg.fill({ color: 0x1e1f3a, alpha: 0.95 })
 		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.2 })

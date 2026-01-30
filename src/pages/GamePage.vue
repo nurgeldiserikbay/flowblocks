@@ -2295,6 +2295,19 @@ async function restart(): Promise<void> {
 	background: transparent;
 }
 
+:deep(.top-bar) {
+	/* Дополнительный отступ сверху для защиты от камеры телефона */
+	padding-top: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.5rem));
+
+	@media (max-width: 640px) {
+		padding-top: max(0.75rem, calc(env(safe-area-inset-top, 0px) + 0.5rem));
+	}
+
+	@media (max-width: 360px) {
+		padding-top: max(0.5rem, calc(env(safe-area-inset-top, 0px) + 0.5rem));
+	}
+}
+
 .game-page {
 	flex: 1;
 	display: flex;

@@ -579,7 +579,7 @@ const patternStyles = computed(() =>
 
 // Privacy link - фиксированная позиция снизу экрана для гарантированной видимости
 .privacy-link {
-	font-size: clamp(0.875rem, 3vw, 1rem);
+	font-size: clamp(1.125rem, 4vw, 1.5rem);
 	color: rgba(255, 255, 255, 0.6);
 	text-decoration: none;
 	transition: all 0.2s ease;
