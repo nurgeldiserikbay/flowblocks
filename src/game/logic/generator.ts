@@ -15,11 +15,13 @@ export function createInitialGrid(height: number, nextId: number = 1, level: num
 
 	// Fill bottom half (rows H/2..H-1) with random cubes
 	const startRow = Math.floor(height / 2)
+	
 	for (let r = startRow; r < height; r++) {
 		grid[r] = []
 		for (let c = 0; c < WIDTH; c++) {
-			const color = Math.floor(Math.random() * numColors)
-			const moves = Math.floor(Math.random() * 9) + 1 // 1-9
+			// Optimized: use bitwise OR for floor, faster than Math.floor
+			const color = (Math.random() * numColors) | 0
+			const moves = ((Math.random() * 9) | 0) + 1 // 1-9
 			const cube: Cube = {
 				id: nextId++,
 				color,

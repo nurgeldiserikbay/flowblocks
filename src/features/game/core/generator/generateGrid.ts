@@ -21,35 +21,55 @@ export function generateGrid(
 		}
 	}
 
-	// Helper to check if color would create immediate match
+	// Optimized helper to check if color would create immediate 3-match
 	function wouldCreateMatch(x: number, y: number, color: number): boolean {
-		// Check horizontal
-		let horizontalCount = 1
-		for (let dx = -2; dx <= 2; dx++) {
+		// Check horizontal: count consecutive same colors left and right
+		let leftCount = 0
+		for (let dx = -1; dx >= -2; dx--) {
 			const nx = x + dx
-			if (nx >= 0 && nx < width && nx !== x) {
-				if (grid[nx][y] === color) {
-					horizontalCount++
-				} else {
-					horizontalCount = 1
-				}
-				if (horizontalCount >= 3) return true
+			if (nx >= 0 && grid[nx][y] === color) {
+				leftCount++
+			} else {
+				break
 			}
 		}
+		
+		let rightCount = 0
+		for (let dx = 1; dx <= 2; dx++) {
+			const nx = x + dx
+			if (nx < width && grid[nx][y] === color) {
+				rightCount++
+			} else {
+				break
+			}
+		}
+		
+		// If we have 2+ same colors on either side, placing this color creates a match
+		if (leftCount + rightCount >= 2) return true
 
-		// Check vertical
-		let verticalCount = 1
-		for (let dy = -2; dy <= 2; dy++) {
+		// Check vertical: count consecutive same colors up and down
+		let upCount = 0
+		for (let dy = -1; dy >= -2; dy--) {
 			const ny = y + dy
-			if (ny >= 0 && ny < height && ny !== y) {
-				if (grid[x][ny] === color) {
-					verticalCount++
-				} else {
-					verticalCount = 1
-				}
-				if (verticalCount >= 3) return true
+			if (ny >= 0 && grid[x][ny] === color) {
+				upCount++
+			} else {
+				break
 			}
 		}
+		
+		let downCount = 0
+		for (let dy = 1; dy <= 2; dy++) {
+			const ny = y + dy
+			if (ny < height && grid[x][ny] === color) {
+				downCount++
+			} else {
+				break
+			}
+		}
+		
+		// If we have 2+ same colors above or below, placing this color creates a match
+		if (upCount + downCount >= 2) return true
 
 		return false
 	}
@@ -57,22 +77,19 @@ export function generateGrid(
 	// Fill grid
 	for (let y = 0; y < height; y++) {
 		for (let x = 0; x < width; x++) {
-			// Try to find a color that doesn't create immediate match
-			const candidates: number[] = []
+			// Collect safe colors without creating candidates array
+			const safeColors: number[] = []
 			for (let c = 0; c < numColors; c++) {
-				candidates.push(c)
+				if (!wouldCreateMatch(x, y, c)) {
+					safeColors.push(c)
+				}
 			}
 
-			// Filter out colors that would create matches
-			const safeColors = candidates.filter((c) => !wouldCreateMatch(x, y, c))
-
-			let color: number
-			if (safeColors.length > 0) {
-				color = safeColors[Math.floor(rng() * safeColors.length)]
-			} else {
-				// Fallback to random color if no safe option
-				color = Math.floor(rng() * numColors)
-			}
+			// Choose color from safe options or fallback to random
+			const color =
+				safeColors.length > 0
+					? safeColors[Math.floor(rng() * safeColors.length)]
+					: Math.floor(rng() * numColors)
 
 			grid[x][y] = color
 
