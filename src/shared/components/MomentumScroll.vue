@@ -91,42 +91,20 @@ const isScrolling = ref(false)
 
 let scroller: ElasticScroll | null = null
 let resizeObserver: ResizeObserver | null = null
+let canvasResizeObserver: ResizeObserver | null = null
 let detachWheel: null | (() => void) = null
-let detachTouchCapture: null | (() => void) = null
 
 let isPointerDown = false
 let pointerId: number | null = null
 let pointerStartY = 0
 let pointerLastY = 0
-
-// Touch events state (для мобильных устройств)
-let touchId: number | null = null
-let touchStartY = 0
-let touchLastY = 0
-let touchStartX = 0
-let touchLastX = 0
-let isTouchDown = false
-let touchStartTime = 0 // Время начала касания для определения быстрого/медленного движения
+let pointerStartTime = 0
 
 let pressTimer: number | null = null
 let dragActivated = false
-let pointerStartTime = 0 // Время начала pointer события
 let didAutoScrollOnMount = false
 /** Чтобы при росте контента (напр. расширение сосуда) проскроллить к низу. */
 let lastContentScrollHeight = 0
-let pendingBoundsUpdate: (() => void) | null = null
-let boundsUpdateTimer: number | null = null
-
-// Вспомогательная функция для определения мобильных устройств
-function isMobileDevice(): boolean {
-	return (
-		/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-			navigator.userAgent,
-		) ||
-		'ontouchstart' in window ||
-		navigator.maxTouchPoints > 0
-	)
-}
 
 function buildOptions(): ElasticScrollOptions {
 	return {
@@ -170,45 +148,14 @@ function updateBounds() {
 	const content = contentRef.value
 	if (!container || !content || !scroller) return
 
+	// Принудительно пересчитываем layout для получения актуальных размеров
+	// Это важно, когда размеры canvas изменяются динамически
+	void container.offsetHeight
+	void content.offsetHeight
+
 	const minY = 0
-	const state = scroller.getState()
-	const oldMaxY = state?.maxY ?? 0
 	const newMaxY = Math.max(0, content.scrollHeight - container.clientHeight)
-
-	// Если пользователь активно взаимодействует, откладываем обновление границ
-	if (
-		isDragging.value ||
-		isScrolling.value ||
-		isPointerDown ||
-		isTouchDown ||
-		dragActivated
-	) {
-		// Обновляем только границы без изменения позиции (setBounds не будет clamp во время dragging)
-		scroller.setBounds(minY, newMaxY)
-		return
-	}
-
-	// Сохраняем относительную позицию скролла (расстояние от низа)
-	// чтобы избежать неожиданного сдвига при изменении высоты контента
-	if (oldMaxY > 0 && newMaxY !== oldMaxY) {
-		const currentY = scroller.getY()
-		const distanceFromBottom = Math.max(0, oldMaxY - currentY)
-
-		// Обновляем границы
-		// setBounds не будет clamp во время dragging, и мы изменили его так,
-		// чтобы он не сбрасывал скорость во время scrolling
-		scroller.setBounds(minY, newMaxY)
-
-		// Восстанавливаем относительную позицию (расстояние от низа) только если скролл остановился
-		// Это предотвращает сброс позиции во время анимации momentum
-		if (!isDragging.value && !isScrolling.value && newMaxY > 0) {
-			const newY = Math.max(0, Math.min(newMaxY, newMaxY - distanceFromBottom))
-			scroller.setY(newY)
-		}
-	} else {
-		// Если высота не изменилась, просто обновляем границы
-		scroller.setBounds(minY, newMaxY)
-	}
+	scroller.setBounds(minY, newMaxY)
 }
 
 /** Реакция на изменение размера контента: обновить bounds и при росте — проскроллить к низу. */
@@ -216,53 +163,14 @@ function onResize() {
 	const content = contentRef.value
 	if (!content || !scroller) return
 
+	// Принудительно пересчитываем layout для получения актуальных размеров
+	// Это важно, когда размеры canvas изменяются динамически
+	void content.offsetHeight
+
 	const newHeight = content.scrollHeight
 
 	// Если пользователь активно взаимодействует, откладываем обновление границ
-	if (
-		isDragging.value ||
-		isScrolling.value ||
-		isPointerDown ||
-		isTouchDown ||
-		dragActivated
-	) {
-		// Сохраняем функцию обновления для вызова после завершения взаимодействия
-		pendingBoundsUpdate = () => {
-			updateBounds()
-			// Не скроллим вниз, если пользователь активно взаимодействует со скроллом
-			if (
-				lastContentScrollHeight > 0 &&
-				newHeight > lastContentScrollHeight &&
-				!isDragging.value &&
-				!isScrolling.value &&
-				!isPointerDown &&
-				!isTouchDown
-			) {
-				scrollToBottom()
-			}
-		}
-
-		// Отменяем предыдущий таймер
-		if (boundsUpdateTimer !== null) {
-			clearTimeout(boundsUpdateTimer)
-		}
-
-		// Устанавливаем таймер для отложенного обновления
-		boundsUpdateTimer = window.setTimeout(() => {
-			if (
-				pendingBoundsUpdate &&
-				!isDragging.value &&
-				!isScrolling.value &&
-				!isPointerDown &&
-				!isTouchDown &&
-				!dragActivated
-			) {
-				pendingBoundsUpdate()
-				pendingBoundsUpdate = null
-			}
-			boundsUpdateTimer = null
-		}, 100)
-
+	if (isDragging.value || isScrolling.value || isPointerDown || dragActivated) {
 		return
 	}
 
@@ -274,8 +182,7 @@ function onResize() {
 		newHeight > lastContentScrollHeight &&
 		!isDragging.value &&
 		!isScrolling.value &&
-		!isPointerDown &&
-		!isTouchDown
+		!isPointerDown
 	) {
 		scrollToBottom()
 	}
@@ -302,11 +209,6 @@ function onPointerDown(e: PointerEvent) {
 	if (!container || !scroller) return
 	if (e.button !== 0 && e.pointerType === 'mouse') return
 
-	// На мобильных устройствах игнорируем pointer события типа touch, используем только нативные touch события
-	if (isMobileDevice() && e.pointerType === 'touch') {
-		return
-	}
-
 	// Проверяем, является ли целевой элемент интерактивным (canvas, button и т.д.)
 	const target = e.target as HTMLElement
 	const isInteractiveElement =
@@ -328,7 +230,7 @@ function onPointerDown(e: PointerEvent) {
 	pointerId = e.pointerId
 	pointerStartY = e.clientY
 	pointerLastY = e.clientY
-	pointerStartTime = performance.now() // Запоминаем время начала pointer события
+	pointerStartTime = performance.now()
 
 	dragActivated = false
 	isPressing.value = true
@@ -342,99 +244,45 @@ function onPointerDown(e: PointerEvent) {
 function onPointerMove(e: PointerEvent) {
 	if (!scroller || !isPointerDown || pointerId !== e.pointerId) return
 
-	// На мобильных устройствах игнорируем pointer события типа touch
-	if (isMobileDevice() && e.pointerType === 'touch') {
-		return
-	}
-
 	const container = containerRef.value
 	if (!container) return
 
 	const deltaY = pointerLastY - e.clientY
-	pointerLastY = e.clientY
-
 	const moved = Math.abs(e.clientY - pointerStartY)
-
-	// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
 	const elapsedTime = performance.now() - pointerStartTime
-	const isFastSwipe = elapsedTime < props.pressDelay
 
-	// Если drag уже активирован (через таймер или движение), скроллим
-	if (dragActivated) {
-		if (e.cancelable) {
-			e.preventDefault()
-		}
-		scroller.onDrag(deltaY, performance.now())
-		return
-	}
-
-	// Если пользователь сдвинулся чуть-чуть — ждём long-press
-	// если сильно потащил — проверяем, быстрое это движение или медленное
-	if (moved > props.pressMoveTolerance) {
-		// Если движение быстрое - обрабатываем как быстрый скролл (wheel event)
-		if (isFastSwipe) {
+	// Если drag не активирован, проверяем условия активации
+	if (!dragActivated) {
+		// Активируем drag если движение превысило tolerance ИЛИ прошло достаточно времени
+		if (moved > props.pressMoveTolerance || elapsedTime >= props.pressDelay) {
 			clearPressTimer()
-			isPointerDown = false
-			pointerId = null
-			isPressing.value = false
-			if (container.hasPointerCapture(e.pointerId)) {
-				container.releasePointerCapture(e.pointerId)
-			}
-			// Обрабатываем как быстрый скролл через wheel event
-			if (e.cancelable) {
-				e.preventDefault()
-			}
-			e.stopPropagation()
-			scroller?.onWheel(deltaY * props.wheelMult, 0, container.clientHeight)
-			return
-		} else {
-			// Медленное движение - активируем drag scrolling
-			// Теперь перехватываем событие, если пользователь начал скроллить
-			if (!container.hasPointerCapture(e.pointerId)) {
-				container.setPointerCapture(e.pointerId)
-			}
 			activateDrag()
-			// Сразу применяем движение после активации
+			// Важно: обновляем pointerLastY после активации, чтобы не потерять движение
+			pointerLastY = e.clientY
+			// Применяем движение, которое привело к активации
 			if (e.cancelable) {
 				e.preventDefault()
 			}
 			scroller.onDrag(deltaY, performance.now())
+		} else {
+			// Недостаточно движения и времени - ждем, не preventDefault
+			// НЕ обновляем pointerLastY, чтобы не потерять движение при следующей активации
 			return
 		}
-	}
-
-	// Если движение недостаточное, но прошло достаточно времени (drag активировался через таймер)
-	// активируем drag и обрабатываем движение
-	if (elapsedTime >= props.pressDelay) {
-		// Таймер должен был активировать drag, но на всякий случай проверяем и активируем если нужно
-		if (!dragActivated) {
-			clearPressTimer() // Отменяем таймер, так как активируем вручную
-			activateDrag()
-		}
-		// Обрабатываем движение как drag scrolling
-		if (!container.hasPointerCapture(e.pointerId)) {
-			container.setPointerCapture(e.pointerId)
-		}
+	} else {
+		// Если drag уже активен, обрабатываем движение
+		pointerLastY = e.clientY
 		if (e.cancelable) {
 			e.preventDefault()
 		}
 		scroller.onDrag(deltaY, performance.now())
-		return
 	}
-
-	// Если движение недостаточное и время еще не истекло - ждем
-	// Не обрабатываем движение, но и не блокируем его (может быть клик)
 }
 
 function onPointerUp(e: PointerEvent) {
 	const container = containerRef.value
 	if (!container || !scroller || !isPointerDown || pointerId !== e.pointerId)
 		return
-
-	// На мобильных устройствах игнорируем pointer события типа touch
-	if (isMobileDevice() && e.pointerType === 'touch') {
-		return
-	}
 
 	clearPressTimer()
 
@@ -448,347 +296,46 @@ function onPointerUp(e: PointerEvent) {
 	pointerStartTime = 0
 
 	// Если drag так и не активировался и движения не было — это клик
-	// Позволяем событию клика пройти дальше к интерактивным элементам
 	if (!dragActivated && moved <= props.clickThreshold) {
 		isPressing.value = false
 		emit('click', e)
-		// Не вызываем preventDefault, чтобы клик прошел к canvas
 		return
 	}
 
-	isPressing.value = false
-	scroller.onDragEnd()
-	emit('scrollEnd')
-	dragActivated = false
-
-	// После завершения взаимодействия выполняем отложенное обновление границ
-	if (pendingBoundsUpdate) {
-		// Небольшая задержка, чтобы убедиться, что взаимодействие полностью завершено
-		setTimeout(() => {
-			if (
-				pendingBoundsUpdate &&
-				!isDragging.value &&
-				!isScrolling.value &&
-				!isPointerDown &&
-				!isTouchDown &&
-				!dragActivated
-			) {
-				pendingBoundsUpdate()
-				pendingBoundsUpdate = null
-			}
-		}, 50)
-	}
-}
-
-// Touch event handlers для мобильных устройств
-function onTouchStart(e: TouchEvent) {
-	const container = containerRef.value
-	if (!container || !scroller) return
-
-	// Используем первый touch
-	const touch = e.touches[0]
-	if (!touch) return
-
-	// Проверяем, является ли целевой элемент интерактивным
-	const target = e.target as HTMLElement
-	const isInteractiveElement =
-		target.tagName === 'CANVAS' ||
-		target.tagName === 'BUTTON' ||
-		target.closest('button') !== null ||
-		target.closest('canvas') !== null
-
-	// Если это интерактивный элемент (canvas, button), не обрабатываем скролл
-	// Позволяем игре обработать событие
-	// level-indicator НЕ является интерактивным элементом - через него можно скроллить
-	if (isInteractiveElement) {
-		return
-	}
-
-	// Проверяем, что событие происходит внутри MomentumScroll контейнера
-	// Используем elementFromPoint для проверки начальной точки касания
-	const startTarget = document.elementFromPoint(
-		touch.clientX,
-		touch.clientY,
-	) as HTMLElement
-
-	// Если начальная точка касания на интерактивном элементе, не обрабатываем
-	const isStartTargetInteractive =
-		startTarget &&
-		(startTarget.tagName === 'CANVAS' ||
-			startTarget.tagName === 'BUTTON' ||
-			startTarget.closest('button') !== null ||
-			startTarget.closest('canvas') !== null)
-
-	if (isStartTargetInteractive) {
-		return
-	}
-
-	// Проверяем, что событие происходит внутри MomentumScroll контейнера
-	// Проверяем target и startTarget, а также используем closest для поиска родительского элемента
-	const targetInMomentumScroll =
-		target &&
-		(container.contains(target) ||
-			target === container ||
-			target.closest('.momentum-scroll') === container)
-	const startTargetInMomentumScroll =
-		startTarget &&
-		(container.contains(startTarget) ||
-			startTarget === container ||
-			startTarget.closest('.momentum-scroll') === container)
-
-	// Если событие происходит внутри нашего контейнера, обрабатываем его
-	if (!targetInMomentumScroll && !startTargetInMomentumScroll) {
-		// Событие началось вне MomentumScroll - не обрабатываем
-		return
-	}
-
-	// Если событие происходит внутри MomentumScroll, предотвращаем всплытие к playAreaRef
-	// Это нужно сделать до установки состояния, чтобы предотвратить обработку на playAreaRef
-	e.stopPropagation()
-
-	isTouchDown = true
-	touchId = touch.identifier
-	touchStartY = touch.clientY
-	touchLastY = touch.clientY
-	touchStartX = touch.clientX
-	touchLastX = touch.clientX
-	touchStartTime = performance.now() // Запоминаем время начала касания
-
-	dragActivated = false
-	isPressing.value = true
-
-	clearPressTimer()
-	// Устанавливаем таймер для автоматической активации drag после задержки
-	// Это позволяет активировать drag даже если пользователь не двигает палец
-	pressTimer = window.setTimeout(() => {
-		if (isTouchDown && !dragActivated) {
-			activateDrag()
-		}
-	}, props.pressDelay)
-
-	// Не вызываем preventDefault здесь, чтобы не блокировать стандартное поведение
-	// preventDefault будет вызван в onTouchMove только после активации drag
-	// stopPropagation уже вызван выше, чтобы предотвратить всплытие к playAreaRef
-}
-
-function onTouchMove(e: TouchEvent) {
-	if (!scroller || !isTouchDown) return
-
-	const container = containerRef.value
-	if (!container) return
-
-	// Находим нужный touch
-	const touch = Array.from(e.touches).find((t) => t.identifier === touchId)
-	if (!touch) {
-		// Если touch не найден, возможно событие было отменено
-		if (e.touches.length === 0) {
-			onTouchEnd(e)
-		}
-		return
-	}
-
-	// Проверяем, не находится ли текущее касание на интерактивном элементе
-	// Это важно, если касание началось вне canvas, но переместилось на canvas
-	const target = document.elementFromPoint(
-		touch.clientX,
-		touch.clientY,
-	) as HTMLElement
-	const isOnInteractiveElement =
-		target &&
-		(target.tagName === 'CANVAS' ||
-			target.tagName === 'BUTTON' ||
-			target.closest('button') !== null ||
-			target.closest('canvas') !== null)
-
-	// Если касание переместилось на интерактивный элемент и скролл еще не активирован
-	// Отменяем обработку скролла, позволяем игре обработать
-	if (!dragActivated && isOnInteractiveElement) {
-		isTouchDown = false
-		touchId = null
-		isPressing.value = false
-		touchStartTime = 0
-		clearPressTimer()
-		return
-	}
-
-	const deltaY = touchLastY - touch.clientY
-	const deltaX = touchLastX - touch.clientX
-	touchLastY = touch.clientY
-	touchLastX = touch.clientX
-
-	const movedY = Math.abs(touch.clientY - touchStartY)
-	const movedX = Math.abs(touch.clientX - touchStartX)
-
-	// Определяем направление движения
-	// Если движение больше по горизонтали, чем по вертикали - это не скролл
-	// Это позволяет игре обрабатывать горизонтальные свайпы
-	const isVerticalSwipe = movedY > movedX
-	const minSwipeDistance = 8 // Минимальное расстояние для активации скролла
-
-	// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
-	const elapsedTime = performance.now() - touchStartTime
-	const isFastSwipe = elapsedTime < props.pressDelay
-
-	// Активируем скролл только при вертикальном свайпе
-	if (!dragActivated) {
-		if (isVerticalSwipe && movedY > minSwipeDistance) {
-			// Активируем drag scrolling для любого вертикального движения достаточной величины
-			clearPressTimer()
-			activateDrag()
-			// После активации drag предотвращаем стандартное поведение
-			if (e.cancelable) {
-				e.preventDefault()
-			}
-			e.stopPropagation()
-			// Применяем движение сразу после активации drag
-			scroller.onDrag(deltaY, performance.now())
-			return
-		} else if (movedX > minSwipeDistance && !isVerticalSwipe) {
-			// Горизонтальный свайп - отменяем обработку скролла, позволяем игре обработать
-			isTouchDown = false
-			touchId = null
-			isPressing.value = false
-			touchStartTime = 0
-			clearPressTimer()
-			return
-		} else {
-			// Если движение еще недостаточное, не блокируем стандартное поведение
-			return
-		}
-	}
-
-	// drag активирован => скроллим только по вертикали
-	// Но если касание переместилось на интерактивный элемент, прекращаем скролл
-	if (isOnInteractiveElement) {
-		onTouchEnd(e)
-		return
-	}
-
-	if (e.cancelable) {
-		e.preventDefault()
-	}
-	e.stopPropagation()
-	scroller.onDrag(deltaY, performance.now())
-}
-
-function onTouchEnd(e: TouchEvent) {
-	const container = containerRef.value
-	if (!container || !scroller || !isTouchDown) return
-
-	clearPressTimer()
-
-	const movedY = Math.abs(touchLastY - touchStartY)
-	const movedX = Math.abs(touchLastX - touchStartX)
-	const totalMoved = Math.sqrt(movedY * movedY + movedX * movedX)
-
-	isTouchDown = false
-	touchId = null
-	touchStartX = 0
-	touchLastX = 0
-	touchStartTime = 0
-
-	// Если drag так и не активировался и движения не было — это клик
-	if (!dragActivated && totalMoved <= props.clickThreshold) {
-		isPressing.value = false
-		// Создаем синтетический PointerEvent для совместимости
-		const syntheticEvent = new PointerEvent('click', {
-			bubbles: true,
-			cancelable: true,
-			clientX: touchLastX || 0,
-			clientY: touchLastY || 0,
-		})
-		emit('click', syntheticEvent)
-		return
-	}
-
-	isPressing.value = false
+	// Если drag был активирован, завершаем его
 	if (dragActivated) {
+		isPressing.value = false
 		scroller.onDragEnd()
 		emit('scrollEnd')
-	}
-	dragActivated = false
-
-	// После завершения взаимодействия выполняем отложенное обновление границ
-	// Ждем, пока скролл полностью остановится (isScrolling станет false)
-	if (pendingBoundsUpdate) {
-		const checkAndUpdate = () => {
-			if (
-				pendingBoundsUpdate &&
-				!isDragging.value &&
-				!isScrolling.value &&
-				!isPointerDown &&
-				!isTouchDown &&
-				!dragActivated
-			) {
-				pendingBoundsUpdate()
-				pendingBoundsUpdate = null
-			} else if (pendingBoundsUpdate) {
-				// Если скролл еще продолжается, проверяем снова через некоторое время
-				setTimeout(checkAndUpdate, 100)
-			}
-		}
-		// Начинаем проверку после небольшой задержки
-		setTimeout(checkAndUpdate, 100)
+		dragActivated = false
 	}
 }
+
 
 function attachWheel() {
 	const el = containerRef.value
 	if (!el || !scroller || !props.enableWheel) return
 
+	// Сохраняем ссылку на scroller в замыкании
+	const currentScroller = scroller
+
 	const onWheel = (ev: WheelEvent) => {
-		ev.preventDefault()
-		scroller?.onWheel(ev.deltaY, ev.deltaMode, el.clientHeight)
+		// Предотвращаем стандартное поведение скролла только если есть что скроллить
+		if (!currentScroller) return
+		
+		const state = currentScroller.getState()
+		const canScroll = state.maxY > 0
+		
+		if (canScroll) {
+			ev.preventDefault()
+			currentScroller.onWheel(ev.deltaY, ev.deltaMode, el.clientHeight)
+		}
 	}
 
 	el.addEventListener('wheel', onWheel, { passive: false })
 	return () => el.removeEventListener('wheel', onWheel)
 }
 
-function attachTouchCapture() {
-	const el = containerRef.value
-	if (!el) return
-
-	// Всегда добавляем touch обработчики для поддержки мобильных устройств
-	// Используем passive: false для возможности вызова preventDefault
-	// Используем capture: true - события обрабатываются в фазе захвата
-	// Это позволяет MomentumScroll обработать события раньше, чем они дойдут до playAreaRef
-	el.addEventListener('touchstart', onTouchStart, {
-		passive: false,
-		capture: true,
-	})
-	el.addEventListener('touchmove', onTouchMove, {
-		passive: false,
-		capture: true,
-	})
-	el.addEventListener('touchend', onTouchEnd, {
-		passive: false,
-		capture: true,
-	})
-	el.addEventListener('touchcancel', onTouchEnd, {
-		passive: false,
-		capture: true,
-	})
-
-	return () => {
-		el.removeEventListener('touchstart', onTouchStart, {
-			passive: false,
-			capture: true,
-		} as EventListenerOptions)
-		el.removeEventListener('touchmove', onTouchMove, {
-			passive: false,
-			capture: true,
-		} as EventListenerOptions)
-		el.removeEventListener('touchend', onTouchEnd, {
-			passive: false,
-			capture: true,
-		} as EventListenerOptions)
-		el.removeEventListener('touchcancel', onTouchEnd, {
-			passive: false,
-			capture: true,
-		} as EventListenerOptions)
-	}
-}
 
 // Public API
 function scrollTo(y: number) {
@@ -936,30 +483,54 @@ onMounted(() => {
 	nextTick(() => {
 		init()
 
-		detachWheel?.()
-		detachWheel = attachWheel() ?? null
-
-		detachTouchCapture?.()
-		detachTouchCapture = attachTouchCapture() ?? null
+		// Убеждаемся, что scroller инициализирован перед прикреплением wheel handler
+		if (scroller) {
+			detachWheel?.()
+			detachWheel = attachWheel() ?? null
+		}
 
 		if (props.autoUpdateBounds && containerRef.value && contentRef.value) {
 			lastContentScrollHeight = contentRef.value.scrollHeight
 			resizeObserver = new ResizeObserver(onResize)
 			resizeObserver.observe(containerRef.value)
 			resizeObserver.observe(contentRef.value)
+
+			// Также отслеживаем изменения размера canvas внутри content
+			// Это важно, когда canvas меняет размер динамически (например, при расширении сосуда)
+			const canvas = contentRef.value.querySelector('canvas')
+			if (canvas) {
+				canvasResizeObserver = new ResizeObserver(() => {
+					// При изменении размера canvas принудительно обновляем bounds
+					requestAnimationFrame(() => {
+						updateBounds()
+					})
+				})
+				canvasResizeObserver.observe(canvas)
+			}
 		}
 
 		// ✅ Автоскролл вниз при первом открытии
 		if (props.autoScrollToBottomOnMount && !didAutoScrollOnMount) {
 			didAutoScrollOnMount = true
 
-			// 1) дать DOM/слоту прорендериться
+			// 1) дать DOM/слоту прорендериться (2 animation frames)
 			requestAnimationFrame(() => {
-				// 2) пересчитать bounds
-				updateBounds()
+				requestAnimationFrame(() => {
+					// 2) пересчитать bounds
+					updateBounds()
+					
+					// Убеждаемся, что wheel handler прикреплен после обновления bounds
+					if (scroller && !detachWheel) {
+						detachWheel = attachWheel() ?? null
+					}
 
-				// 3) прокрутить вниз (можно без анимации, но лучше плавно)
-				scrollToBottomAnimated(props.autoScrollDuration, 2500)
+					// 3) проверить, есть ли что скроллить
+					const state = scroller?.getState()
+					if (state && state.maxY > 0) {
+						// 4) прокрутить вниз
+						scrollToBottomAnimated(props.autoScrollDuration, 2500)
+					}
+				})
 			})
 		}
 	})
@@ -968,32 +539,19 @@ onMounted(() => {
 onBeforeUnmount(() => {
 	clearPressTimer()
 
-	// Сброс touch состояния
-	isTouchDown = false
-	touchId = null
-	touchStartX = 0
-	touchLastX = 0
-	touchStartTime = 0
-
 	// Сброс pointer состояния
 	isPointerDown = false
 	pointerId = null
 	pointerStartTime = 0
 
-	if (boundsUpdateTimer !== null) {
-		clearTimeout(boundsUpdateTimer)
-		boundsUpdateTimer = null
-	}
-	pendingBoundsUpdate = null
-
 	detachWheel?.()
 	detachWheel = null
 
-	detachTouchCapture?.()
-	detachTouchCapture = null
-
 	resizeObserver?.disconnect()
 	resizeObserver = null
+
+	canvasResizeObserver?.disconnect()
+	canvasResizeObserver = null
 
 	scroller?.destroy()
 	scroller = null
@@ -1015,8 +573,11 @@ watch(
 	() => {
 		nextTick(() => {
 			init()
-			detachWheel?.()
-			detachWheel = attachWheel() ?? null
+			// Убеждаемся, что scroller инициализирован перед прикреплением wheel handler
+			if (scroller) {
+				detachWheel?.()
+				detachWheel = attachWheel() ?? null
+			}
 		})
 	},
 )
@@ -1052,7 +613,7 @@ watch(
 	&__content {
 		width: 100%;
 		height: max-content;
-		min-height: 100%;
+		min-height: fit-content;
 		box-sizing: border-box;
 		will-change: transform;
 		transform: translate3d(0, 0, 0);

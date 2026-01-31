@@ -93,6 +93,18 @@ class PixiServiceClass {
 			throw new Error('PixiService not initialized')
 		}
 
+		// Если canvas уже прикреплен к этому хосту, ничего не делаем
+		if (this.canvas.parentElement === newHostEl) {
+			// Убеждаемся, что стили правильные
+			this.canvas.style.position = 'relative'
+			this.canvas.style.left = 'auto'
+			this.canvas.style.top = 'auto'
+			this.canvas.style.opacity = '1'
+			this.canvas.style.pointerEvents = 'auto'
+			this.canvas.style.display = 'block'
+			return
+		}
+
 		// Удаляем из старого хоста (если был)
 		if (this.canvas.parentElement) {
 			this.canvas.parentElement.removeChild(this.canvas)

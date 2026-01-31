@@ -59,11 +59,7 @@
 					<div class="game-page__canvas-container">
 						<!-- Canvas будет заменен на canvas из PixiService при attachToHost -->
 						<!-- Но нужен ref для получения контейнера -->
-						<canvas
-							ref="canvas"
-							class="game-canvas"
-							style="display: none"
-						></canvas>
+						<canvas ref="canvas" class="game-canvas"></canvas>
 					</div>
 				</MomentumScroll>
 
@@ -234,7 +230,7 @@ function isInsideMomentumScroll(target: HTMLElement | null): boolean {
 function isMobileDevice(): boolean {
 	return (
 		/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-			navigator.userAgent,
+			navigator.userAgent
 		) ||
 		'ontouchstart' in window ||
 		navigator.maxTouchPoints > 0
@@ -432,7 +428,7 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 	}
 
 	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === playAreaTouchId,
+		(t) => t.identifier === playAreaTouchId
 	)
 	if (!touch) {
 		if (e.touches.length === 0) {
@@ -444,7 +440,7 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 	// Проверяем, не находится ли текущее касание на интерактивном элементе
 	const target = document.elementFromPoint(
 		touch.clientX,
-		touch.clientY,
+		touch.clientY
 	) as HTMLElement
 	if (isInteractiveElement(target)) {
 		// Если касание переместилось на интерактивный элемент и скролл еще не активирован
@@ -875,7 +871,7 @@ function handleLevelIndicatorBarTouchMove(e: TouchEvent) {
 		return
 
 	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === levelIndicatorBarTouchId,
+		(t) => t.identifier === levelIndicatorBarTouchId
 	)
 	if (!touch) return
 
@@ -1010,7 +1006,7 @@ function handleLevelIndicatorTouchMove(e: TouchEvent) {
 	if (!momentumScrollRef.value || !levelIndicatorRef.value) return
 
 	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === levelIndicatorTouchId,
+		(t) => t.identifier === levelIndicatorTouchId
 	)
 	if (!touch) return
 
@@ -1126,6 +1122,7 @@ let lastEventType: string | null = null
 let canvasDragStartTime = 0 // Время начала касания на canvas
 let canvasDragScrolling = false // Флаг активации drag scrolling вместо обработки игры
 let canvasDragStartedOnBlock = false // Флаг: было ли начальное касание на плитке (блоке)
+let canvasPressTimer: ReturnType<typeof setTimeout> | null = null // Таймер для активации скроллинга при долгом удержании
 const CANVAS_PRESS_DELAY_EMPTY = 140 // ms - время удержания для активации drag scrolling на пустом месте
 const CANVAS_PRESS_DELAY_BLOCK = 300 // ms - время удержания для активации drag scrolling на плитке (больше, чтобы дать время для быстрого свайпа)
 const CANVAS_PRESS_MOVE_TOLERANCE = 6 // px - порог движения для ранней активации
@@ -1137,7 +1134,7 @@ const formattedTime = computed(() => {
 })
 
 const gridHeight = computed(
-	() => gameStore.grid?.length ?? gameStore.getHeight(),
+	() => gameStore.grid?.length ?? gameStore.getHeight()
 )
 // Индикатор «сколько рядов до верха сосуда»: верхняя занятая строка (0 = у края, game over)
 const topmostRow = computed(() => {
@@ -1205,6 +1202,19 @@ async function handleVesselExpanded(): Promise<void> {
 	// forceUpdate = true гарантирует, что все позиции будут пересчитаны даже если индексы не изменились
 	// Это важно при расширении сосуда, когда canvas становится выше
 	await renderer.syncGridPositions(gameStore.grid, true)
+
+	// КРИТИЧНО: Обновляем bounds для MomentumScroll после изменения размера canvas
+	// Ждем, чтобы браузер успел пересчитать layout
+	await nextTick()
+	await new Promise((resolve) => requestAnimationFrame(resolve))
+	// Принудительно пересчитываем layout перед обновлением bounds
+	if (pixiCanvas.parentElement) {
+		// Принудительный reflow для обновления scrollHeight
+		void pixiCanvas.parentElement.offsetHeight
+	}
+	if (momentumScrollRef.value) {
+		momentumScrollRef.value.updateBounds()
+	}
 }
 
 function initCanvas(): void {
@@ -1289,7 +1299,7 @@ function initCanvas(): void {
 }
 
 function getPositionFromEvent(
-	e: MouseEvent | TouchEvent | PointerEvent,
+	e: MouseEvent | TouchEvent | PointerEvent
 ): { r: number; c: number } | null {
 	// КРИТИЧНО: Используем canvas из PixiService
 	const pixiCanvas = getPixiCanvas()
@@ -1350,6 +1360,26 @@ function getPositionFromEvent(
 	return null
 }
 
+function clearCanvasPressTimer() {
+	if (canvasPressTimer !== null) {
+		clearTimeout(canvasPressTimer)
+		canvasPressTimer = null
+	}
+}
+
+function activateCanvasDragScrolling() {
+	if (!momentumScrollRef.value || canvasDragScrolling) return
+	canvasDragScrolling = true
+	momentumScrollRef.value.updateBounds()
+	momentumScrollRef.value.startDrag(performance.now())
+	
+	// Теперь блокируем события игры
+	const pixiCanvas = getPixiCanvas()
+	if (pixiCanvas) {
+		// События уже обрабатываются через pointerMoveHandler
+	}
+}
+
 function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// КРИТИЧНО: Блокируем ввод до тех пор, пока игра не запущена
 	if (!gameStore.isGameStarted) {
@@ -1363,8 +1393,8 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 		e instanceof TouchEvent
 			? 'touch'
 			: e instanceof PointerEvent
-				? 'pointer'
-				: 'mouse'
+			? 'pointer'
+			: 'mouse'
 	const now = Date.now()
 	if (now - lastEventTime < 50 && lastEventType !== eventType) {
 		// Игнорируем событие, если недавно было обработано событие другого типа
@@ -1376,23 +1406,13 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// Unlock audio context on first interaction (iOS/Android)
 	AudioManager.unlock()
 
-	// Предотвращаем скролл при взаимодействии с canvas
-	// КРИТИЧНО: Используем canvas из PixiService
+	// КРИТИЧНО: НЕ блокируем события сразу - позволяем MomentumScroll обработать их
+	// Блокируем только если это точно не скроллинг (определится в pointerMove)
 	const pixiCanvas = getPixiCanvas()
 
-	if (e instanceof PointerEvent) {
-		e.preventDefault()
-		e.stopPropagation()
-		// Захватываем pointer для отслеживания движения
-		if (pixiCanvas && e.pointerId !== undefined) {
-			pixiCanvas.setPointerCapture(e.pointerId)
-		}
-	} else if (e instanceof TouchEvent) {
-		// Для touch событий также предотвращаем скролл
-		e.preventDefault()
-		e.stopPropagation()
-	} else if (e instanceof MouseEvent) {
-		e.stopPropagation()
+	// Захватываем pointer для отслеживания движения (но не блокируем события)
+	if (e instanceof PointerEvent && pixiCanvas && e.pointerId !== undefined) {
+		pixiCanvas.setPointerCapture(e.pointerId)
 	}
 
 	// Сохраняем начальные координаты клиента для определения свайпа
@@ -1430,9 +1450,21 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 		// Касание вне canvas или вне границ - считаем пустым местом
 		canvasDragStartedOnBlock = false
 	}
+
+	// Запускаем таймер для активации скроллинга при долгом удержании
+	clearCanvasPressTimer()
+	const pressDelay = canvasDragStartedOnBlock
+		? CANVAS_PRESS_DELAY_BLOCK
+		: CANVAS_PRESS_DELAY_EMPTY
+	canvasPressTimer = setTimeout(() => {
+		activateCanvasDragScrolling()
+	}, pressDelay)
 }
 
 function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
+	// Очищаем таймер
+	clearCanvasPressTimer()
+
 	// Если был активирован drag scrolling, завершаем его
 	const wasDragScrolling = canvasDragScrolling
 	if (canvasDragScrolling && momentumScrollRef.value) {
@@ -1474,11 +1506,10 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 	}
 
 	// Если был активирован drag scrolling, не обрабатываем события игры
-	if (canvasDragScrolling) {
+	if (wasDragScrolling) {
 		dragStart = null
 		dragStartClient = null
 		isDragging = false
-		canvasDragScrolling = false
 		canvasDragStartTime = 0
 		canvasDragStartedOnBlock = false
 		renderer?.setSelectedPosition(null, null)
@@ -1618,6 +1649,7 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 	}
 
 	// Очищаем состояние drag scrolling
+	clearCanvasPressTimer()
 	canvasDragStartTime = 0
 	canvasDragScrolling = false
 	canvasDragStartedOnBlock = false
@@ -1676,7 +1708,7 @@ onMounted(async () => {
 	// Если контейнер не найден, пытаемся найти его через playAreaRef
 	if (!container && playAreaRef.value) {
 		container = playAreaRef.value.querySelector(
-			'.game-page__canvas-container',
+			'.game-page__canvas-container'
 		) as HTMLElement
 	}
 
@@ -1690,7 +1722,7 @@ onMounted(async () => {
 
 	if (!container) {
 		console.error(
-			'[GamePage] onMounted: Canvas container not found after waiting',
+			'[GamePage] onMounted: Canvas container not found after waiting'
 		)
 		return
 	}
@@ -1702,7 +1734,7 @@ onMounted(async () => {
 		containerStyle.visibility === 'hidden'
 	) {
 		console.warn(
-			'[GamePage] onMounted: Canvas container is hidden, waiting for visibility...',
+			'[GamePage] onMounted: Canvas container is hidden, waiting for visibility...'
 		)
 		// Ждем, пока контейнер станет видимым
 		await new Promise((resolve) => {
@@ -1720,11 +1752,23 @@ onMounted(async () => {
 
 	// КРИТИЧНО: Проверяем, что PixiService инициализирован
 	if (!PixiService.isReady()) {
-		console.error(
-			'[GamePage] onMounted: PixiService not initialized. Please initialize on StartPage first.',
+		console.warn(
+			'[GamePage] onMounted: PixiService not initialized. Initializing fallback...'
 		)
-		// Попытка инициализировать в экстренном случае (не должно происходить)
-		await PixiService.init(container, { width: 320, height: 400 })
+		// Попытка инициализировать в экстренном случае (fallback для прямого перехода на GamePage)
+		try {
+			await PixiService.init(container, { width: 320, height: 400 })
+			if (!PixiService.isReady()) {
+				console.error('[GamePage] onMounted: PixiService initialization failed')
+				return
+			}
+		} catch (error) {
+			console.error(
+				'[GamePage] onMounted: Failed to initialize PixiService:',
+				error
+			)
+			return
+		}
 	}
 
 	// КРИТИЧНО: Удаляем временный canvas из template (если есть)
@@ -1733,7 +1777,15 @@ onMounted(async () => {
 	}
 
 	// КРИТИЧНО: Прикрепляем canvas из PixiService к нашему контейнеру
-	PixiService.attachToHost(container)
+	try {
+		PixiService.attachToHost(container)
+	} catch (error) {
+		console.error(
+			'[GamePage] onMounted: Failed to attach canvas to host:',
+			error
+		)
+		return
+	}
 
 	// Получаем canvas из PixiService
 	const pixiCanvas = getPixiCanvas()
@@ -1780,7 +1832,7 @@ onMounted(async () => {
 				computedHeight: window.getComputedStyle(container).height,
 				parentWidth: container.parentElement?.getBoundingClientRect().width,
 				parentHeight: container.parentElement?.getBoundingClientRect().height,
-			},
+			}
 		)
 		// Продолжаем с минимальными размерами вместо ошибки
 		console.warn('[GamePage] onMounted: Using fallback dimensions (320x400)')
@@ -1803,7 +1855,7 @@ onMounted(async () => {
 		// Принудительно устанавливаем видимость если нужно
 		if (canvasStyle.display === 'none' || canvasRect.width === 0) {
 			console.warn(
-				'[GamePage] onMounted: Canvas is hidden or has zero width, forcing visibility',
+				'[GamePage] onMounted: Canvas is hidden or has zero width, forcing visibility'
 			)
 			pixiCanvasAfterInit.style.display = 'block'
 			pixiCanvasAfterInit.style.visibility = 'visible'
@@ -1896,7 +1948,7 @@ onMounted(async () => {
 	const level = levelParam ? parseInt(String(levelParam), 10) : 1
 	if (isNaN(level) || level < 1) {
 		console.warn(
-			`[GamePage] Invalid level parameter: ${levelParam}, using default level 1`,
+			`[GamePage] Invalid level parameter: ${levelParam}, using default level 1`
 		)
 		gameStore.setCurrentLevel(1)
 	} else {
@@ -1920,7 +1972,7 @@ onMounted(async () => {
 	const pixiCanvasForHandlers = getPixiCanvas()
 	if (!pixiCanvasForHandlers) {
 		console.error(
-			'[GamePage] onMounted: Failed to get canvas for event handlers',
+			'[GamePage] onMounted: Failed to get canvas for event handlers'
 		)
 		return
 	}
@@ -1962,54 +2014,68 @@ onMounted(async () => {
 		const elapsedTime = performance.now() - canvasDragStartTime
 		const isFastSwipe = elapsedTime < pressDelay
 
-		// Если движение достаточно большое
-		if (moved > threshold || moved > CANVAS_PRESS_MOVE_TOLERANCE) {
-			// Если движение быстрое - обрабатываем как игру (свайп блоков)
-			// Но только если касание было на блоке - на пустом месте быстрый свайп тоже может быть скроллом
-			if (isFastSwipe && !canvasDragScrolling && canvasDragStartedOnBlock) {
-				isDragging = true
+		// Если drag scrolling уже активирован, обрабатываем только скроллинг
+		if (canvasDragScrolling && momentumScrollRef.value) {
+			e.preventDefault()
+			e.stopPropagation()
 
-				// Предотвращаем скролл при движении по canvas
+			const deltaY = dragStartClient.y - e.clientY
+			momentumScrollRef.value.drag(deltaY, performance.now())
+			// Обновляем dragStartClient для следующего движения
+			dragStartClient.y = e.clientY
+			return
+		}
+
+		// КРИТИЧНО: Скроллинг активируется ТОЛЬКО при долгом удержании (elapsedTime >= pressDelay)
+		// Быстрые свайпы всегда обрабатываются как игра
+		if (elapsedTime >= pressDelay && moved > CANVAS_PRESS_MOVE_TOLERANCE) {
+			// Долгое удержание + движение - активируем drag scrolling
+			if (!canvasDragScrolling) {
+				clearCanvasPressTimer()
+				activateCanvasDragScrolling()
+			}
+
+			// Если drag scrolling активирован, обрабатываем скроллинг
+			if (canvasDragScrolling && momentumScrollRef.value) {
 				e.preventDefault()
 				e.stopPropagation()
 
-				// Обновляем выделение при движении
-				const pos = getPositionFromEvent(e)
-				if (pos) {
-					// Highlight tile under pointer (only if it has moves > 0)
-					const cube = gameStore.grid[pos.r]?.[pos.c]
-					if (cube && cube.moves > 0) {
-						renderer?.setSelectedPosition(pos.r, pos.c)
+				const deltaY = dragStartClient.y - e.clientY
+				momentumScrollRef.value.drag(deltaY, performance.now())
+				// Обновляем dragStartClient для следующего движения
+				dragStartClient.y = e.clientY
+				return
+			}
+		}
+
+		// Если движение быстрое (до истечения pressDelay) - обрабатываем как игру
+		if (isFastSwipe && moved > threshold) {
+			isDragging = true
+
+			// Предотвращаем скролл при движении по canvas
+			e.preventDefault()
+			e.stopPropagation()
+
+			// Обновляем выделение при движении
+			const pos = getPositionFromEvent(e)
+			if (pos) {
+				// Highlight tile under pointer (only if it has moves > 0)
+				const cube = gameStore.grid[pos.r]?.[pos.c]
+				if (cube && cube.moves > 0) {
+					renderer?.setSelectedPosition(pos.r, pos.c)
+				} else {
+					// Highlight starting tile if it has moves > 0
+					const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
+					if (startCube && startCube.moves > 0) {
+						renderer?.setSelectedPosition(dragStart.r, dragStart.c)
 					} else {
-						// Highlight starting tile if it has moves > 0
-						const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
-						if (startCube && startCube.moves > 0) {
-							renderer?.setSelectedPosition(dragStart.r, dragStart.c)
-						} else {
-							renderer?.setSelectedPosition(null, null)
-						}
+						renderer?.setSelectedPosition(null, null)
 					}
-				}
-			} else {
-				// Долгое удержание + движение - активируем drag scrolling
-				if (!canvasDragScrolling && momentumScrollRef.value) {
-					canvasDragScrolling = true
-					momentumScrollRef.value.updateBounds()
-					momentumScrollRef.value.startDrag(performance.now())
-				}
-
-				if (canvasDragScrolling && momentumScrollRef.value) {
-					// Предотвращаем скролл и обрабатываем drag scrolling
-					e.preventDefault()
-					e.stopPropagation()
-
-					const deltaY = dragStartClient.y - e.clientY
-					momentumScrollRef.value.drag(deltaY, performance.now())
-					// Обновляем dragStartClient для следующего движения
-					dragStartClient.y = e.clientY
 				}
 			}
 		}
+		// Если движение недостаточное и время еще не истекло - не блокируем события
+		// Позволяем MomentumScroll обработать их, если нужно
 	}
 	pixiCanvasForHandlers.addEventListener('pointermove', pointerMoveHandler, {
 		passive: false,
@@ -2054,54 +2120,68 @@ onMounted(async () => {
 			const elapsedTime = performance.now() - canvasDragStartTime
 			const isFastSwipe = elapsedTime < pressDelay
 
-			// Если движение достаточно большое
-			if (moved > threshold || moved > CANVAS_PRESS_MOVE_TOLERANCE) {
-				// Если движение быстрое - обрабатываем как игру (свайп блоков)
-				// Но только если касание было на блоке - на пустом месте быстрый свайп тоже может быть скроллом
-				if (isFastSwipe && !canvasDragScrolling && canvasDragStartedOnBlock) {
-					isDragging = true
+			// Если drag scrolling уже активирован, обрабатываем только скроллинг
+			if (canvasDragScrolling && momentumScrollRef.value) {
+				e.preventDefault()
+				e.stopPropagation()
 
-					// Предотвращаем скролл при движении по canvas
+				const deltaY = dragStartClient.y - touch.clientY
+				momentumScrollRef.value.drag(deltaY, performance.now())
+				// Обновляем dragStartClient для следующего движения
+				dragStartClient.y = touch.clientY
+				return
+			}
+
+			// КРИТИЧНО: Скроллинг активируется ТОЛЬКО при долгом удержании (elapsedTime >= pressDelay)
+			// Быстрые свайпы всегда обрабатываются как игра
+			if (elapsedTime >= pressDelay && moved > CANVAS_PRESS_MOVE_TOLERANCE) {
+				// Долгое удержание + движение - активируем drag scrolling
+				if (!canvasDragScrolling) {
+					clearCanvasPressTimer()
+					activateCanvasDragScrolling()
+				}
+
+				// Если drag scrolling активирован, обрабатываем скроллинг
+				if (canvasDragScrolling && momentumScrollRef.value) {
 					e.preventDefault()
 					e.stopPropagation()
 
-					// Обновляем выделение при движении
-					const pos = getPositionFromEvent(e)
-					if (pos) {
-						// Highlight tile under pointer (only if it has moves > 0)
-						const cube = gameStore.grid[pos.r]?.[pos.c]
-						if (cube && cube.moves > 0) {
-							renderer?.setSelectedPosition(pos.r, pos.c)
+					const deltaY = dragStartClient.y - touch.clientY
+					momentumScrollRef.value.drag(deltaY, performance.now())
+					// Обновляем dragStartClient для следующего движения
+					dragStartClient.y = touch.clientY
+					return
+				}
+			}
+
+			// Если движение быстрое (до истечения pressDelay) - обрабатываем как игру
+			if (isFastSwipe && moved > threshold) {
+				isDragging = true
+
+				// Предотвращаем скролл при движении по canvas
+				e.preventDefault()
+				e.stopPropagation()
+
+				// Обновляем выделение при движении
+				const pos = getPositionFromEvent(e)
+				if (pos) {
+					// Highlight tile under pointer (only if it has moves > 0)
+					const cube = gameStore.grid[pos.r]?.[pos.c]
+					if (cube && cube.moves > 0) {
+						renderer?.setSelectedPosition(pos.r, pos.c)
+					} else {
+						// Highlight starting tile if it has moves > 0
+						const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
+						if (startCube && startCube.moves > 0) {
+							renderer?.setSelectedPosition(dragStart.r, dragStart.c)
 						} else {
-							// Highlight starting tile if it has moves > 0
-							const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
-							if (startCube && startCube.moves > 0) {
-								renderer?.setSelectedPosition(dragStart.r, dragStart.c)
-							} else {
-								renderer?.setSelectedPosition(null, null)
-							}
+							renderer?.setSelectedPosition(null, null)
 						}
-					}
-				} else {
-					// Долгое удержание + движение - активируем drag scrolling
-					if (!canvasDragScrolling && momentumScrollRef.value) {
-						canvasDragScrolling = true
-						momentumScrollRef.value.updateBounds()
-						momentumScrollRef.value.startDrag(performance.now())
-					}
-
-					if (canvasDragScrolling && momentumScrollRef.value) {
-						// Предотвращаем скролл и обрабатываем drag scrolling
-						e.preventDefault()
-						e.stopPropagation()
-
-						const deltaY = dragStartClient.y - touch.clientY
-						momentumScrollRef.value.drag(deltaY, performance.now())
-						// Обновляем dragStartClient для следующего движения
-						dragStartClient.y = touch.clientY
 					}
 				}
 			}
+			// Если движение недостаточное и время еще не истекло - не блокируем события
+			// Позволяем MomentumScroll обработать их, если нужно
 		}
 	}
 	pixiCanvasForHandlers.addEventListener('touchmove', touchMoveHandler, {
@@ -2356,8 +2436,7 @@ async function restart(): Promise<void> {
 					rgba(220, 38, 38, 0.6) 100%
 				);
 				border-color: rgba(239, 68, 68, 0.5);
-				box-shadow:
-					0 4px 16px rgba(239, 68, 68, 0.4),
+				box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4),
 					0 0 0 1px rgba(255, 255, 255, 0.1),
 					inset 0 1px 2px rgba(255, 255, 255, 0.2);
 				animation: danger-glow 1.5s ease-in-out infinite;
@@ -2405,10 +2484,8 @@ async function restart(): Promise<void> {
 		min-height: 0; // Важно для правильной работы flex
 		backdrop-filter: blur(24px);
 		-webkit-backdrop-filter: blur(24px);
-		box-shadow:
-			inset 0 4px 32px rgba(0, 0, 0, 0.5),
-			0 8px 32px rgba(0, 0, 0, 0.4),
-			0 0 0 1px rgba(255, 255, 255, 0.1);
+		box-shadow: inset 0 4px 32px rgba(0, 0, 0, 0.5),
+			0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
 		border: 2px solid rgba(255, 255, 255, 0.25);
 		background: rgba(255, 255, 255, 0.05);
 		border-radius: 20px;
@@ -2530,9 +2607,7 @@ async function restart(): Promise<void> {
 		right: 0;
 		width: 100%;
 		border-radius: 0 0 5px 5px;
-		transition:
-			height 0.25s ease,
-			background-color 0.2s ease;
+		transition: height 0.25s ease, background-color 0.2s ease;
 		// Улучшаем видимость заполнения на мобильных устройствах
 		box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.3);
 		visibility: visible !important;
@@ -2595,8 +2670,7 @@ async function restart(): Promise<void> {
 		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 		touch-action: manipulation;
 		flex-shrink: 0;
-		box-shadow:
-			0 4px 12px rgba(0, 0, 0, 0.25),
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25),
 			0 0 0 1px rgba(255, 255, 255, 0.1),
 			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		padding: 0;
@@ -2608,8 +2682,7 @@ async function restart(): Promise<void> {
 				rgba(255, 255, 255, 0.2) 100%
 			);
 			transform: scale(1.1);
-			box-shadow:
-				0 6px 20px rgba(0, 0, 0, 0.35),
+			box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35),
 				0 0 0 1px rgba(255, 255, 255, 0.15),
 				inset 0 1px 3px rgba(255, 255, 255, 0.3);
 			border-color: rgba(255, 255, 255, 0.5);
@@ -2617,8 +2690,7 @@ async function restart(): Promise<void> {
 
 		&:active {
 			transform: scale(0.95);
-			box-shadow:
-				0 2px 8px rgba(0, 0, 0, 0.25),
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25),
 				inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		}
 
@@ -2678,8 +2750,7 @@ async function restart(): Promise<void> {
 		-webkit-backdrop-filter: blur(16px);
 		border-radius: 14px;
 		border: 1px solid rgba(255, 255, 255, 0.3);
-		box-shadow:
-			0 4px 16px rgba(0, 0, 0, 0.35),
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35),
 			0 0 0 1px rgba(255, 255, 255, 0.1),
 			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
@@ -2781,10 +2852,8 @@ async function restart(): Promise<void> {
 		text-align: center;
 		color: white;
 		border: 2px solid rgba(255, 255, 255, 0.2);
-		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.15),
-			0 0 0 1px rgba(139, 92, 246, 0.25),
-			0 24px 48px rgba(0, 0, 0, 0.6),
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15),
+			0 0 0 1px rgba(139, 92, 246, 0.25), 0 24px 48px rgba(0, 0, 0, 0.6),
 			0 0 80px rgba(139, 92, 246, 0.2);
 		animation: game-overlay-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
 	}
@@ -2907,18 +2976,15 @@ async function restart(): Promise<void> {
 	font-size: 1.2rem;
 	font-weight: 700;
 	border-radius: 18px;
-	box-shadow:
-		0 4px 16px rgba(139, 92, 246, 0.4),
+	box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4),
 		inset 0 1px 0 rgba(255, 255, 255, 0.2);
 	color: #fff;
 
 	&:hover {
 		background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 50%, #7c3aed 100%);
 		border-color: rgba(196, 181, 253, 0.6);
-		box-shadow:
-			0 6px 24px rgba(139, 92, 246, 0.5),
-			0 0 32px rgba(139, 92, 246, 0.25),
-			inset 0 1px 0 rgba(255, 255, 255, 0.25);
+		box-shadow: 0 6px 24px rgba(139, 92, 246, 0.5),
+			0 0 32px rgba(139, 92, 246, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 		transform: translateY(-2px);
 	}
 
@@ -2995,14 +3061,12 @@ async function restart(): Promise<void> {
 @keyframes danger-glow {
 	0%,
 	100% {
-		box-shadow:
-			0 4px 16px rgba(239, 68, 68, 0.4),
+		box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4),
 			0 0 0 1px rgba(255, 255, 255, 0.1),
 			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 	}
 	50% {
-		box-shadow:
-			0 6px 24px rgba(239, 68, 68, 0.6),
+		box-shadow: 0 6px 24px rgba(239, 68, 68, 0.6),
 			0 0 0 1px rgba(255, 255, 255, 0.15),
 			inset 0 1px 3px rgba(255, 255, 255, 0.3);
 	}

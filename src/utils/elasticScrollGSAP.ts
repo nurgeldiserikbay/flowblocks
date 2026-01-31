@@ -97,22 +97,28 @@ export class ElasticScroll {
 		this.bounds.minY = minY
 		this.bounds.maxY = Math.max(minY, maxY)
 
-		if (!this.isDragging) {
+		// Clamp только когда НЕ drag и НЕ momentum (нет активной скорости)
+		if (!this.isDragging && Math.abs(this.v) < this.opts.stopVelocity) {
 			// Зажимаем позицию только если она действительно выходит за границы
 			const clampedY = this.clamp(this.rawY)
 			if (clampedY !== this.rawY) {
 				this.rawY = clampedY
 			}
-			// Не сбрасываем скорость, если скролл еще анимируется (есть скорость)
-			// Это позволяет momentum продолжать работать после обновления границ
-			if (Math.abs(this.v) < this.opts.stopVelocity) {
-				this.v = 0
-			}
+			// Сбрасываем скорость только если она уже маленькая
+			this.v = 0
 		}
 
+		// Обновляем targetY, но НЕ сбрасываем y (smoothing) если пользователь активно взаимодействует
+		// Это предотвращает визуальное "возвращение" скролла назад
 		this.targetY = this.renderY(this.rawY)
-		this.y = this.targetY
-		this.applyTransform(this.y)
+		
+		// Сбрасываем smoothing только если не drag и нет активной скорости
+		// Во время drag/momentum позволяем smoothing работать естественно
+		if (!this.isDragging && Math.abs(this.v) < this.opts.stopVelocity) {
+			this.y = this.targetY
+			this.applyTransform(this.y)
+		}
+		
 		this.emitState()
 	}
 
