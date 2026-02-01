@@ -30,6 +30,7 @@ type CubeContainer = {
 	sprite: Sprite
 	text: Text | null
 	highlight: Graphics | null
+	color: number // Текущий цвет куба для отслеживания изменений
 }
 
 export class GameRenderer {
@@ -355,7 +356,7 @@ export class GameRenderer {
 			})
 		}
 
-		this.cubeContainers.set(cube.id, { container, sprite, text, highlight })
+		this.cubeContainers.set(cube.id, { container, sprite, text, highlight, color: cube.color })
 		this.cubePositions.set(cube.id, { r, c })
 
 		// Update highlight if this position is selected
@@ -1448,6 +1449,20 @@ export class GameRenderer {
 							cubeContainer.container.x = c * this.tileSize
 							cubeContainer.container.y = this.calculateYFromBottom(r)
 						}
+						
+						// КРИТИЧНО: Проверяем и обновляем цвет/текстуру, если цвет изменился
+						// Это исправляет баг, когда существующие плитки меняют цвет при спауне новых
+						if (cubeContainer.color !== cube.color) {
+							const newTexture = getBlockTexture(cube.color)
+							if (newTexture && cubeContainer.sprite) {
+								// Обновляем текстуру только если она действительно изменилась
+								if (cubeContainer.sprite.texture !== newTexture) {
+									cubeContainer.sprite.texture = newTexture
+								}
+								// Обновляем сохраненный цвет
+								cubeContainer.color = cube.color
+							}
+						}
 					}
 					// Don't create missing cubes here - they should be created by renderGrid or spawn events
 				}
@@ -1455,10 +1470,28 @@ export class GameRenderer {
 		}
 
 		// Remove cubes that are no longer in grid (but only if they weren't already removed by animateRemove)
+		// КРИТИЧНО: Проверяем дважды, что куб действительно отсутствует в grid перед удалением
+		// Это защищает от случайного удаления существующих спрайтов, особенно в первой строке
 		const cubesToRemove: number[] = []
 		for (const cubeId of this.cubeContainers.keys()) {
 			if (!cubesInGrid.has(cubeId)) {
-				cubesToRemove.push(cubeId)
+				// Дополнительная проверка: убеждаемся, что куб действительно отсутствует в grid
+				let foundInGrid = false
+				for (let r = 0; r < grid.length; r++) {
+					for (let c = 0; c < WIDTH; c++) {
+						const cube = grid[r]?.[c]
+						if (cube && cube.id === cubeId) {
+							foundInGrid = true
+							break
+						}
+					}
+					if (foundInGrid) break
+				}
+				
+				// Удаляем только если куб действительно отсутствует в grid
+				if (!foundInGrid) {
+					cubesToRemove.push(cubeId)
+				}
 			}
 		}
 
