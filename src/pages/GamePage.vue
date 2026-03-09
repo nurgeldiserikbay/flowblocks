@@ -33,7 +33,13 @@
 			</div>
 		</template>
 
-		<div class="game-page" :class="{ 'game-page--danger': isDangerState }">
+		<div
+			class="game-page"
+			:class="{
+				'game-page--danger': isDangerState,
+				'game-page--android': isAndroidPlatform,
+			}"
+		>
 			<div
 				ref="playAreaRef"
 				class="game-page__play-area"
@@ -157,6 +163,7 @@ import admob from '@/utils/admob'
 const router = useRouter()
 const route = useRoute()
 const gameStore = useGameStore()
+const isAndroidPlatform = Capacitor.getPlatform() === 'android'
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
 const momentumScrollRef =
@@ -2555,6 +2562,19 @@ async function restart(): Promise<void> {
 		gap: 0.5rem;
 	}
 
+	&--android {
+		gap: 0.125rem;
+
+		.game-page__bottom-section {
+			// На Android уменьшаем резерв под баннер до компактного фиксированного значения.
+			gap: 0;
+			// Небольшой зазор между игровой областью и рекламным блоком.
+			padding-top: 0.1rem;
+			padding-bottom: max(0.05rem, env(safe-area-inset-bottom, 0px));
+			min-height: calc(8px + max(0.05rem, env(safe-area-inset-bottom, 0px)));
+		}
+	}
+
 	&__play-area {
 		display: flex;
 		align-items: stretch;
@@ -2573,16 +2593,22 @@ async function restart(): Promise<void> {
 		flex-shrink: 0;
 		padding: 0.5rem 0 1rem;
 		padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
-		// Всегда резервируем место под нижний баннер, даже если реклама не загрузилась.
-		// 50px — стандартная высота BannerAdSize.BANNER.
-		min-height: calc(50px + 0.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px)));
+		// Резервируем место под нижний баннер, но на мобильных уменьшаем запас,
+		// чтобы не съедать игровую область.
+		min-height: calc(44px + 0.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px)));
 
 		@media (max-width: 640px) {
 			gap: 0.4rem;
 			padding: 0.4rem 0 1rem;
 			padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
 			min-height: calc(
-				50px + 0.4rem + max(0.4rem, env(safe-area-inset-bottom, 0px))
+				40px + 0.4rem + max(0.4rem, env(safe-area-inset-bottom, 0px))
+			);
+		}
+
+		@media (max-width: 480px) {
+			min-height: calc(
+				36px + 0.35rem + max(0.35rem, env(safe-area-inset-bottom, 0px))
 			);
 		}
 	}
