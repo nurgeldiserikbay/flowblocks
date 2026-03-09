@@ -4,7 +4,7 @@
 
 import type { Cube } from './types'
 import { WIDTH, setCube } from './grid'
-import { getNumColorsForLevel } from '@/shared/stores/gameStore'
+import { getNumColorsForLevel, rollMovesForLevel } from '@/shared/stores/gameStore'
 
 export function createInitialGrid(height: number, nextId: number = 1, level: number = 1): {
 	grid: (Cube | null)[][]
@@ -21,7 +21,7 @@ export function createInitialGrid(height: number, nextId: number = 1, level: num
 		for (let c = 0; c < WIDTH; c++) {
 			// Optimized: use bitwise OR for floor, faster than Math.floor
 			const color = (Math.random() * numColors) | 0
-			const moves = ((Math.random() * 9) | 0) + 1 // 1-9
+			const moves = rollMovesForLevel(level)
 			const cube: Cube = {
 				id: nextId++,
 				color,

@@ -3,9 +3,9 @@ import { ref } from 'vue'
 import type { Cube } from '@/game/logic/types'
 import { WIDTH } from '@/game/logic/grid'
 const BASE_HEIGHT = 30
-const BASE_WAVE_DURATION = 30
-const MIN_WAVE_DURATION = 14 // Увеличено с 10 до 14 для более длительной игры
-const WAVE_DURATION_DECREASE = 0.6 // Уменьшено с 1.5 до 0.6 для более плавного снижения
+const BASE_WAVE_DURATION = 24
+const MIN_WAVE_DURATION = 10
+const WAVE_DURATION_DECREASE = 0.9
 const NUM_COLORS = 8
 
 /** Длительность волны в секундах: с ростом уровня уменьшается (мин. MIN_WAVE_DURATION) */
@@ -16,10 +16,9 @@ export function getWaveDuration(level: number): number {
 	)
 }
 
-/** Строк спавна за волну: с ростом уровня растёт (макс. 10) - более плавный рост */
+/** Строк спавна за волну: растут быстрее, чтобы держать сессию в 2-3 минуты */
 export function getSpawnRowsForLevel(level: number): number {
-	// Изменено с level/2 на level/3 для более постепенного увеличения сложности
-	return Math.min(10, 3 + Math.floor(level / 3))
+	return Math.min(11, 4 + Math.floor(level / 2))
 }
 
 /** Высота сосуда: каждые 5 уровней +4 ряда для бесконечной игры */
@@ -29,14 +28,36 @@ export function getHeightForLevel(level: number): number {
 
 /** Количество цветов: растет с уровнем от 5 до 8 */
 export function getNumColorsForLevel(level: number): number {
-	// Level 1-12: 5 colors
-	// Level 13-25: 6 colors
-	// Level 26-37: 7 colors
-	// Level 38-50: 8 colors
-	if (level <= 12) return 5
-	if (level <= 25) return 6
-	if (level <= 37) return 7
+	if (level <= 6) return 5
+	if (level <= 14) return 6
+	if (level <= 24) return 7
 	return 8
+}
+
+/**
+ * Диапазон ходов у новых плиток:
+ * в начале выше вариативность, дальше ниже среднее значение для роста давления.
+ */
+export function getMovesRangeForLevel(level: number): {
+	min: number
+	max: number
+	highMovesChance: number
+} {
+	if (level <= 3) return { min: 3, max: 8, highMovesChance: 0.08 }
+	if (level <= 8) return { min: 2, max: 7, highMovesChance: 0.05 }
+	if (level <= 15) return { min: 2, max: 6, highMovesChance: 0.03 }
+	return { min: 1, max: 5, highMovesChance: 0.02 }
+}
+
+export function rollMovesForLevel(
+	level: number,
+	rng: () => number = Math.random
+): number {
+	const { min, max, highMovesChance } = getMovesRangeForLevel(level)
+	if (rng() < highMovesChance) {
+		return 7 + Math.floor(rng() * 3) // 7..9 редкий "подарок" для вариативности
+	}
+	return min + Math.floor(rng() * (max - min + 1))
 }
 
 export const useGameStore = defineStore('game', () => {
@@ -263,5 +284,7 @@ export const useGameStore = defineStore('game', () => {
 		getSpawnRowsForLevel,
 		getHeightForLevel,
 		getNumColorsForLevel,
+		getMovesRangeForLevel,
+		rollMovesForLevel,
 	}
 })

@@ -33,6 +33,8 @@ type CubeContainer = {
 	color: number // Текущий цвет куба для отслеживания изменений
 }
 
+type CubeSpriteContainer = Container & { __cubeId?: number }
+
 export class GameRenderer {
 	private canvas: HTMLCanvasElement
 	private app: Application | null = null
@@ -294,6 +296,46 @@ export class GameRenderer {
 		return { x: canvasX, y: canvasY }
 	}
 
+	/**
+	 * Position popup in the visual center of the phone viewport.
+	 */
+	private positionPopupAtViewportCenter(
+		popup: Container,
+		width: number,
+		height: number
+	): void {
+		const screenCenter = this.getScreenCenterInCanvasCoordinates()
+		popup.x = screenCenter.x - width / 2
+		popup.y = screenCenter.y - height / 2
+	}
+
+	/**
+	 * Keep popup pinned to viewport center even when container scrolls.
+	 */
+	private pinPopupToViewportCenter(
+		popup: Container,
+		width: number,
+		height: number
+	): () => void {
+		if (!this.app) {
+			this.positionPopupAtViewportCenter(popup, width, height)
+			return () => {}
+		}
+
+		const updatePosition = () => {
+			this.positionPopupAtViewportCenter(popup, width, height)
+		}
+
+		updatePosition()
+		this.app.ticker.add(updatePosition)
+
+		return () => {
+			if (this.app) {
+				this.app.ticker.remove(updatePosition)
+			}
+		}
+	}
+
 	private createCubeSprite(
 		cube: Cube,
 		r: number,
@@ -340,6 +382,7 @@ export class GameRenderer {
 
 		// Create container for cube
 		const container = new Container()
+		;(container as CubeSpriteContainer).__cubeId = cube.id
 		container.x = c * this.tileSize
 		container.y = this.calculateYFromBottom(r)
 
@@ -440,6 +483,43 @@ export class GameRenderer {
 		}
 
 		return { container, sprite, text, highlight, color: cube.color }
+	}
+
+	/**
+	 * Удаляет "осиротевшие" куб-спрайты из gameContainer.
+	 * Это защита от визуальных дублей, когда контейнер остался в сцене,
+	 * но уже отсутствует в cubeContainers/cubePositions.
+	 */
+	private cleanupOrphanCubeSprites(): void {
+		if (!this.gameContainer) return
+
+		const mappedContainers = new Set<Container>()
+		for (const cubeContainer of this.cubeContainers.values()) {
+			mappedContainers.add(cubeContainer.container)
+		}
+
+		const orphanChildren: CubeSpriteContainer[] = []
+		for (const child of this.gameContainer.children) {
+			const cubeChild = child as CubeSpriteContainer
+			const cubeId = cubeChild.__cubeId
+			if (cubeId === undefined) continue
+
+			const mapped = this.cubeContainers.get(cubeId)
+			const isMappedToThisContainer = mapped?.container === child
+			if (!isMappedToThisContainer || !mappedContainers.has(child as Container)) {
+				orphanChildren.push(cubeChild)
+			}
+		}
+
+		for (const orphan of orphanChildren) {
+			gsap.killTweensOf(orphan)
+			if (orphan.parent) {
+				orphan.parent.removeChild(orphan)
+			}
+			if (orphan && (orphan as Container).scale) {
+				orphan.destroy({ children: true })
+			}
+		}
 	}
 
 	updateCubeMoves(cubeId: number, moves: number): void {
@@ -563,6 +643,7 @@ export class GameRenderer {
 
 		await Promise.all([
 			new Promise<void>((resolve) => {
+				gsap.killTweensOf(containerA.container)
 				gsap.to(containerA.container, {
 					x: posBX,
 					y: posBY,
@@ -572,6 +653,7 @@ export class GameRenderer {
 				})
 			}),
 			new Promise<void>((resolve) => {
+				gsap.killTweensOf(containerB.container)
 				gsap.to(containerB.container, {
 					x: posAX,
 					y: posAY,
@@ -600,6 +682,7 @@ export class GameRenderer {
 		const targetY = this.calculateYFromBottom(to.r)
 
 		await new Promise<void>((resolve) => {
+			gsap.killTweensOf(cubeContainer.container)
 			gsap.to(cubeContainer.container, {
 				x: targetX,
 				y: targetY,
@@ -618,34 +701,35 @@ export class GameRenderer {
 			color: number
 		}>
 	): Promise<void> {
-		const animations = items.map((item) => {
-			// Use ID if available (more reliable), otherwise fall back to position lookup
+		// Дедупликация по cubeId: для каждого куба анимируем только конечную позицию.
+		// Иначе возможны конкурирующие tweens одного контейнера и визуальные артефакты.
+		const finalFallByCube = new Map<
+			number,
+			{ to: { r: number; c: number }; from: { r: number; c: number } }
+		>()
+
+		for (const item of items) {
 			let cubeId: number | null = null
 			if (item.id !== undefined) {
 				cubeId = item.id
 			} else {
-				// Fallback: try to find cube by position (for backward compatibility)
 				cubeId = this.findCubeIdAt(item.from.r, item.from.c)
 			}
+			if (cubeId === null) continue
+			finalFallByCube.set(cubeId, { to: item.to, from: item.from })
+		}
 
-			if (cubeId === null) {
-				// Cube not found - skip animation (may have been removed or already moved)
-				return Promise.resolve()
-			}
-
+		const animations = Array.from(finalFallByCube.entries()).map(([cubeId, item]) => {
 			const cubeContainer = this.cubeContainers.get(cubeId)
-			if (!cubeContainer) {
-				// Container not found - skip animation
-				return Promise.resolve()
-			}
+			if (!cubeContainer) return Promise.resolve()
 
-			// Update position immediately to prevent duplicate lookups
 			this.cubePositions.set(cubeId, { r: item.to.r, c: item.to.c })
 
 			const targetX = item.to.c * this.tileSize
 			const targetY = this.calculateYFromBottom(item.to.r)
 
 			return new Promise<void>((resolve) => {
+				gsap.killTweensOf(cubeContainer.container)
 				gsap.to(cubeContainer.container, {
 					x: targetX,
 					y: targetY,
@@ -879,6 +963,14 @@ export class GameRenderer {
 		for (const cell of cells) {
 			let cubeContainer = this.cubeContainers.get(cell.id)
 
+			// Если есть "битый" контейнер (без parent), пересоздаем его.
+			// Иначе спавн может пройти, но плитка останется невидимой.
+			if (cubeContainer && !cubeContainer.container.parent) {
+				this.cubeContainers.delete(cell.id)
+				this.cubePositions.delete(cell.id)
+				cubeContainer = undefined
+			}
+
 			// Если спрайт еще не создан, создаем его сейчас с правильными начальными состояниями
 			if (!cubeContainer) {
 				// Создаем временный куб для создания спрайта
@@ -946,10 +1038,9 @@ export class GameRenderer {
 				return Promise.resolve()
 			}
 
-			const pos = this.cubePositions.get(cell.id)
-			if (!pos) return Promise.resolve()
-
-			const targetRow = pos.r
+			const targetRow = cell.toRow !== undefined ? cell.toRow : cell.r
+			// Гарантируем синхронизацию позиции в карте даже если она была потеряна.
+			this.cubePositions.set(cell.id, { r: targetRow, c: cell.c })
 			const targetY = this.calculateYFromBottom(targetRow)
 
 			if (cell.fromRow !== undefined && cell.fromRow < 0) {
@@ -967,7 +1058,12 @@ export class GameRenderer {
 
 				container.y = startY
 				container.visible = true
+				container.alpha = 1
+				if (container.scale) {
+					container.scale.set(1)
+				}
 				cubeContainer.sprite.visible = true
+				cubeContainer.sprite.alpha = 1
 
 				return new Promise<void>((resolve) => {
 					gsap.to(container, {
@@ -1025,6 +1121,35 @@ export class GameRenderer {
 		await this.waitForNextFrame()
 
 		await Promise.all(animations)
+
+		// Fallback: после анимаций гарантируем, что все заспавненные кубы реально существуют
+		// и находятся в полностью видимом состоянии.
+		for (const cell of cells) {
+			let cubeContainer = this.cubeContainers.get(cell.id)
+			const targetRow = cell.toRow !== undefined ? cell.toRow : cell.r
+			const targetY = this.calculateYFromBottom(targetRow)
+
+			if (!cubeContainer) {
+				const tempCube: Cube = {
+					id: cell.id,
+					color: cell.color,
+					moves: 0,
+				}
+				cubeContainer = this.createCubeSprite(tempCube, targetRow, cell.c, 1, 1)
+			}
+
+			this.cubePositions.set(cell.id, { r: targetRow, c: cell.c })
+			const container = cubeContainer.container
+			container.x = cell.c * this.tileSize
+			container.y = targetY
+			container.visible = true
+			container.alpha = 1
+			if (container.scale) {
+				container.scale.set(1)
+			}
+			cubeContainer.sprite.visible = true
+			cubeContainer.sprite.alpha = 1
+		}
 
 		// КРИТИЧНО: Ждем дополнительный кадр после завершения всех анимаций
 		// Это гарантирует, что браузер успел отрендерить финальное состояние всех спрайтов
@@ -1221,28 +1346,20 @@ export class GameRenderer {
 		const popup = new Container()
 
 		// Получаем центр экрана в координатах канваса
-		const screenCenter = this.getScreenCenterInCanvasCoordinates()
-
 		// Создаем тексты для расчета размеров
 		// Адаптивный размер текста: не слишком большой, но видимый
-		const baseFontSize = Math.min(
-			Math.max(24, window.innerWidth * 0.06),
-			Math.max(24, this.tileSize * 1.2)
-		)
-		const bonusFontSize = Math.min(
-			Math.max(18, window.innerWidth * 0.045),
-			Math.max(18, this.tileSize * 0.9)
-		)
+		const baseFontSize = Math.min(Math.max(20, window.innerWidth * 0.05), 32)
+		const bonusFontSize = Math.min(Math.max(16, window.innerWidth * 0.038), 24)
 
 		const mainText = new Text({
-			text: `Great!`,
+			text: `Block Cleared!`,
 			style: new TextStyle({
 				fontFamily: 'Inter, Arial',
 				fontSize: baseFontSize,
-				fill: 0xc4b5fd, // Purple accent color from game theme
+				fill: 0xf5e8ff, // Brighter text for stronger contrast
 				align: 'center',
 				fontWeight: 'bold',
-				letterSpacing: -0.3,
+				letterSpacing: 0.2,
 			}),
 		})
 		mainText.resolution = window.devicePixelRatio || 1
@@ -1253,7 +1370,7 @@ export class GameRenderer {
 			style: new TextStyle({
 				fontFamily: 'Inter, Arial',
 				fontSize: bonusFontSize,
-				fill: 0x4ade80, // Green for bonus
+				fill: 0x86efac, // Softer green to match popup palette
 				align: 'center',
 				fontWeight: 'bold',
 			}),
@@ -1282,29 +1399,31 @@ export class GameRenderer {
 		const bgWidth = Math.max(maxTextWidth + padding * 2, 140)
 		const bgHeight = Math.max(totalTextHeight + padding * 2, 60)
 
-		// Позиционируем popup: центр экрана по X, сдвиг вверх на половину высоты popup
-		// Центрируем по горизонтали
-		// Сдвигаем вверх на половину высоты popup от центра
-		popup.x = screenCenter.x - bgWidth / 2
-		popup.y = screenCenter.y - bgHeight / 2
-		bg.roundRect(0, 0, bgWidth, bgHeight, 12)
-		bg.fill({ color: 0x1e1f3a, alpha: 0.95 })
-		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.2 })
+		// Центрируем в viewport и дальше пиним к центру во время показа
+		const unpinPopup = this.pinPopupToViewportCenter(popup, bgWidth, bgHeight)
+		bg.roundRect(0, 0, bgWidth, bgHeight, 14)
+		bg.fill({ color: 0x14172e, alpha: 0.95 })
+		bg.stroke({ color: 0xb388ff, width: 2.5, alpha: 0.45 })
 		popup.addChild(bg)
 
+		const innerGlow = new Graphics()
+		innerGlow.roundRect(4, 4, bgWidth - 8, bgHeight - 8, 10)
+		innerGlow.stroke({ color: 0xffffff, width: 1, alpha: 0.2 })
+		popup.addChild(innerGlow)
+
 		// Add blur filter to background
-		const blurFilter = new BlurFilter({ strength: 8 })
+		const blurFilter = new BlurFilter({ strength: 6 })
 		bg.filters = [blurFilter]
 
 		// Позиционируем тексты относительно popup (учитывая размеры)
 		mainText.x = bgWidth / 2
 		mainText.y = padding + mainTextHeight / 2
-		mainText.style.stroke = { color: 0x8b5cf6, width: 2, alpha: 0.5 }
+		mainText.style.stroke = { color: 0x8b5cf6, width: 3, alpha: 0.8 }
 		popup.addChild(mainText)
 
 		bonusText.x = bgWidth / 2
 		bonusText.y = padding + mainTextHeight + 10 + bonusTextHeight / 2
-		bonusText.style.stroke = { color: 0x22c55e, width: 1.5, alpha: 0.6 }
+		bonusText.style.stroke = { color: 0x16a34a, width: 2, alpha: 0.7 }
 		popup.addChild(bonusText)
 
 		popup.alpha = 0
@@ -1336,11 +1455,11 @@ export class GameRenderer {
 			}
 			gsap.to(popup, {
 				alpha: 0,
-				y: popup.y - 30,
 				duration: 1.0,
 				delay: 1.5,
 				ease: 'power2.in',
 				onComplete: () => {
+					unpinPopup()
 					// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
 					gsap.killTweensOf(popup)
 					if (popup.scale) {
@@ -1365,28 +1484,20 @@ export class GameRenderer {
 		const popup = new Container()
 
 		// Получаем центр экрана в координатах канваса
-		const screenCenter = this.getScreenCenterInCanvasCoordinates()
-
 		// Создаем тексты для расчета размеров
 		// Адаптивный размер текста: не слишком большой, но видимый
-		const baseFontSize = Math.min(
-			Math.max(24, window.innerWidth * 0.06),
-			Math.max(24, this.tileSize * 1.2)
-		)
-		const bonusFontSize = Math.min(
-			Math.max(18, window.innerWidth * 0.045),
-			Math.max(18, this.tileSize * 0.9)
-		)
+		const baseFontSize = Math.min(Math.max(20, window.innerWidth * 0.05), 32)
+		const bonusFontSize = Math.min(Math.max(16, window.innerWidth * 0.038), 24)
 
 		const noMovesText = new Text({
-			text: 'No Moves',
+			text: 'No Moves Left',
 			style: new TextStyle({
 				fontFamily: 'Inter, Arial',
 				fontSize: baseFontSize,
-				fill: 0xf8f4ff, // Light purple/white from game theme
+				fill: 0xfff1e8, // Warm high-contrast tone for warning state
 				align: 'center',
 				fontWeight: 'bold',
-				letterSpacing: -0.3,
+				letterSpacing: 0.15,
 			}),
 		})
 		noMovesText.resolution = window.devicePixelRatio || 1
@@ -1397,7 +1508,7 @@ export class GameRenderer {
 			style: new TextStyle({
 				fontFamily: 'Inter, Arial',
 				fontSize: bonusFontSize,
-				fill: 0x4ade80, // Green for bonus
+				fill: 0xa7f3d0, // Brighter mint for bonus
 				align: 'center',
 				fontWeight: 'bold',
 			}),
@@ -1426,29 +1537,31 @@ export class GameRenderer {
 		const bgWidth = Math.max(maxTextWidth + padding * 2, 160)
 		const bgHeight = Math.max(totalTextHeight + padding * 2, 70)
 
-		// Позиционируем popup: центр экрана по X, сдвиг вверх на половину высоты popup
-		// Центрируем по горизонтали
-		// Сдвигаем вверх на половину высоты popup от центра
-		popup.x = screenCenter.x - bgWidth / 2
-		popup.y = screenCenter.y - bgHeight / 2
-		bg.roundRect(0, 0, bgWidth, bgHeight, 12)
-		bg.fill({ color: 0x1e1f3a, alpha: 0.95 })
-		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.2 })
+		// Центрируем в viewport и дальше пиним к центру во время показа
+		const unpinPopup = this.pinPopupToViewportCenter(popup, bgWidth, bgHeight)
+		bg.roundRect(0, 0, bgWidth, bgHeight, 14)
+		bg.fill({ color: 0x2a1721, alpha: 0.94 })
+		bg.stroke({ color: 0xff9f6e, width: 2.5, alpha: 0.55 })
 		popup.addChild(bg)
 
+		const innerGlow = new Graphics()
+		innerGlow.roundRect(4, 4, bgWidth - 8, bgHeight - 8, 10)
+		innerGlow.stroke({ color: 0xffffff, width: 1, alpha: 0.2 })
+		popup.addChild(innerGlow)
+
 		// Add blur filter to background
-		const blurFilter = new BlurFilter({ strength: 8 })
+		const blurFilter = new BlurFilter({ strength: 6 })
 		bg.filters = [blurFilter]
 
 		// Позиционируем тексты относительно popup (учитывая размеры)
 		noMovesText.x = bgWidth / 2
 		noMovesText.y = padding + noMovesTextHeight / 2
-		noMovesText.style.stroke = { color: 0xc4b5fd, width: 2, alpha: 0.5 }
+		noMovesText.style.stroke = { color: 0xff7a59, width: 3, alpha: 0.85 }
 		popup.addChild(noMovesText)
 
 		bonusText.x = bgWidth / 2
 		bonusText.y = padding + noMovesTextHeight + 10 + bonusTextHeight / 2
-		bonusText.style.stroke = { color: 0x22c55e, width: 1.5, alpha: 0.6 }
+		bonusText.style.stroke = { color: 0x059669, width: 2, alpha: 0.7 }
 		popup.addChild(bonusText)
 
 		popup.alpha = 0
@@ -1480,11 +1593,11 @@ export class GameRenderer {
 			}
 			gsap.to(popup, {
 				alpha: 0,
-				y: popup.y - 30,
 				duration: 1.0,
 				delay: 1.4,
 				ease: 'power2.in',
 				onComplete: () => {
+					unpinPopup()
 					// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
 					gsap.killTweensOf(popup)
 					if (popup.scale) {
@@ -1521,39 +1634,37 @@ export class GameRenderer {
 				const cube = grid[r]?.[c]
 				if (cube) {
 					cubesInGrid.add(cube.id)
-					// Update position if cube exists
-					const cubeContainer = this.cubeContainers.get(cube.id)
-					if (cubeContainer) {
-						const pos = this.cubePositions.get(cube.id)
-						if (forceUpdate || !pos || pos.r !== r || pos.c !== c) {
-							// Position changed - update it (but don't animate, just set)
-							this.cubePositions.set(cube.id, { r, c })
-							cubeContainer.container.x = c * this.tileSize
-							cubeContainer.container.y = this.calculateYFromBottom(r)
-						}
-
-						// КРИТИЧНО: Проверяем и обновляем цвет/текстуру, если цвет изменился
-						// Это исправляет баг, когда существующие плитки меняют цвет при спауне новых
-						// ВАЖНО: Это должно происходить только если цвет действительно изменился в grid
-						// Если цвет изменился неожиданно, это может указывать на проблему в логике игры
-						if (cubeContainer.color !== cube.color) {
-							console.warn(
-								`[GameRenderer] syncGridPositions: Color mismatch detected for cube ${cube.id} at (${r}, ${c}): ` +
-									`renderer color=${cubeContainer.color}, grid color=${cube.color}. ` +
-									`This may indicate a bug in game logic.`
-							)
-							const newTexture = getBlockTexture(cube.color)
-							if (newTexture && cubeContainer.sprite) {
-								// Обновляем текстуру только если она действительно изменилась
-								if (cubeContainer.sprite.texture !== newTexture) {
-									cubeContainer.sprite.texture = newTexture
-								}
-								// Обновляем сохраненный цвет
-								cubeContainer.color = cube.color
-							}
-						}
+					let cubeContainer = this.cubeContainers.get(cube.id)
+					if (!cubeContainer) {
+						cubeContainer = this.createCubeSprite(cube, r, c, 1, 1)
 					}
-					// Don't create missing cubes here - they should be created by renderGrid or spawn events
+
+					// Детерминированно приводим визуальное состояние к grid.
+					const pos = this.cubePositions.get(cube.id)
+					if (forceUpdate || !pos || pos.r !== r || pos.c !== c) {
+						this.cubePositions.set(cube.id, { r, c })
+					}
+
+					cubeContainer.container.x = c * this.tileSize
+					cubeContainer.container.y = this.calculateYFromBottom(r)
+					cubeContainer.container.visible = true
+					cubeContainer.container.alpha = 1
+					if (cubeContainer.container.scale) {
+						cubeContainer.container.scale.set(1)
+					}
+					cubeContainer.sprite.visible = true
+					cubeContainer.sprite.alpha = 1
+
+					if (cubeContainer.color !== cube.color) {
+						const newTexture = getBlockTexture(cube.color)
+						if (newTexture && cubeContainer.sprite.texture !== newTexture) {
+							cubeContainer.sprite.texture = newTexture
+						}
+						cubeContainer.color = cube.color
+					}
+
+					// Синхронизируем числовой оверлей ходов.
+					this.updateCubeMoves(cube.id, cube.moves)
 				}
 			}
 		}
@@ -1609,6 +1720,9 @@ export class GameRenderer {
 		if (this.selectedPosition) {
 			this.setSelectedPosition(this.selectedPosition.r, this.selectedPosition.c)
 		}
+
+		// Self-heal: очищаем визуальные дубли в сцене
+		this.cleanupOrphanCubeSprites()
 	}
 
 	/**

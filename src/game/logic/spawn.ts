@@ -21,7 +21,7 @@ import type { Cube, GameEvent, SpawnResult, Position } from './types'
 import { WIDTH, getCube, setCube } from './grid'
 import { applyGravityUntilSettled } from './gravity'
 import { findMatchesIncludingNewCubes } from './matches'
-import { getNumColorsForLevel } from '@/shared/stores/gameStore'
+import { getNumColorsForLevel, rollMovesForLevel } from '@/shared/stores/gameStore'
 
 export function spawnWave(
 	grid: (Cube | null)[][],
@@ -91,7 +91,7 @@ export function spawnWave(
 			}
 
 			const color = Math.floor(Math.random() * numColors)
-			const moves = Math.floor(Math.random() * 9) + 1 // 1-9
+			const moves = rollMovesForLevel(level)
 			const cube: Cube = { id: nextId++, color, moves }
 			const startRow = -spawnRows + spawnIndex
 			newCubes.push({ cube, startRow, targetRow, c })
