@@ -24,8 +24,14 @@ export function resolveAfterMove(
 	// Positions to consider "moved": 1st = player move; cascade = blocks that just fell
 	let currentCheckPositions: Position[] = checkPositions ?? []
 
-	while (hasChanges) {
+	// КРИТИЧНО: Защита от бесконечного цикла
+	// Максимальное количество итераций каскада (разумный лимит для предотвращения зависания)
+	const MAX_CASCADE_ITERATIONS = 100
+	let iterations = 0
+
+	while (hasChanges && iterations < MAX_CASCADE_ITERATIONS) {
 		hasChanges = false
+		iterations++
 
 		// Only remove matches that touch moved blocks (player move or blocks that fell)
 		const matches =
@@ -35,12 +41,24 @@ export function resolveAfterMove(
 
 		if (matches.length > 0) {
 			chainCount++
-			const removeCells: Array<{ r: number; c: number; color: number; id: number; moves: number }> = []
+			const removeCells: Array<{
+				r: number
+				c: number
+				color: number
+				id: number
+				moves: number
+			}> = []
 
 			for (const { r, c } of matches) {
 				const cube = getCube(grid, r, c)
 				if (cube) {
-					removeCells.push({ r, c, color: cube.color, id: cube.id, moves: cube.moves })
+					removeCells.push({
+						r,
+						c,
+						color: cube.color,
+						id: cube.id,
+						moves: cube.moves,
+					})
 					setCube(grid, r, c, null)
 				}
 			}
@@ -61,6 +79,13 @@ export function resolveAfterMove(
 
 			hasChanges = true
 		}
+	}
+
+	// Предупреждение если достигнут лимит итераций
+	if (iterations >= MAX_CASCADE_ITERATIONS && hasChanges) {
+		console.warn(
+			'[resolveAfterMove] Maximum cascade iterations reached, stopping to prevent infinite loop'
+		)
 	}
 
 	return { events, chainCount, removedCounts }

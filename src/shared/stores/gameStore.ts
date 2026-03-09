@@ -100,6 +100,15 @@ export const useGameStore = defineStore('game', () => {
 		// Не сбрасываем gamesPlayed - он должен сохраняться между играми
 	}
 
+	/**
+	 * Полный сброс состояния игры как при самом первом запуске приложения.
+	 * Используется при явном выходе из игры в меню.
+	 */
+	function resetHard() {
+		reset()
+		gamesPlayed.value = 0
+	}
+
 	function incrementGamesPlayed() {
 		gamesPlayed.value++
 	}
@@ -229,6 +238,7 @@ export const useGameStore = defineStore('game', () => {
 		NUM_COLORS,
 		// Actions
 		reset,
+		resetHard,
 		setGrid,
 		addScore,
 		setWaveIndex,

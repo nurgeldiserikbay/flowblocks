@@ -11,6 +11,7 @@ import {
 	applyGravityUntilSettled,
 	resolveAfterMove,
 	spawnWave,
+	checkMatchesAfterSpawn,
 	calculateBaseRemovalScore,
 	calculateComboBonus,
 	getVesselClearBonus,
@@ -71,7 +72,7 @@ export class GameController {
 		// Просто проверяем готовность
 		if (!PixiService.isReady()) {
 			console.warn(
-				'[GameController] init: PixiService not ready, attempting to load textures',
+				'[GameController] init: PixiService not ready, attempting to load textures'
 			)
 			// Fallback: пытаемся загрузить текстуры (не должно происходить)
 			await loadBlockTextures()
@@ -122,10 +123,31 @@ export class GameController {
 		const { grid, nextId } = createInitialGrid(
 			this.store.getHeight(),
 			1,
-			this.store.currentLevel,
+			this.store.currentLevel
 		)
 		this.nextCubeId = nextId
 		this.store.setGrid(grid)
+
+		// КРИТИЧНО: Обновляем размеры canvas после создания grid
+		// Это особенно важно при возврате на страницу, когда canvas может быть инициализирован с неправильной высотой
+		if (this.renderer) {
+			const gridHeight = grid.length
+			const canvas = this.renderer.getCanvas()
+			if (canvas) {
+				const canvasWidth =
+					parseInt(canvas.style.width) ||
+					canvas.getBoundingClientRect().width ||
+					320
+				const tileSize = canvasWidth / WIDTH
+				const canvasHeight = gridHeight * tileSize
+
+				// Обновляем CSS высоту canvas
+				canvas.style.height = `${canvasHeight}px`
+
+				// Обновляем размеры через renderer
+				this.renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
+			}
+		}
 
 		// Собираем все начальные плитки для анимации появления
 		const initialCubes: Array<{
@@ -205,7 +227,7 @@ export class GameController {
 			} catch (error) {
 				console.error(
 					'[GameController] startGame: failed to wait for tiles visible',
-					error,
+					error
 				)
 				// Продолжаем выполнение, но это может привести к проблемам с отображением
 				// Устанавливаем флаг в любом случае, чтобы не заблокировать игру
@@ -269,13 +291,13 @@ export class GameController {
 			} catch (error) {
 				console.error(
 					'[GameController] bootGame: scroll animation failed',
-					error,
+					error
 				)
 				// Продолжаем выполнение даже если скролл не удался
 			}
 		} else {
 			console.warn(
-				'[GameController] bootGame: onStartScrollAnimation callback not provided',
+				'[GameController] bootGame: onStartScrollAnimation callback not provided'
 			)
 		}
 
@@ -320,7 +342,7 @@ export class GameController {
 			// Не логируем предупреждение, если это нормальный вызов (не force)
 			if (force) {
 				console.warn(
-					'[GameController] scheduleNextTick: timer already scheduled, clearing and rescheduling',
+					'[GameController] scheduleNextTick: timer already scheduled, clearing and rescheduling'
 				)
 				clearTimeout(this.timerTimeout)
 				this.timerTimeout = null
@@ -336,18 +358,15 @@ export class GameController {
 		// В этом случае сбрасываем ожидаемое время
 		if (delay > 2000) {
 			console.warn(
-				`[GameController] scheduleNextTick: large delay detected: ${delay}ms, resetting timer`,
+				`[GameController] scheduleNextTick: large delay detected: ${delay}ms, resetting timer`
 			)
 			this.expectedNextTick = now + 1000
 		}
 
-		this.timerTimeout = window.setTimeout(
-			() => {
-				this.timerTimeout = null // Очищаем перед вызовом tick
-				this.tick()
-			},
-			Math.max(0, this.expectedNextTick - Date.now()),
-		)
+		this.timerTimeout = window.setTimeout(() => {
+			this.timerTimeout = null // Очищаем перед вызовом tick
+			this.tick()
+		}, Math.max(0, this.expectedNextTick - Date.now()))
 	}
 
 	private tick(): void {
@@ -410,6 +429,7 @@ export class GameController {
 	}
 
 	private async onWaveEnd(): Promise<void> {
+		// КРИТИЧНО: Проверка перед началом операции
 		if (this.store.isLocked || this.store.isGameOver) return
 
 		// Очищаем кэш при окончании волны
@@ -421,288 +441,389 @@ export class GameController {
 		}
 		this.comboLevel = 0
 
+		// КРИТИЧНО: Блокируем игру и используем try-finally для гарантированной разблокировки
 		this.store.setLocked(true)
 
-		const newWaveIndex = this.store.waveIndex + 1
-		// Reset timer (длительность волны уменьшается с уровнем)
-		this.store.setRemainingTime(this.store.getWaveDuration(newWaveIndex))
+		try {
+			const newWaveIndex = this.store.waveIndex + 1
+			// Reset timer (длительность волны уменьшается с уровнем)
+			this.store.setRemainingTime(this.store.getWaveDuration(newWaveIndex))
 
-		// Spawn wave - это изменяет grid синхронно и создает события для анимации
-		const grid = cloneGrid(this.store.grid)
-		const result = spawnWave(
-			grid,
-			this.store.spawnRows,
-			this.nextCubeId,
-			this.store.currentLevel,
-		)
-		this.nextCubeId = result.nextId
+			// Spawn wave - это изменяет grid синхронно и создает события для анимации
+			const grid = cloneGrid(this.store.grid)
+			const result = spawnWave(
+				grid,
+				this.store.spawnRows,
+				this.nextCubeId,
+				this.store.currentLevel
+			)
+			this.nextCubeId = result.nextId
 
-		// КРИТИЧНО: Обновляем grid в store СРАЗУ после spawnWave
-		// Это гарантирует, что grid содержит финальное состояние после всех операций
-		this.store.setGrid(grid)
+			// КРИТИЧНО: Обновляем grid в store СРАЗУ после spawnWave
+			// Это гарантирует, что grid содержит финальное состояние после всех операций
+			this.store.setGrid(grid)
 
-		// Собираем ID новых кубов из событий spawn, чтобы не создавать для них спрайты в renderGrid
-		// Они будут созданы в animateSpawn с правильными начальными состояниями
-		const newCubeIds = new Set<number>()
-		for (const event of result.events) {
-			if (event.type === 'spawn') {
-				for (const cell of event.cells) {
-					newCubeIds.add(cell.id)
-				}
-			}
-		}
-
-		// Re-render grid, исключая новые кубы (они будут созданы в animateSpawn)
-		// КРИТИЧНО: renderGrid вызывается с финальным grid, но исключает новые кубы
-		// Это гарантирует, что существующие кубы отображаются в правильных позициях
-		await this.renderer?.renderGrid(
-			grid,
-			this.nextCubeId,
-			newCubeIds.size > 0 ? newCubeIds : undefined,
-		)
-
-		// КРИТИЧНО: НЕ разблокируем игру до завершения всех анимаций
-		// Это гарантирует правильную последовательность: сначала все анимации завершаются, потом игра разблокируется
-		// Play spawn sound (once per wave)
-		AudioManager.playSpawn()
-
-		// КРИТИЧНО: Обрабатываем события последовательно и ждем завершения всех анимаций
-		// Правильный порядок событий: remove -> fall -> spawn -> fall (для новых кубов) -> remove -> fall (каскад)
-		if (this.renderer && result.events.length > 0) {
-			// Ждем завершения всех анимаций перед разблокировкой игры
-			await this.renderer.applyEvents(result.events)
-
-			// Обновляем moves для новых плиток после завершения анимаций
-			const newCubeIdsAfterAnim = new Set<number>()
+			// Собираем ID новых кубов из событий spawn, чтобы не создавать для них спрайты в renderGrid
+			// Они будут созданы в animateSpawn с правильными начальными состояниями
+			const newCubeIds = new Set<number>()
 			for (const event of result.events) {
 				if (event.type === 'spawn') {
 					for (const cell of event.cells) {
-						newCubeIdsAfterAnim.add(cell.id)
+						newCubeIds.add(cell.id)
 					}
 				}
 			}
 
-			// Находим кубы в grid по ID и обновляем их moves
-			// После гравитации позиции могут измениться, поэтому ищем по всему grid
-			for (let r = 0; r < grid.length; r++) {
-				for (let c = 0; c < WIDTH; c++) {
-					const cube = grid[r]?.[c]
-					if (cube && newCubeIdsAfterAnim.has(cube.id) && cube.moves > 0) {
-						this.renderer?.updateCubeMoves(cube.id, cube.moves)
+			// Re-render grid, исключая новые кубы (они будут созданы в animateSpawn)
+			// КРИТИЧНО: renderGrid вызывается с финальным grid, но исключает новые кубы
+			// Это гарантирует, что существующие кубы отображаются в правильных позициях
+			await this.renderer?.renderGrid(
+				grid,
+				this.nextCubeId,
+				newCubeIds.size > 0 ? newCubeIds : undefined
+			)
+
+			// КРИТИЧНО: НЕ разблокируем игру до завершения всех анимаций
+			// Это гарантирует правильную последовательность: сначала все анимации завершаются, потом игра разблокируется
+			// Play spawn sound (once per wave)
+			AudioManager.playSpawn()
+
+			// КРИТИЧНО: Обрабатываем события последовательно и ждем завершения всех анимаций
+			// Правильный порядок событий: fall (существующие) -> spawn -> fall (новые кубы) -> пауза -> remove (матчи) -> fall (каскад)
+			let hasGameOver = false
+			if (this.renderer && result.events.length > 0) {
+				// ШАГ 1: Сначала собираем ID новых кубов из spawn событий
+				const newCubeIds = new Set<number>()
+				for (const event of result.events) {
+					if (event.type === 'spawn') {
+						for (const cell of event.cells) {
+							newCubeIds.add(cell.id)
+						}
 					}
+				}
+
+				// ШАГ 2: Разделяем события на группы для правильной последовательности обработки
+				const spawnEvents: GameEvent[] = []
+				const newCubesFallEvents: GameEvent[] = []
+				const otherEvents: GameEvent[] = []
+
+				for (const event of result.events) {
+					if (event.type === 'spawn') {
+						spawnEvents.push(event)
+					} else if (event.type === 'fall') {
+						// Проверяем, является ли это fall для новых кубов
+						const isNewCubesFall = event.items.some(
+							(item) => item.id !== undefined && newCubeIds.has(item.id)
+						)
+						if (isNewCubesFall) {
+							newCubesFallEvents.push(event)
+						} else {
+							otherEvents.push(event)
+						}
+					} else {
+						otherEvents.push(event)
+					}
+				}
+
+				// ШАГ 1.1: Обрабатываем другие события (fall для существующих кубов и т.д.)
+				if (otherEvents.length > 0) {
+					await this.renderer.applyEvents(otherEvents)
+				}
+
+				// ШАГ 1.2: Обрабатываем spawn события и ждем их завершения
+				if (spawnEvents.length > 0) {
+					await this.renderer.applyEvents(spawnEvents)
+					// Дополнительное ожидание для гарантии завершения spawn анимаций
+					await this.renderer.waitForNextFrame()
+					await this.renderer.waitForNextFrame()
+				}
+
+				// ШАГ 1.3: КРИТИЧНО: Обрабатываем fall для новых кубов и ждем их полного завершения
+				if (newCubesFallEvents.length > 0) {
+					await this.renderer.applyEvents(newCubesFallEvents)
+					// Дополнительное ожидание для гарантии завершения fall анимаций для новых кубов
+					await this.renderer.waitForNextFrame()
+					await this.renderer.waitForNextFrame()
+					await this.renderer.waitForNextFrame()
+				}
+
+				// Обновляем moves для новых плиток после завершения всех анимаций
+				const newCubeIdsAfterAnim = new Set<number>()
+				for (const event of spawnEvents) {
+					if (event.type === 'spawn') {
+						for (const cell of event.cells) {
+							newCubeIdsAfterAnim.add(cell.id)
+						}
+					}
+				}
+
+				// Находим кубы в grid по ID и обновляем их moves
+				// После гравитации позиции могут измениться, поэтому ищем по всему grid
+				for (let r = 0; r < grid.length; r++) {
+					for (let c = 0; c < WIDTH; c++) {
+						const cube = grid[r]?.[c]
+						if (cube && newCubeIdsAfterAnim.has(cube.id) && cube.moves > 0) {
+							this.renderer?.updateCubeMoves(cube.id, cube.moves)
+						}
+					}
+				}
+
+				// КРИТИЧНО: Синхронизируем позиции после всех анимаций spawn и fall
+				// Это гарантирует, что все спрайты находятся в правильных позициях перед проверкой матчей
+				await this.renderer?.syncGridPositions(grid)
+
+				// ШАГ 2: КРИТИЧНО: Пауза после завершения анимации падения новых блоков перед проверкой матчей
+				// Это дает пользователю время понять, что произошло после спавна и падения
+				// Длительность паузы подобрана для лучшего UX (400ms - достаточно для понимания, но не слишком долго)
+				const SPAWN_MATCH_CHECK_DELAY = 400
+				await new Promise((resolve) =>
+					setTimeout(resolve, SPAWN_MATCH_CHECK_DELAY)
+				)
+
+				// ШАГ 3: КРИТИЧНО: После завершения всех анимаций и паузы запускаем проверку матчей
+				// Проверка матчей теперь происходит ПОСЛЕ завершения всех анимаций, чтобы пользователь
+				// видел, как плитки установились правильно перед проверкой совпадений
+				const matchEvents = checkMatchesAfterSpawn(
+					grid,
+					result.newCubeIds,
+					result.existingCubeIds
+				)
+				// Обновляем grid после проверки матчей
+				this.store.setGrid(grid)
+
+				// Запускаем анимацию исчезновения плиток
+				if (matchEvents.length > 0) {
+					await this.renderer.applyEvents(matchEvents)
+
+					// Синхронизируем позиции после проверки матчей
+					await this.renderer?.syncGridPositions(grid)
+				}
+
+				// Check game over (проверяется в checkMatchesAfterSpawn и добавляется в matchEvents)
+				hasGameOver = matchEvents.some((e) => e.type === 'gameover')
+				if (hasGameOver) {
+					this.store.setGameOver(true)
+					AudioManager.playGameOver()
 				}
 			}
 
-			// КРИТИЧНО: Синхронизируем позиции после всех анимаций
-			// Это гарантирует, что все спрайты находятся в правильных позициях
-			await this.renderer?.syncGridPositions(grid)
-		}
+			this.store.setWaveIndex(newWaveIndex)
+			// С ростом уровня растёт количество строк спавна (макс. 8)
+			this.store.setSpawnRows(this.store.getSpawnRowsForLevel(newWaveIndex))
 
-		// КРИТИЧНО: Разблокируем игру ТОЛЬКО после завершения всех анимаций
-		// Это гарантирует правильную последовательность операций
-		this.store.setLocked(false)
-
-		this.store.setWaveIndex(newWaveIndex)
-		// С ростом уровня растёт количество строк спавна (макс. 8)
-		this.store.setSpawnRows(this.store.getSpawnRowsForLevel(newWaveIndex))
-
-		// Расширение сосуда каждые 5 уровней для бесконечной игры
-		if (!result.gameOver) {
-			const newHeight = this.store.getHeightForLevel(newWaveIndex)
-			if (newHeight > this.store.getHeight()) {
-				expandGrid(grid, newHeight)
-				this.store.setHeight(newHeight)
-				// Явный вызов: переразмер канваса и скролл к низу (watch может не успеть / не сработать)
-				await Promise.resolve(this.opts.onVesselExpanded?.())
+			// Расширение сосуда каждые 5 уровней для бесконечной игры
+			if (!hasGameOver) {
+				const newHeight = this.store.getHeightForLevel(newWaveIndex)
+				if (newHeight > this.store.getHeight()) {
+					expandGrid(grid, newHeight)
+					this.store.setHeight(newHeight)
+					// Явный вызов: переразмер канваса и скролл к низу (watch может не успеть / не сработать)
+					await Promise.resolve(this.opts.onVesselExpanded?.())
+				}
 			}
-		}
 
-		// Check game over
-		if (result.gameOver) {
-			this.store.setGameOver(true)
-			// Play game over sound
-			AudioManager.playGameOver()
-		}
+			// Check game over (проверяется в matchEvents выше)
+			// Не нужно проверять здесь, так как gameOver уже обработан в matchEvents
 
-		// КРИТИЧНО: Перезапускаем таймер ПОСЛЕ разблокировки игры, чтобы избежать скачков
-		// Таймер должен запуститься только если игра не завершена
-		if (!result.gameOver) {
-			this.restartTimer()
+			// КРИТИЧНО: Перезапускаем таймер ПОСЛЕ разблокировки игры, чтобы избежать скачков
+			// Таймер должен запуститься только если игра не завершена
+			if (!hasGameOver) {
+				this.restartTimer()
+			}
+		} catch (error) {
+			console.error('[GameController] onWaveEnd: error during wave end', error)
+			// В случае ошибки все равно разблокируем игру через finally
+		} finally {
+			// КРИТИЧНО: Гарантированная разблокировка игры в любом случае
+			// Это предотвращает зависание игры при ошибках
+			this.store.setLocked(false)
 		}
 	}
 
 	async applyUserAction(
 		action: 'swap' | 'slide',
 		from: Position,
-		to: Position,
+		to: Position
 	): Promise<void> {
+		// КРИТИЧНО: Дополнительная проверка перед блокировкой
+		// Предотвращает race conditions с checkGameStateAsync
 		if (this.store.isLocked || this.store.isGameOver) return
 
 		// Очищаем кэш проверки hasPossibleMoves при действии пользователя
 		this.lastHasMovesCheck = null
 
+		// КРИТИЧНО: Блокируем игру и используем try-finally для гарантированной разблокировки
 		this.store.setLocked(true)
 
-		const grid = cloneGrid(this.store.grid)
-		let success = false
-		let moveEvent: GameEvent | null = null
+		try {
+			const grid = cloneGrid(this.store.grid)
+			let success = false
+			let moveEvent: GameEvent | null = null
 
-		// Perform move
-		if (action === 'swap') {
-			// Запомнить, был ли у куба в to 0 ходов (до обмена)
-			const replacedHadNoMoves = (grid[to.r]?.[to.c]?.moves ?? 0) === 0
-			success = trySwap(grid, from, to)
-			if (success) {
-				// После swap: from = куб с которым меняли, to = куб которого двигали
-				const cubeReplaced = grid[from.r]?.[from.c] // бывший в to
-				const cubeMoved = grid[to.r]?.[to.c] // бывший в from
-				// Двигаемый: -1 обычно; -2 если блок с которым меняли не имел ходов
-				if (cubeMoved) {
-					const delta = replacedHadNoMoves ? 2 : 1
-					cubeMoved.moves = Math.max(0, cubeMoved.moves - delta)
-					if (this.renderer)
-						this.renderer.updateCubeMoves(cubeMoved.id, cubeMoved.moves)
+			// Perform move
+			if (action === 'swap') {
+				// Запомнить, был ли у куба в to 0 ходов (до обмена)
+				const replacedHadNoMoves = (grid[to.r]?.[to.c]?.moves ?? 0) === 0
+				success = trySwap(grid, from, to)
+				if (success) {
+					// После swap: from = куб с которым меняли, to = куб которого двигали
+					const cubeReplaced = grid[from.r]?.[from.c] // бывший в to
+					const cubeMoved = grid[to.r]?.[to.c] // бывший в from
+					// Двигаемый: -1 обычно; -2 если блок с которым меняли не имел ходов
+					if (cubeMoved) {
+						const delta = replacedHadNoMoves ? 2 : 1
+						cubeMoved.moves = Math.max(0, cubeMoved.moves - delta)
+						if (this.renderer)
+							this.renderer.updateCubeMoves(cubeMoved.id, cubeMoved.moves)
+					}
+					if (cubeReplaced) {
+						cubeReplaced.moves = Math.max(0, cubeReplaced.moves - 1)
+						if (this.renderer)
+							this.renderer.updateCubeMoves(cubeReplaced.id, cubeReplaced.moves)
+					}
+					moveEvent = { type: 'swap', a: from, b: to }
 				}
-				if (cubeReplaced) {
-					cubeReplaced.moves = Math.max(0, cubeReplaced.moves - 1)
-					if (this.renderer)
-						this.renderer.updateCubeMoves(cubeReplaced.id, cubeReplaced.moves)
-				}
-				moveEvent = { type: 'swap', a: from, b: to }
-			}
-		} else if (action === 'slide') {
-			success = trySlide(grid, from, to)
-			if (success) {
-				const cube = grid[to.r]?.[to.c]
-				if (cube) {
-					// Слайд: цель пустая, «блок с которым заменили» нет — минус 1 ход
-					cube.moves = Math.max(0, cube.moves - 1)
-					if (this.renderer) this.renderer.updateCubeMoves(cube.id, cube.moves)
-					moveEvent = {
-						type: 'move',
-						from,
-						to,
-						color: cube.color,
-						kind: 'slide',
+			} else if (action === 'slide') {
+				success = trySlide(grid, from, to)
+				if (success) {
+					const cube = grid[to.r]?.[to.c]
+					if (cube) {
+						// Слайд: цель пустая, «блок с которым заменили» нет — минус 1 ход
+						cube.moves = Math.max(0, cube.moves - 1)
+						if (this.renderer)
+							this.renderer.updateCubeMoves(cube.id, cube.moves)
+						moveEvent = {
+							type: 'move',
+							from,
+							to,
+							color: cube.color,
+							kind: 'slide',
+						}
 					}
 				}
 			}
-		}
 
-		if (!success || !moveEvent) {
-			this.store.setLocked(false)
-			return
-		}
+			if (!success || !moveEvent) {
+				return
+			}
 
-		// Play move sound
-		AudioManager.playMove()
+			// Play move sound
+			AudioManager.playMove()
 
-		// Animate move first (this updates positions in renderer)
-		if (this.renderer) {
-			await this.renderer.applyEvents([moveEvent])
-		}
+			// Animate move first (this updates positions in renderer)
+			if (this.renderer) {
+				await this.renderer.applyEvents([moveEvent])
+			}
 
-		// Update store grid AFTER animation completes
-		// This ensures renderer cubePositions are synced with grid before resolveAfterMove
-		this.store.setGrid(grid)
-
-		// Positions of moved tiles for match resolution (only matches touching these are removed)
-		let checkPositions: Position[] = [from, to]
-
-		// After slide move: from is always empty — blocks above it must fall. Always apply gravity.
-		// КРИТИЧНО: Применяем гравитацию до полного заполнения всех пустот
-		if (action === 'slide' && success) {
-			const fallItems = applyGravityUntilSettled(grid)
+			// Update store grid AFTER animation completes
+			// This ensures renderer cubePositions are synced with grid before resolveAfterMove
 			this.store.setGrid(grid)
 
-			if (fallItems.length > 0 && this.renderer) {
-				const fallEvent: GameEvent = {
-					type: 'fall',
-					items: fallItems,
+			// Positions of moved tiles for match resolution (only matches touching these are removed)
+			let checkPositions: Position[] = [from, to]
+
+			// After slide move: from is always empty — blocks above it must fall. Always apply gravity.
+			// КРИТИЧНО: Применяем гравитацию до полного заполнения всех пустот
+			if (action === 'slide' && success) {
+				const fallItems = applyGravityUntilSettled(grid)
+				this.store.setGrid(grid)
+
+				if (fallItems.length > 0 && this.renderer) {
+					const fallEvent: GameEvent = {
+						type: 'fall',
+						items: fallItems,
+					}
+					await this.renderer.applyEvents([fallEvent])
+					await this.renderer.syncGridPositions(grid)
 				}
-				await this.renderer.applyEvents([fallEvent])
+
+				// For resolve: all landing positions; add to if the moved cube did not fall
+				const movedCubeFell = fallItems.some(
+					(f) => f.from.r === to.r && f.from.c === to.c
+				)
+				checkPositions = fallItems.map((f) => f.to)
+				if (!movedCubeFell) checkPositions.push(to)
+			}
+
+			// Apply gravity and resolve matches
+			// Note: resolveAfterMove works on grid where cubes are already swapped/moved
+			// On first check, only matches that touch moved positions are removed
+			const resolveResult = resolveAfterMove(grid, checkPositions)
+			this.store.setGrid(grid)
+
+			// Enrich remove events with baseScore/comboBonus and add score
+			// Store chainIndex in events for sound playback during animation
+			let removeEventIndex = 0
+			for (const ev of resolveResult.events) {
+				if (ev.type !== 'remove') continue
+				removeEventIndex++
+				const chainIndex = removeEventIndex
+
+				const baseScore = calculateBaseRemovalScore(ev.cells)
+				let comboBonus = 0
+				if (this.comboTimer !== null) {
+					this.comboLevel++
+					comboBonus = calculateComboBonus(this.comboLevel, ev.cells.length)
+					clearTimeout(this.comboTimer)
+				} else {
+					this.comboLevel = 1
+				}
+				this.comboTimer = setTimeout(() => {
+					this.comboTimer = null
+					this.comboLevel = 0
+				}, COMBO_WINDOW_MS)
+				ev.baseScore = baseScore
+				ev.comboBonus = comboBonus
+				ev.chainIndex = chainIndex // Сохраняем chainIndex для воспроизведения звука во время анимации
+				this.store.addScore(baseScore + comboBonus)
+			}
+
+			// Apply resolve events (remove, fall, etc.)
+			// Note: We don't re-render grid after events because:
+			// 1. Remove events already remove sprites by ID
+			// 2. Fall events already animate sprites to new positions
+			// 3. Re-rendering would recreate all sprites and lose animations
+			// Only sync positions after animations complete
+			if (this.renderer && resolveResult.events.length > 0) {
+				await this.renderer.applyEvents(resolveResult.events)
+				// After animations, sync positions with grid state
+				// This will update positions of cubes that moved due to gravity
+				// animateRemove already removed cubes from maps, so syncGridPositions won't try to remove them again
 				await this.renderer.syncGridPositions(grid)
 			}
 
-			// For resolve: all landing positions; add to if the moved cube did not fall
-			const movedCubeFell = fallItems.some(
-				(f) => f.from.r === to.r && f.from.c === to.c,
-			)
-			checkPositions = fallItems.map((f) => f.to)
-			if (!movedCubeFell) checkPositions.push(to)
-		}
-
-		// Apply gravity and resolve matches
-		// Note: resolveAfterMove works on grid where cubes are already swapped/moved
-		// On first check, only matches that touch moved positions are removed
-		const resolveResult = resolveAfterMove(grid, checkPositions)
-		this.store.setGrid(grid)
-
-		// Enrich remove events with baseScore/comboBonus and add score
-		// Store chainIndex in events for sound playback during animation
-		let removeEventIndex = 0
-		for (const ev of resolveResult.events) {
-			if (ev.type !== 'remove') continue
-			removeEventIndex++
-			const chainIndex = removeEventIndex
-
-			const baseScore = calculateBaseRemovalScore(ev.cells)
-			let comboBonus = 0
-			if (this.comboTimer !== null) {
-				this.comboLevel++
-				comboBonus = calculateComboBonus(this.comboLevel, ev.cells.length)
-				clearTimeout(this.comboTimer)
-			} else {
-				this.comboLevel = 1
-			}
-			this.comboTimer = setTimeout(() => {
-				this.comboTimer = null
-				this.comboLevel = 0
-			}, COMBO_WINDOW_MS)
-			ev.baseScore = baseScore
-			ev.comboBonus = comboBonus
-			ev.chainIndex = chainIndex // Сохраняем chainIndex для воспроизведения звука во время анимации
-			this.store.addScore(baseScore + comboBonus)
-		}
-
-		// Apply resolve events (remove, fall, etc.)
-		// Note: We don't re-render grid after events because:
-		// 1. Remove events already remove sprites by ID
-		// 2. Fall events already animate sprites to new positions
-		// 3. Re-rendering would recreate all sprites and lose animations
-		// Only sync positions after animations complete
-		if (this.renderer && resolveResult.events.length > 0) {
-			await this.renderer.applyEvents(resolveResult.events)
-			// After animations, sync positions with grid state
-			// This will update positions of cubes that moved due to gravity
-			// animateRemove already removed cubes from maps, so syncGridPositions won't try to remove them again
-			await this.renderer.syncGridPositions(grid)
-		}
-
-		// Check for vessel clear bonus
-		let isEmpty = true
-		for (let r = 0; r < grid.length; r++) {
-			for (let c = 0; c < WIDTH; c++) {
-				if (grid[r]?.[c]) {
-					isEmpty = false
-					break
+			// Check for vessel clear bonus
+			let isEmpty = true
+			for (let r = 0; r < grid.length; r++) {
+				for (let c = 0; c < WIDTH; c++) {
+					if (grid[r]?.[c]) {
+						isEmpty = false
+						break
+					}
 				}
+				if (!isEmpty) break
 			}
-			if (!isEmpty) break
+
+			if (isEmpty) {
+				const clearBonus = getVesselClearBonus(grid)
+				this.store.addScore(clearBonus)
+				await this.renderer?.showGreatMessage(clearBonus)
+				// Play clear sound
+				AudioManager.playClear()
+			}
+
+			// Check game state: cubes finished or no moves
+			await this.checkGameState(grid)
+		} catch (error) {
+			console.error(
+				'[GameController] applyUserAction: error during move',
+				error
+			)
+			// В случае ошибки все равно разблокируем игру через finally
+		} finally {
+			// КРИТИЧНО: Гарантированная разблокировка игры в любом случае
+			this.store.setLocked(false)
 		}
-
-		if (isEmpty) {
-			const clearBonus = getVesselClearBonus(grid)
-			this.store.addScore(clearBonus)
-			await this.renderer?.showGreatMessage(clearBonus)
-			// Play clear sound
-			AudioManager.playClear()
-		}
-
-		// Check game state: cubes finished or no moves
-		await this.checkGameState(grid)
-
-		this.store.setLocked(false)
 	}
 
 	/**
@@ -788,25 +909,38 @@ export class GameController {
 	 * Async version for checking game state (called from tick)
 	 * Doesn't lock the game, just checks and handles if needed
 	 * КРИТИЧНО: Проверяет наличие ходов только если кубиков <= 32 для оптимизации
+	 * КРИТИЧНО ИСПРАВЛЕНО: Добавлена защита от race conditions с applyUserAction
 	 */
 	private async checkGameStateAsync(grid: (Cube | null)[][]): Promise<void> {
-		// Защита от проверки во время блокировки или завершения игры
+		// КРИТИЧНО: Защита от проверки во время блокировки или завершения игры
+		// Проверяем дважды для предотвращения race conditions
 		if (this.store.isLocked || this.store.isGameOver) return
 
 		// Use current grid from store (may have changed since call)
 		const currentGrid = this.store.grid
 		if (!currentGrid || currentGrid.length === 0) return
 
+		// КРИТИЧНО: Повторная проверка после чтения grid (может измениться)
+		if (this.store.isLocked || this.store.isGameOver) return
+
 		const isEmpty = isGridEmpty(currentGrid)
 		const remainingTime = this.store.remainingTime
 
 		// Case 1: Cubes finished and timer still running
 		if (isEmpty && remainingTime > 0) {
-			// Дополнительная проверка: убеждаемся что игра не заблокирована
+			// КРИТИЧНО: Дополнительная проверка перед блокировкой
+			// Предотвращает race conditions с applyUserAction
 			if (this.store.isLocked || this.store.isGameOver) return
+
+			// КРИТИЧНО: Используем атомарную проверку и блокировку
+			// Если игра уже заблокирована, не продолжаем
+			if (this.store.isLocked) return
 
 			this.store.setLocked(true)
 			try {
+				// КРИТИЧНО: Повторная проверка после блокировки (может измениться состояние)
+				if (this.store.isGameOver) return
+
 				// Show "Great" message and add bonus
 				const greatBonus = getGreatBonus(currentGrid)
 				this.store.addScore(greatBonus)
@@ -814,9 +948,18 @@ export class GameController {
 				AudioManager.playClear()
 
 				// Spawn new wave with half vessel height rows
+				// КРИТИЧНО: spawnMidWave уже заблокирует игру, но мы используем try-finally для гарантии
 				const halfHeight = Math.floor(this.store.getHeight() / 2)
 				await this.spawnMidWave(currentGrid, halfHeight)
+			} catch (error) {
+				console.error(
+					'[GameController] checkGameStateAsync: error in Case 1',
+					error
+				)
+				// В случае ошибки разблокируем через finally
 			} finally {
+				// КРИТИЧНО: Гарантированная разблокировка
+				// spawnMidWave также разблокирует игру, но это безопасно (idempотентно)
 				this.store.setLocked(false)
 			}
 			return
@@ -850,22 +993,39 @@ export class GameController {
 				}
 
 				if (!hasMoves) {
-					// Перед блокировкой убеждаемся что игра не заблокирована
+					// КРИТИЧНО: Повторная проверка перед блокировкой
+					// Предотвращает race conditions с applyUserAction
 					if (this.store.isLocked || this.store.isGameOver) return
+
+					// КРИТИЧНО: Используем атомарную проверку и блокировку
+					// Если игра уже заблокирована, не продолжаем
+					if (this.store.isLocked) return
 
 					// Очищаем кэш перед спавном (grid изменится)
 					this.lastHasMovesCheck = null
 
 					this.store.setLocked(true)
 					try {
+						// КРИТИЧНО: Повторная проверка после блокировки (может измениться состояние)
+						if (this.store.isGameOver) return
+
 						// Show "No moves" message and add bonus based on remaining time
 						const noMovesBonus = getNoMovesBonus(remainingTime)
 						this.store.addScore(noMovesBonus)
 						await this.renderer?.showNoMovesMessage(noMovesBonus)
 						// Spawn new wave with half vessel height rows
+						// КРИТИЧНО: spawnMidWave уже заблокирует игру, но мы используем try-finally для гарантии
 						const halfHeight = Math.floor(this.store.getHeight() / 2)
 						await this.spawnMidWave(currentGrid, halfHeight)
+					} catch (error) {
+						console.error(
+							'[GameController] checkGameStateAsync: error in Case 2',
+							error
+						)
+						// В случае ошибки разблокируем через finally
 					} finally {
+						// КРИТИЧНО: Гарантированная разблокировка
+						// spawnMidWave также разблокирует игру, но это безопасно (idempотентно)
 						this.store.setLocked(false)
 					}
 					return
@@ -879,103 +1039,165 @@ export class GameController {
 	 * Spawn mid-wave: spawn new cubes with specified number of rows
 	 * Used when cubes finish or no moves left but timer still running
 	 * Note: Game should already be locked when calling this
-	 * ОПТИМИЗИРОВАНО: Разблокируем игру сразу после обновления grid, анимации продолжаются в фоне
+	 * КРИТИЧНО ИСПРАВЛЕНО: Разблокируем игру ТОЛЬКО после завершения всех анимаций
+	 * Это предотвращает race conditions и зависания игры
 	 */
 	private async spawnMidWave(
 		grid: (Cube | null)[][],
-		spawnRows: number,
+		spawnRows: number
 	): Promise<void> {
-		if (this.store.isGameOver) return
+		if (this.store.isGameOver) {
+			// Если игра завершена, разблокируем (на случай если была заблокирована)
+			this.store.setLocked(false)
+			return
+		}
 
 		// Очищаем кэш перед спавном (grid изменится)
 		this.lastHasMovesCheck = null
 
-		// Spawn wave with specified number of rows
-		// maxFilledRows ensures maximum filled rows equals half vessel height
-		const result = spawnWave(
-			grid,
-			spawnRows,
-			this.nextCubeId,
-			this.store.currentLevel,
-			spawnRows,
-		)
-		this.nextCubeId = result.nextId
+		try {
+			// Spawn wave with specified number of rows
+			// maxFilledRows ensures maximum filled rows equals half vessel height
+			const result = spawnWave(
+				grid,
+				spawnRows,
+				this.nextCubeId,
+				this.store.currentLevel,
+				spawnRows
+			)
+			this.nextCubeId = result.nextId
 
-		// Update grid
-		this.store.setGrid(grid)
+			// Update grid
+			this.store.setGrid(grid)
 
-		// Оптимизация: собираем newCubeIds только один раз и используем для всех операций
-		const newCubeIds = new Set<number>()
-		for (const event of result.events) {
-			if (event.type === 'spawn') {
-				for (const cell of event.cells) {
-					newCubeIds.add(cell.id)
+			// Оптимизация: собираем newCubeIds только один раз и используем для всех операций
+			const newCubeIds = new Set<number>()
+			for (const event of result.events) {
+				if (event.type === 'spawn') {
+					for (const cell of event.cells) {
+						newCubeIds.add(cell.id)
+					}
 				}
 			}
-		}
 
-		// Re-render grid, excluding new cubes
-		await this.renderer?.renderGrid(
-			grid,
-			this.nextCubeId,
-			newCubeIds.size > 0 ? newCubeIds : undefined,
-		)
+			// Re-render grid, excluding new cubes
+			await this.renderer?.renderGrid(
+				grid,
+				this.nextCubeId,
+				newCubeIds.size > 0 ? newCubeIds : undefined
+			)
 
-		// КРИТИЧНО: Разблокируем игру СРАЗУ после обновления grid
-		// Это позволяет пользователю двигать плитки даже во время анимации спавна
-		// Анимации будут продолжаться в фоне без блокировки игры
-		this.store.setLocked(false)
+			// Play spawn sound
+			AudioManager.playSpawn()
 
-		// Play spawn sound
-		AudioManager.playSpawn()
-
-		// Animate spawn events (анимации продолжаются в фоне, игра уже разблокирована)
-		if (this.renderer && result.events.length > 0) {
-			// Запускаем анимации асинхронно, не блокируя игру
-			this.renderer
-				.applyEvents(result.events)
-				.then(() => {
-					// После завершения анимаций обновляем moves для новых кубиков
-					for (const event of result.events) {
-						if (event.type === 'spawn') {
-							for (const cell of event.cells) {
-								// Находим кубик в grid по ID (после гравитации позиция может измениться)
-								for (let r = 0; r < grid.length; r++) {
-									for (let c = 0; c < WIDTH; c++) {
-										const cube = grid[r]?.[c]
-										if (cube && cube.id === cell.id && cube.moves > 0) {
-											this.renderer?.updateCubeMoves(cube.id, cube.moves)
-											break
-										}
-									}
-								}
-							}
+			// КРИТИЧНО: Обрабатываем события последовательно и ждем завершения всех анимаций
+			// Правильный порядок событий: spawn -> fall (новые кубы) -> пауза -> remove (матчи) -> fall (каскад)
+			if (this.renderer && result.events.length > 0) {
+				// ШАГ 1: Сначала собираем ID новых кубов из spawn событий
+				const newCubeIds = new Set<number>()
+				for (const event of result.events) {
+					if (event.type === 'spawn') {
+						for (const cell of event.cells) {
+							newCubeIds.add(cell.id)
 						}
 					}
-					// Sync positions after spawn animations
-					this.renderer?.syncGridPositions(grid)
-				})
-				.catch((error) => {
-					console.error('[GameController] spawnMidWave: animation error', error)
-				})
-		}
+				}
 
-		// Check game over
-		if (result.gameOver) {
-			this.store.setGameOver(true)
-			AudioManager.playGameOver()
-		}
+				// ШАГ 2: Разделяем события на группы для правильной последовательности обработки
+				const spawnEvents: GameEvent[] = []
+				const newCubesFallEvents: GameEvent[] = []
+				const otherEvents: GameEvent[] = []
 
-		// Обновляем таймер и waveIndex, чтобы избежать двойного спавна
-		// Это нужно делать после спавна, чтобы таймер не истек и не вызвал onWaveEnd()
-		const newWaveIndex = this.store.waveIndex + 1
-		this.store.setWaveIndex(newWaveIndex)
-		// Сбрасываем таймер на полную длительность новой волны
-		this.store.setRemainingTime(this.store.getWaveDuration(newWaveIndex))
-		// КРИТИЧНО: Перезапускаем таймер с новым временем, чтобы избежать скачков
-		this.restartTimer()
-		// Обновляем количество строк спавна для следующего уровня
-		this.store.setSpawnRows(this.store.getSpawnRowsForLevel(newWaveIndex))
+				for (const event of result.events) {
+					if (event.type === 'spawn') {
+						spawnEvents.push(event)
+					} else if (event.type === 'fall') {
+						// Проверяем, является ли это fall для новых кубов
+						const isNewCubesFall = event.items.some(
+							(item) => item.id !== undefined && newCubeIds.has(item.id)
+						)
+						if (isNewCubesFall) {
+							newCubesFallEvents.push(event)
+						} else {
+							otherEvents.push(event)
+						}
+					} else {
+						otherEvents.push(event)
+					}
+				}
+
+				// ШАГ 1.1: Обрабатываем другие события (если есть)
+				if (otherEvents.length > 0) {
+					await this.renderer.applyEvents(otherEvents)
+				}
+
+				// ШАГ 1.2: Обрабатываем spawn события и ждем их завершения
+				if (spawnEvents.length > 0) {
+					await this.renderer.applyEvents(spawnEvents)
+					// Дополнительное ожидание для гарантии завершения spawn анимаций
+					await this.renderer.waitForNextFrame()
+					await this.renderer.waitForNextFrame()
+				}
+
+				// ШАГ 1.3: КРИТИЧНО: Обрабатываем fall для новых кубов и ждем их полного завершения
+				if (newCubesFallEvents.length > 0) {
+					await this.renderer.applyEvents(newCubesFallEvents)
+					// Дополнительное ожидание для гарантии завершения fall анимаций для новых кубов
+					await this.renderer.waitForNextFrame()
+					await this.renderer.waitForNextFrame()
+					await this.renderer.waitForNextFrame()
+				}
+
+				// Обновляем moves для новых плиток после завершения всех анимаций
+				const newCubeIdsAfterAnim = new Set<number>()
+				for (const event of spawnEvents) {
+					if (event.type === 'spawn') {
+						for (const cell of event.cells) {
+							newCubeIdsAfterAnim.add(cell.id)
+						}
+					}
+				}
+
+				// Находим кубы в grid по ID и обновляем их moves
+				// После гравитации позиции могут измениться, поэтому ищем по всему grid
+				for (let r = 0; r < grid.length; r++) {
+					for (let c = 0; c < WIDTH; c++) {
+						const cube = grid[r]?.[c]
+						if (cube && newCubeIdsAfterAnim.has(cube.id) && cube.moves > 0) {
+							this.renderer?.updateCubeMoves(cube.id, cube.moves)
+						}
+					}
+				}
+
+				// КРИТИЧНО: Синхронизируем позиции после всех анимаций spawn и fall
+				// Это гарантирует, что все спрайты находятся в правильных позициях
+				await this.renderer?.syncGridPositions(grid)
+
+				// Check game over (проверяется в spawnWave)
+				if (result.gameOver) {
+					this.store.setGameOver(true)
+					AudioManager.playGameOver()
+				}
+			}
+
+			// Обновляем таймер и waveIndex, чтобы избежать двойного спавна
+			// Это нужно делать после спавна, чтобы таймер не истек и не вызвал onWaveEnd()
+			const newWaveIndex = this.store.waveIndex + 1
+			this.store.setWaveIndex(newWaveIndex)
+			// Сбрасываем таймер на полную длительность новой волны
+			this.store.setRemainingTime(this.store.getWaveDuration(newWaveIndex))
+			// КРИТИЧНО: Перезапускаем таймер с новым временем, чтобы избежать скачков
+			this.restartTimer()
+			// Обновляем количество строк спавна для следующего уровня
+			this.store.setSpawnRows(this.store.getSpawnRowsForLevel(newWaveIndex))
+		} catch (error) {
+			console.error('[GameController] spawnMidWave: error during spawn', error)
+			// В случае ошибки все равно разблокируем игру, чтобы не зависнуть
+		} finally {
+			// КРИТИЧНО: Разблокируем игру ТОЛЬКО после завершения всех операций
+			// Это гарантирует правильную последовательность: сначала все анимации завершаются, потом игра разблокируется
+			this.store.setLocked(false)
+		}
 	}
 
 	private restartTimer(): void {

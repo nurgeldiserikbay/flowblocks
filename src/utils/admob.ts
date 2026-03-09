@@ -11,9 +11,12 @@ import {
 	AdOptions,
 } from '@capacitor-community/admob'
 
+const isProduction = import.meta.env.VITE_APP_MODE === 'PROD'
+
 const AdMobInitializationOptions = {
 	testingDevices: ['8a1b4b83d67add00', '1f6e845f97c74f32', 'e81b6ee74e7f26dc'],
-	initializeForTesting: true,
+	// В проде обязательно false — иначе реклама может не показываться
+	initializeForTesting: !isProduction,
 	tagForChildDirectedTreatment: true,
 }
 

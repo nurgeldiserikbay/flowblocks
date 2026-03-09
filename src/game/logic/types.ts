@@ -70,7 +70,10 @@ export type ResolveResult = {
 }
 
 export type SpawnResult = {
-	events: GameEvent[]
+	events: GameEvent[] // События до проверки матчей после spawn (включая spawn)
+	eventsAfterSpawnCheck: GameEvent[] // События проверки матчей после завершения анимации spawn (заполняется через checkMatchesAfterSpawn)
 	gameOver: boolean
 	nextId: number
+	newCubeIds: Set<number> // ID новых кубов для проверки матчей
+	existingCubeIds: Set<number> // ID существующих кубов до спавна
 }

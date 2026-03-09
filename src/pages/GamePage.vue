@@ -165,6 +165,10 @@ const levelIndicatorRef = useTemplateRef<HTMLElement>('levelIndicator')
 const playAreaRef = useTemplateRef<HTMLElement>('playArea')
 const isExitDialogOpen = ref(false)
 const isGenerating = ref(true)
+let shouldUseHardResetOnUnmount = false
+const INTERSTITIAL_CLOSE_TIMEOUT_MS = 8000
+const CONTAINER_VISIBILITY_TIMEOUT_MS = 2000
+const BANNER_HIDE_TIMEOUT_MS = 1500
 
 // Хелпер для получения canvas из PixiService или fallback на ref
 function getPixiCanvas(): HTMLCanvasElement | null {
@@ -1657,7 +1661,47 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 
 // Функция для запуска игры с проверкой рекламы
 async function startGameWithAds(): Promise<void> {
-	if (!gameController) return
+	if (!gameController || !renderer) return
+
+	// КРИТИЧНО: Убеждаемся, что canvas имеет правильные размеры перед запуском игры
+	// Это особенно важно при возврате на страницу, когда canvas может быть инициализирован с нулевой высотой
+	const pixiCanvas = getPixiCanvas()
+	if (pixiCanvas) {
+		// Получаем актуальную высоту grid (будет использована при создании grid в startGame)
+		const expectedHeight = gameStore.getHeight()
+		const containerWidth =
+			cachedContainerRect?.width ??
+			pixiCanvas.getBoundingClientRect().width ??
+			320
+		const tileSize = Math.max(containerWidth, 320) / WIDTH
+		const expectedCanvasHeight = expectedHeight * tileSize
+
+		// Обновляем размеры canvas, если они неправильные
+		const currentHeight = parseInt(pixiCanvas.style.height) || 0
+		if (currentHeight !== expectedCanvasHeight) {
+			pixiCanvas.style.height = `${expectedCanvasHeight}px`
+			// Обновляем размеры через renderer
+			renderer.resizeCanvas(
+				parseInt(pixiCanvas.style.width) || containerWidth,
+				expectedCanvasHeight,
+				expectedHeight
+			)
+		}
+
+		// Ждем, пока canvas получит правильные размеры
+		let attempts = 0
+		const maxAttempts = 10
+		while (attempts < maxAttempts) {
+			const rect = pixiCanvas.getBoundingClientRect()
+			if (rect.height > 0 && rect.width > 0) {
+				break
+			}
+			attempts++
+			await nextTick()
+			await new Promise((resolve) => requestAnimationFrame(resolve))
+			await new Promise((resolve) => setTimeout(resolve, 50))
+		}
+	}
 
 	// Увеличиваем счетчик игр
 	gameStore.incrementGamesPlayed()
@@ -1670,12 +1714,36 @@ async function startGameWithAds(): Promise<void> {
 
 		// Показываем interstitial рекламу и ждем её закрытия
 		await new Promise<void>((resolve) => {
-			admob.interstitial({
+			let isResolved = false
+			const finish = () => {
+				if (isResolved) return
+				isResolved = true
+				resolve()
+			}
+
+			const timeoutId = setTimeout(() => {
+				console.warn(
+					`[GamePage] Interstitial close timeout after ${INTERSTITIAL_CLOSE_TIMEOUT_MS}ms, continuing game startup`
+				)
+				finish()
+			}, INTERSTITIAL_CLOSE_TIMEOUT_MS)
+
+			void admob
+				.interstitial({
 				isFirst: false,
 				onInterstitialAdClosed: () => {
-					resolve()
+					clearTimeout(timeoutId)
+					finish()
 				},
 			})
+				.catch((error) => {
+					console.warn(
+						'[GamePage] Interstitial failed, continuing game startup:',
+						error
+					)
+					clearTimeout(timeoutId)
+					finish()
+				})
 		})
 	}
 
@@ -1691,6 +1759,12 @@ async function startGameWithAds(): Promise<void> {
 
 onMounted(async () => {
 	const gamePageStartTime = performance.now()
+
+	// КРИТИЧНО: Сбрасываем состояние игры при монтировании компонента
+	// Это гарантирует, что игра всегда запускается с чистого состояния
+	// даже если пользователь вернулся на страницу после выхода
+	gameStore.reset()
+	isGenerating.value = true
 
 	// Initialize AudioManager
 	await AudioManager.init()
@@ -1738,9 +1812,17 @@ onMounted(async () => {
 		)
 		// Ждем, пока контейнер станет видимым
 		await new Promise((resolve) => {
+			const startedAt = performance.now()
 			const checkVisibility = () => {
 				const style = window.getComputedStyle(container)
 				if (style.display !== 'none' && style.visibility !== 'hidden') {
+					resolve(undefined)
+				} else if (
+					performance.now() - startedAt >= CONTAINER_VISIBILITY_TIMEOUT_MS
+				) {
+					console.warn(
+						`[GamePage] onMounted: container visibility wait timeout after ${CONTAINER_VISIBILITY_TIMEOUT_MS}ms, continuing startup`
+					)
 					resolve(undefined)
 				} else {
 					requestAnimationFrame(checkVisibility)
@@ -2275,7 +2357,7 @@ onMounted(async () => {
 	}
 })
 
-onBeforeUnmount(async () => {
+onBeforeUnmount(() => {
 	// Очищаем таймеры play-area
 	clearPlayAreaPressTimer()
 
@@ -2331,16 +2413,32 @@ onBeforeUnmount(async () => {
 	// Переключаемся обратно на стартовую сцену
 	PixiService.switchToStartScene()
 
-	// Скрываем баннерную рекламу при выходе со страницы
-	try {
-		await admob.hideBanner()
-	} catch (error) {
-		console.warn('[GamePage] Failed to hide banner ad:', error)
+	// КРИТИЧНО: Останавливаем игру перед уничтожением контроллера
+	if (gameController) {
+		gameController.stop()
+		gameController.destroy()
 	}
-
-	gameController?.destroy()
 	gameController = null
 	renderer = null
+
+	// КРИТИЧНО: Сбрасываем состояние игры при размонтировании компонента
+	// Это гарантирует, что при возврате игра запустится с чистого состояния
+	if (shouldUseHardResetOnUnmount) {
+		gameStore.resetHard()
+	} else {
+		gameStore.reset()
+	}
+	isGenerating.value = false
+
+	// Скрываем баннер после основной очистки и не блокируем unmount
+	void Promise.race([
+		admob.hideBanner(),
+		new Promise<void>((resolve) =>
+			setTimeout(resolve, BANNER_HIDE_TIMEOUT_MS)
+		),
+	]).catch((error) => {
+		console.warn('[GamePage] Failed to hide banner ad:', error)
+	})
 })
 
 function showExitDialog(): void {
@@ -2348,6 +2446,13 @@ function showExitDialog(): void {
 }
 
 function handleExit(): void {
+	// Сбрасываем состояние игры при выходе
+	shouldUseHardResetOnUnmount = true
+	if (gameController) {
+		gameController.stop()
+	}
+	gameStore.resetHard()
+	isGenerating.value = false
 	router.push('/')
 }
 
@@ -2468,14 +2573,17 @@ async function restart(): Promise<void> {
 		flex-shrink: 0;
 		padding: 0.5rem 0 1rem;
 		padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
-		// Высота нижней секции: кнопка (~48px) + баннер (~50px) + отступы (~16px)
-		// Итого примерно 114px + safe-area-inset-bottom
-		min-height: fit-content;
+		// Всегда резервируем место под нижний баннер, даже если реклама не загрузилась.
+		// 50px — стандартная высота BannerAdSize.BANNER.
+		min-height: calc(50px + 0.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px)));
 
 		@media (max-width: 640px) {
 			gap: 0.4rem;
 			padding: 0.4rem 0 1rem;
 			padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
+			min-height: calc(
+				50px + 0.4rem + max(0.4rem, env(safe-area-inset-bottom, 0px))
+			);
 		}
 	}
 
