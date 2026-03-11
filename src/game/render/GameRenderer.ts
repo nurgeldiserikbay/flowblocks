@@ -42,9 +42,11 @@ export class GameRenderer {
 	private tileSize: number
 	private cubeContainers: Map<number, CubeContainer> = new Map() // Map<cubeId, container>
 	private cubePositions: Map<number, { r: number; c: number }> = new Map() // Map<cubeId, position>
+	private positionToCubeId: Map<string, number> = new Map() // Map<"r,c", cubeId>
 	private nextCubeId: number = 1
 	private selectedPosition: { r: number; c: number } | null = null
 	private gridHeight: number = 0 // Высота grid для расчета позиций снизу
+	private syncCounter: number = 0
 
 	constructor(options: GameRendererOptions) {
 		this.canvas = options.canvas
@@ -164,7 +166,7 @@ export class GameRenderer {
 							const pos = this.cubePositions.get(cube.id)
 							if (!pos || pos.r !== r || pos.c !== c) {
 								// Позиция изменилась - обновляем её
-								this.cubePositions.set(cube.id, { r, c })
+								this.setCubePosition(cube.id, r, c)
 								cubeContainer.container.x = c * this.tileSize
 								cubeContainer.container.y = this.calculateYFromBottom(r)
 							}
@@ -222,7 +224,7 @@ export class GameRenderer {
 				}
 
 				this.cubeContainers.delete(cubeId)
-				this.cubePositions.delete(cubeId)
+				this.deleteCubePosition(cubeId)
 			}
 		}
 
@@ -471,7 +473,7 @@ export class GameRenderer {
 			highlight,
 			color: cube.color,
 		})
-		this.cubePositions.set(cube.id, { r, c })
+		this.setCubePosition(cube.id, r, c)
 
 		// Update highlight if this position is selected
 		if (
@@ -522,6 +524,18 @@ export class GameRenderer {
 		}
 	}
 
+	private maybeCleanupOrphanCubeSprites(): void {
+		if (!this.gameContainer) return
+
+		this.syncCounter++
+		const extraChildren = this.gameContainer.children.length - this.cubeContainers.size
+		if (extraChildren <= 2 && this.syncCounter % 5 !== 0) {
+			return
+		}
+
+		this.cleanupOrphanCubeSprites()
+	}
+
 	updateCubeMoves(cubeId: number, moves: number): void {
 		const cubeContainer = this.cubeContainers.get(cubeId)
 		if (!cubeContainer) return
@@ -547,7 +561,10 @@ export class GameRenderer {
 				cubeContainer.container.addChild(cubeContainer.text)
 			} else {
 				// Update existing text
-				cubeContainer.text.text = String(moves)
+				const nextText = String(moves)
+				if (cubeContainer.text.text !== nextText) {
+					cubeContainer.text.text = nextText
+				}
 			}
 		} else {
 			// Remove text if moves is 0
@@ -638,8 +655,8 @@ export class GameRenderer {
 		const posBY = this.calculateYFromBottom(b.r)
 
 		// Update positions
-		this.cubePositions.set(cubeIdA, { r: b.r, c: b.c })
-		this.cubePositions.set(cubeIdB, { r: a.r, c: a.c })
+		this.setCubePosition(cubeIdA, b.r, b.c)
+		this.setCubePosition(cubeIdB, a.r, a.c)
 
 		await Promise.all([
 			new Promise<void>((resolve) => {
@@ -647,7 +664,7 @@ export class GameRenderer {
 				gsap.to(containerA.container, {
 					x: posBX,
 					y: posBY,
-					duration: 0.2,
+					duration: 0.22,
 					ease: 'power2.out',
 					onComplete: resolve,
 				})
@@ -657,7 +674,7 @@ export class GameRenderer {
 				gsap.to(containerB.container, {
 					x: posAX,
 					y: posAY,
-					duration: 0.2,
+					duration: 0.22,
 					ease: 'power2.out',
 					onComplete: resolve,
 				})
@@ -676,7 +693,7 @@ export class GameRenderer {
 		if (!cubeContainer) return
 
 		// Update position
-		this.cubePositions.set(cubeId, { r: to.r, c: to.c })
+		this.setCubePosition(cubeId, to.r, to.c)
 
 		const targetX = to.c * this.tileSize
 		const targetY = this.calculateYFromBottom(to.r)
@@ -686,7 +703,7 @@ export class GameRenderer {
 			gsap.to(cubeContainer.container, {
 				x: targetX,
 				y: targetY,
-				duration: 0.2,
+				duration: 0.22,
 				ease: 'power2.out',
 				onComplete: resolve,
 			})
@@ -716,24 +733,31 @@ export class GameRenderer {
 				cubeId = this.findCubeIdAt(item.from.r, item.from.c)
 			}
 			if (cubeId === null) continue
-			finalFallByCube.set(cubeId, { to: item.to, from: item.from })
+			const existing = finalFallByCube.get(cubeId)
+			if (existing) {
+				finalFallByCube.set(cubeId, { from: existing.from, to: item.to })
+			} else {
+				finalFallByCube.set(cubeId, { from: item.from, to: item.to })
+			}
 		}
 
 		const animations = Array.from(finalFallByCube.entries()).map(([cubeId, item]) => {
 			const cubeContainer = this.cubeContainers.get(cubeId)
 			if (!cubeContainer) return Promise.resolve()
 
-			this.cubePositions.set(cubeId, { r: item.to.r, c: item.to.c })
+			this.setCubePosition(cubeId, item.to.r, item.to.c)
 
 			const targetX = item.to.c * this.tileSize
 			const targetY = this.calculateYFromBottom(item.to.r)
+			const fallDistance = Math.max(1, Math.abs(item.to.r - item.from.r))
+			const duration = Math.min(0.5, 0.16 + fallDistance * 0.06)
 
 			return new Promise<void>((resolve) => {
 				gsap.killTweensOf(cubeContainer.container)
 				gsap.to(cubeContainer.container, {
 					x: targetX,
 					y: targetY,
-					duration: 0.3,
+					duration,
 					ease: 'power2.out',
 					onComplete: resolve,
 				})
@@ -940,7 +964,7 @@ export class GameRenderer {
 		// Remove from maps
 		cubeIdsToRemove.forEach((id) => {
 			this.cubeContainers.delete(id)
-			this.cubePositions.delete(id)
+			this.deleteCubePosition(id)
 		})
 	}
 
@@ -967,7 +991,7 @@ export class GameRenderer {
 			// Иначе спавн может пройти, но плитка останется невидимой.
 			if (cubeContainer && !cubeContainer.container.parent) {
 				this.cubeContainers.delete(cell.id)
-				this.cubePositions.delete(cell.id)
+				this.deleteCubePosition(cell.id)
 				cubeContainer = undefined
 			}
 
@@ -1040,7 +1064,7 @@ export class GameRenderer {
 
 			const targetRow = cell.toRow !== undefined ? cell.toRow : cell.r
 			// Гарантируем синхронизацию позиции в карте даже если она была потеряна.
-			this.cubePositions.set(cell.id, { r: targetRow, c: cell.c })
+			this.setCubePosition(cell.id, targetRow, cell.c)
 			const targetY = this.calculateYFromBottom(targetRow)
 
 			if (cell.fromRow !== undefined && cell.fromRow < 0) {
@@ -1095,24 +1119,31 @@ export class GameRenderer {
 				return new Promise<void>((resolve) => {
 					const container = cubeContainer.container
 
+					gsap.killTweensOf(container)
+					if (container.scale) {
+						gsap.killTweensOf(container.scale)
+						gsap.set(container.scale, { x: 0, y: 0 })
+					}
 					gsap.to(container, {
 						alpha: 1,
-						scale: 1,
-						duration: 0.15,
-						ease: 'back.out',
-						onComplete: () => {
-							// КРИТИЧНО: Проверяем, что контейнер еще существует перед установкой значений
-							if (!container || !container.scale) {
-								resolve()
-								return
-							}
-
-							// Убеждаемся, что финальные значения установлены
-							container.alpha = 1
-							container.scale.set(1)
-							resolve()
-						},
+						duration: 0.2,
+						ease: 'power2.out',
 					})
+					if (container.scale) {
+						gsap.to(container.scale, {
+							x: 1,
+							y: 1,
+							duration: 0.24,
+							ease: 'back.out(1.5)',
+							onComplete: () => {
+								container.alpha = 1
+								container.scale?.set(1)
+								resolve()
+							},
+						})
+					} else {
+						resolve()
+					}
 				})
 			}
 		})
@@ -1138,7 +1169,7 @@ export class GameRenderer {
 				cubeContainer = this.createCubeSprite(tempCube, targetRow, cell.c, 1, 1)
 			}
 
-			this.cubePositions.set(cell.id, { r: targetRow, c: cell.c })
+			this.setCubePosition(cell.id, targetRow, cell.c)
 			const container = cubeContainer.container
 			container.x = cell.c * this.tileSize
 			container.y = targetY
@@ -1158,12 +1189,34 @@ export class GameRenderer {
 	}
 
 	private findCubeIdAt(r: number, c: number): number | null {
-		for (const [cubeId, pos] of this.cubePositions.entries()) {
-			if (pos.r === r && pos.c === c) {
-				return cubeId
+		return this.positionToCubeId.get(this.makePosKey(r, c)) ?? null
+	}
+
+	private makePosKey(r: number, c: number): string {
+		return `${r},${c}`
+	}
+
+	private setCubePosition(cubeId: number, r: number, c: number): void {
+		const prev = this.cubePositions.get(cubeId)
+		if (prev) {
+			const prevKey = this.makePosKey(prev.r, prev.c)
+			if (this.positionToCubeId.get(prevKey) === cubeId) {
+				this.positionToCubeId.delete(prevKey)
 			}
 		}
-		return null
+		this.cubePositions.set(cubeId, { r, c })
+		this.positionToCubeId.set(this.makePosKey(r, c), cubeId)
+	}
+
+	private deleteCubePosition(cubeId: number): void {
+		const prev = this.cubePositions.get(cubeId)
+		if (prev) {
+			const prevKey = this.makePosKey(prev.r, prev.c)
+			if (this.positionToCubeId.get(prevKey) === cubeId) {
+				this.positionToCubeId.delete(prevKey)
+			}
+		}
+		this.cubePositions.delete(cubeId)
 	}
 
 	updateTileSize(
@@ -1642,7 +1695,7 @@ export class GameRenderer {
 					// Детерминированно приводим визуальное состояние к grid.
 					const pos = this.cubePositions.get(cube.id)
 					if (forceUpdate || !pos || pos.r !== r || pos.c !== c) {
-						this.cubePositions.set(cube.id, { r, c })
+						this.setCubePosition(cube.id, r, c)
 					}
 
 					cubeContainer.container.x = c * this.tileSize
@@ -1670,28 +1723,10 @@ export class GameRenderer {
 		}
 
 		// Remove cubes that are no longer in grid (but only if they weren't already removed by animateRemove)
-		// КРИТИЧНО: Проверяем дважды, что куб действительно отсутствует в grid перед удалением
-		// Это защищает от случайного удаления существующих спрайтов, особенно в первой строке
 		const cubesToRemove: number[] = []
 		for (const cubeId of this.cubeContainers.keys()) {
 			if (!cubesInGrid.has(cubeId)) {
-				// Дополнительная проверка: убеждаемся, что куб действительно отсутствует в grid
-				let foundInGrid = false
-				for (let r = 0; r < grid.length; r++) {
-					for (let c = 0; c < WIDTH; c++) {
-						const cube = grid[r]?.[c]
-						if (cube && cube.id === cubeId) {
-							foundInGrid = true
-							break
-						}
-					}
-					if (foundInGrid) break
-				}
-
-				// Удаляем только если куб действительно отсутствует в grid
-				if (!foundInGrid) {
-					cubesToRemove.push(cubeId)
-				}
+				cubesToRemove.push(cubeId)
 			}
 		}
 
@@ -1712,7 +1747,7 @@ export class GameRenderer {
 				}
 
 				this.cubeContainers.delete(cubeId)
-				this.cubePositions.delete(cubeId)
+				this.deleteCubePosition(cubeId)
 			}
 		}
 
@@ -1722,7 +1757,7 @@ export class GameRenderer {
 		}
 
 		// Self-heal: очищаем визуальные дубли в сцене
-		this.cleanupOrphanCubeSprites()
+		this.maybeCleanupOrphanCubeSprites()
 	}
 
 	/**
@@ -2156,6 +2191,8 @@ export class GameRenderer {
 			}
 		})
 		this.cubeContainers.clear()
+		this.cubePositions.clear()
+		this.positionToCubeId.clear()
 
 		// КРИТИЧНО: НЕ уничтожаем Application - он принадлежит PixiService
 		// Просто очищаем ссылки

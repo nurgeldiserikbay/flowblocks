@@ -56,6 +56,7 @@ export class GameController {
 	private lastStateCheckTime: number = 0 // Время последней проверки состояния игры
 	private readonly STATE_CHECK_INTERVAL = 2000 // Проверяем состояние не чаще чем раз в 2 секунды
 	private lastHasMovesCheck: { gridHash: string; result: boolean } | null = null // Кэш последней проверки hasPossibleMoves
+	private readonly isAndroidDevice = /Android/i.test(navigator.userAgent)
 
 	constructor(renderer: GameRenderer, opts?: GameControllerOptions) {
 		this.renderer = renderer
@@ -264,17 +265,7 @@ export class GameController {
 		}
 
 		// Ждем несколько дополнительных кадров рендера
-		if (this.renderer && this.renderer.isInitialized()) {
-			// Используем renderer для ожидания дополнительных кадров
-			for (let i = 0; i < 2; i++) {
-				await this.renderer.waitForNextFrame()
-			}
-		} else {
-			// Fallback: ждем через requestAnimationFrame
-			for (let i = 0; i < 2; i++) {
-				await new Promise((resolve) => requestAnimationFrame(resolve))
-			}
-		}
+		await this.waitRendererFrames(this.isAndroidDevice ? 1 : 2)
 
 		// 2. КРИТИЧНО: Скрываем loading overlay ПОСЛЕ того, как плитки видны, но ДО скролла
 		// Это гарантирует правильный порядок: tiles visible → loading disappears → scroll → timer
@@ -413,9 +404,12 @@ export class GameController {
 			if (!this.store.isLocked) {
 				const now = Date.now()
 				const timeSinceLastCheck = now - this.lastStateCheckTime
+				const stateCheckInterval = this.isAndroidDevice
+					? this.STATE_CHECK_INTERVAL + 1200
+					: this.STATE_CHECK_INTERVAL
 
 				// Проверяем состояние только если прошло достаточно времени с последней проверки
-				if (timeSinceLastCheck >= this.STATE_CHECK_INTERVAL) {
+				if (timeSinceLastCheck >= stateCheckInterval) {
 					setTimeout(() => {
 						if (!this.store.isLocked && !this.store.isGameOver) {
 							this.lastStateCheckTime = Date.now()
@@ -533,18 +527,13 @@ export class GameController {
 				// ШАГ 1.2: Обрабатываем spawn события и ждем их завершения
 				if (spawnEvents.length > 0) {
 					await this.renderer.applyEvents(spawnEvents)
-					// Дополнительное ожидание для гарантии завершения spawn анимаций
-					await this.renderer.waitForNextFrame()
-					await this.renderer.waitForNextFrame()
+					await this.waitRendererFrames(1)
 				}
 
 				// ШАГ 1.3: КРИТИЧНО: Обрабатываем fall для новых кубов и ждем их полного завершения
 				if (newCubesFallEvents.length > 0) {
 					await this.renderer.applyEvents(newCubesFallEvents)
-					// Дополнительное ожидание для гарантии завершения fall анимаций для новых кубов
-					await this.renderer.waitForNextFrame()
-					await this.renderer.waitForNextFrame()
-					await this.renderer.waitForNextFrame()
+					await this.waitRendererFrames(this.isAndroidDevice ? 1 : 2)
 				}
 
 				// Обновляем moves для новых плиток после завершения всех анимаций
@@ -574,8 +563,8 @@ export class GameController {
 
 				// ШАГ 2: КРИТИЧНО: Пауза после завершения анимации падения новых блоков перед проверкой матчей
 				// Это дает пользователю время понять, что произошло после спавна и падения
-				// Длительность паузы подобрана для лучшего UX (400ms - достаточно для понимания, но не слишком долго)
-				const SPAWN_MATCH_CHECK_DELAY = 400
+				// На Android уменьшаем задержку, чтобы игра ощущалась отзывчивее.
+				const SPAWN_MATCH_CHECK_DELAY = this.isAndroidDevice ? 220 : 320
 				await new Promise((resolve) =>
 					setTimeout(resolve, SPAWN_MATCH_CHECK_DELAY)
 				)
@@ -1134,18 +1123,13 @@ export class GameController {
 				// ШАГ 1.2: Обрабатываем spawn события и ждем их завершения
 				if (spawnEvents.length > 0) {
 					await this.renderer.applyEvents(spawnEvents)
-					// Дополнительное ожидание для гарантии завершения spawn анимаций
-					await this.renderer.waitForNextFrame()
-					await this.renderer.waitForNextFrame()
+					await this.waitRendererFrames(1)
 				}
 
 				// ШАГ 1.3: КРИТИЧНО: Обрабатываем fall для новых кубов и ждем их полного завершения
 				if (newCubesFallEvents.length > 0) {
 					await this.renderer.applyEvents(newCubesFallEvents)
-					// Дополнительное ожидание для гарантии завершения fall анимаций для новых кубов
-					await this.renderer.waitForNextFrame()
-					await this.renderer.waitForNextFrame()
-					await this.renderer.waitForNextFrame()
+					await this.waitRendererFrames(this.isAndroidDevice ? 1 : 2)
 				}
 
 				// Обновляем moves для новых плиток после завершения всех анимаций
@@ -1197,6 +1181,18 @@ export class GameController {
 			// КРИТИЧНО: Разблокируем игру ТОЛЬКО после завершения всех операций
 			// Это гарантирует правильную последовательность: сначала все анимации завершаются, потом игра разблокируется
 			this.store.setLocked(false)
+		}
+	}
+
+	private async waitRendererFrames(frames: number): Promise<void> {
+		if (frames <= 0) return
+
+		for (let i = 0; i < frames; i++) {
+			if (this.renderer && this.renderer.isInitialized()) {
+				await this.renderer.waitForNextFrame()
+			} else {
+				await new Promise((resolve) => requestAnimationFrame(resolve))
+			}
 		}
 	}
 

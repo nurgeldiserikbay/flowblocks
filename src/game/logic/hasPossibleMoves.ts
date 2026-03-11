@@ -3,8 +3,12 @@
  */
 
 import type { Cube, Position } from './types'
-import { getCube, WIDTH, isAdjacent, swapCubes, setCube } from './grid'
+import { getCube, WIDTH, isAdjacent, setCube } from './grid'
 import { findMatches } from './matches'
+
+const IS_ANDROID_DEVICE =
+	typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
+const MAX_SEARCH_DEPTH = IS_ANDROID_DEVICE ? 4 : 5
 
 /**
  * Check if swapping two cubes would create a match
@@ -310,7 +314,7 @@ export function hasPossibleMoves(grid: (Cube | null)[][]): boolean {
 			// Если простые случаи не сработали, проверяем последовательности ходов (swap и slide)
 			// КРИТИЧНО: Проверяем даже если moves = 1, так как может быть комбинация после гравитации
 			// Ограничиваем глубину рекурсии для оптимизации
-			const maxDepth = Math.min(cube.moves, 5) // Максимум 5 уровней рекурсии
+			const maxDepth = Math.min(cube.moves, MAX_SEARCH_DEPTH)
 			if (maxDepth >= 1) {
 				const testGrid = grid.map((row) => (row ? [...row] : []))
 				const visited = new Set<string>()

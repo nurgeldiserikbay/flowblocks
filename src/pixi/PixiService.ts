@@ -12,6 +12,21 @@ export interface PixiServiceOptions {
 	height?: number
 }
 
+function getOptimalRenderResolution(): number {
+	const dpr = window.devicePixelRatio || 1
+	const isAndroid = /Android/i.test(navigator.userAgent)
+	const cores = navigator.hardwareConcurrency || 4
+	const memory = Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory || 4)
+
+	// На Android высокий DPR сильно бьет по fill-rate, поэтому ограничиваем рендер-буфер.
+	if (isAndroid) {
+		const maxAndroidResolution = cores <= 4 || memory <= 4 ? 1.25 : 1.5
+		return Math.min(dpr, maxAndroidResolution)
+	}
+
+	return Math.min(dpr, 2)
+}
+
 class PixiServiceClass {
 	private app: Application | null = null
 	private startSceneContainer: Container | null = null
@@ -50,7 +65,7 @@ class PixiServiceClass {
 
 		// Создаем Pixi Application
 		this.app = new Application()
-		const devicePixelRatio = window.devicePixelRatio || 1
+		const renderResolution = getOptimalRenderResolution()
 		const logicalWidth = options?.width || 320
 		const logicalHeight = options?.height || 400
 
@@ -60,9 +75,16 @@ class PixiServiceClass {
 			height: logicalHeight,
 			backgroundColor: 0x000000,
 			backgroundAlpha: 0,
-			resolution: devicePixelRatio,
+			resolution: renderResolution,
 			autoDensity: true,
+			antialias: false,
+			powerPreference: 'high-performance',
 		})
+
+		// Стабилизируем delta time в мобильном WebView, чтобы анимации не "пролетали"
+		// после кратковременных фризов.
+		this.app.ticker.maxFPS = 60
+		this.app.ticker.minFPS = 30
 
 		// Создаем сцены
 		this.startSceneContainer = new Container()

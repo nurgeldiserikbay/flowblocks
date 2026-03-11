@@ -103,6 +103,31 @@
 						/>
 					</div>
 				</div>
+
+				<div
+					v-if="!gameStore.isGameOver"
+					class="column-danger-indicator"
+					aria-live="polite"
+				>
+					<div class="column-danger-indicator__track">
+						<div
+							v-for="(heightPercent, colIndex) in columnHeightPercents"
+							:key="colIndex"
+							class="column-danger-indicator__col"
+							:class="{
+								'column-danger-indicator__col--active':
+									colIndex === primaryPriorityColumn,
+								'column-danger-indicator__col--tied':
+									priorityColumnIndexes.includes(colIndex),
+							}"
+						>
+							<div
+								class="column-danger-indicator__fill"
+								:style="{ height: `${heightPercent}%` }"
+							/>
+						</div>
+					</div>
+				</div>
 			</div>
 
 			<div class="game-page__bottom-section"></div>
@@ -241,7 +266,7 @@ function isInsideMomentumScroll(target: HTMLElement | null): boolean {
 function isMobileDevice(): boolean {
 	return (
 		/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-			navigator.userAgent
+			navigator.userAgent,
 		) ||
 		'ontouchstart' in window ||
 		navigator.maxTouchPoints > 0
@@ -439,7 +464,7 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 	}
 
 	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === playAreaTouchId
+		(t) => t.identifier === playAreaTouchId,
 	)
 	if (!touch) {
 		if (e.touches.length === 0) {
@@ -451,7 +476,7 @@ function handlePlayAreaTouchMove(e: TouchEvent) {
 	// Проверяем, не находится ли текущее касание на интерактивном элементе
 	const target = document.elementFromPoint(
 		touch.clientX,
-		touch.clientY
+		touch.clientY,
 	) as HTMLElement
 	if (isInteractiveElement(target)) {
 		// Если касание переместилось на интерактивный элемент и скролл еще не активирован
@@ -882,7 +907,7 @@ function handleLevelIndicatorBarTouchMove(e: TouchEvent) {
 		return
 
 	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === levelIndicatorBarTouchId
+		(t) => t.identifier === levelIndicatorBarTouchId,
 	)
 	if (!touch) return
 
@@ -1017,7 +1042,7 @@ function handleLevelIndicatorTouchMove(e: TouchEvent) {
 	if (!momentumScrollRef.value || !levelIndicatorRef.value) return
 
 	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === levelIndicatorTouchId
+		(t) => t.identifier === levelIndicatorTouchId,
 	)
 	if (!touch) return
 
@@ -1145,7 +1170,7 @@ const formattedTime = computed(() => {
 })
 
 const gridHeight = computed(
-	() => gameStore.grid?.length ?? gameStore.getHeight()
+	() => gameStore.grid?.length ?? gameStore.getHeight(),
 )
 // Индикатор «сколько рядов до верха сосуда»: верхняя занятая строка (0 = у края, game over)
 const topmostRow = computed(() => {
@@ -1169,6 +1194,51 @@ const levelBarColor = computed(() => {
 	if (p >= 80) return 'rgb(239, 68, 68)' // red
 	if (p >= 50) return 'rgb(250, 204, 21)' // amber
 	return 'rgb(74, 222, 128)' // green
+})
+
+const columnHeights = computed(() => {
+	const g = gameStore.grid
+	const h = gridHeight.value
+	if (!g?.length || h <= 0) return Array.from({ length: WIDTH }, () => 0)
+
+	return Array.from({ length: WIDTH }, (_, c) => {
+		for (let r = 0; r < h; r++) {
+			if (g[r]?.[c]) {
+				return h - r
+			}
+		}
+		return 0
+	})
+})
+
+const maxColumnHeight = computed(() => {
+	const heights = columnHeights.value
+	if (!heights.length) return 0
+	return Math.max(...heights)
+})
+
+const priorityColumnIndexes = computed(() => {
+	const maxHeight = maxColumnHeight.value
+	if (maxHeight <= 0) return [] as number[]
+	return columnHeights.value.reduce<number[]>((acc, height, index) => {
+		if (height === maxHeight) acc.push(index)
+		return acc
+	}, [])
+})
+
+const primaryPriorityColumn = computed(() => {
+	const priorities = priorityColumnIndexes.value
+	return priorities.length > 0 ? priorities[0] : -1
+})
+
+const columnHeightPercents = computed(() => {
+	const h = gridHeight.value
+	if (h <= 0) return Array.from({ length: WIDTH }, () => 0)
+	return columnHeights.value.map((value) => {
+		if (value <= 0) return 6
+		const pct = (value / h) * 100
+		return Math.max(12, Math.min(100, pct))
+	})
 })
 
 // Danger state: tiles are near the top (less than 20% remaining)
@@ -1310,7 +1380,7 @@ function initCanvas(): void {
 }
 
 function getPositionFromEvent(
-	e: MouseEvent | TouchEvent | PointerEvent
+	e: MouseEvent | TouchEvent | PointerEvent,
 ): { r: number; c: number } | null {
 	// КРИТИЧНО: Используем canvas из PixiService
 	const pixiCanvas = getPixiCanvas()
@@ -1383,7 +1453,7 @@ function activateCanvasDragScrolling() {
 	canvasDragScrolling = true
 	momentumScrollRef.value.updateBounds()
 	momentumScrollRef.value.startDrag(performance.now())
-	
+
 	// Теперь блокируем события игры
 	const pixiCanvas = getPixiCanvas()
 	if (pixiCanvas) {
@@ -1404,8 +1474,8 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 		e instanceof TouchEvent
 			? 'touch'
 			: e instanceof PointerEvent
-			? 'pointer'
-			: 'mouse'
+				? 'pointer'
+				: 'mouse'
 	const now = Date.now()
 	if (now - lastEventTime < 50 && lastEventType !== eventType) {
 		// Игнорируем событие, если недавно было обработано событие другого типа
@@ -1691,7 +1761,7 @@ async function startGameWithAds(): Promise<void> {
 			renderer.resizeCanvas(
 				parseInt(pixiCanvas.style.width) || containerWidth,
 				expectedCanvasHeight,
-				expectedHeight
+				expectedHeight,
 			)
 		}
 
@@ -1730,23 +1800,23 @@ async function startGameWithAds(): Promise<void> {
 
 			const timeoutId = setTimeout(() => {
 				console.warn(
-					`[GamePage] Interstitial close timeout after ${INTERSTITIAL_CLOSE_TIMEOUT_MS}ms, continuing game startup`
+					`[GamePage] Interstitial close timeout after ${INTERSTITIAL_CLOSE_TIMEOUT_MS}ms, continuing game startup`,
 				)
 				finish()
 			}, INTERSTITIAL_CLOSE_TIMEOUT_MS)
 
 			void admob
 				.interstitial({
-				isFirst: false,
-				onInterstitialAdClosed: () => {
-					clearTimeout(timeoutId)
-					finish()
-				},
-			})
+					isFirst: false,
+					onInterstitialAdClosed: () => {
+						clearTimeout(timeoutId)
+						finish()
+					},
+				})
 				.catch((error) => {
 					console.warn(
 						'[GamePage] Interstitial failed, continuing game startup:',
-						error
+						error,
 					)
 					clearTimeout(timeoutId)
 					finish()
@@ -1789,7 +1859,7 @@ onMounted(async () => {
 	// Если контейнер не найден, пытаемся найти его через playAreaRef
 	if (!container && playAreaRef.value) {
 		container = playAreaRef.value.querySelector(
-			'.game-page__canvas-container'
+			'.game-page__canvas-container',
 		) as HTMLElement
 	}
 
@@ -1803,7 +1873,7 @@ onMounted(async () => {
 
 	if (!container) {
 		console.error(
-			'[GamePage] onMounted: Canvas container not found after waiting'
+			'[GamePage] onMounted: Canvas container not found after waiting',
 		)
 		return
 	}
@@ -1815,7 +1885,7 @@ onMounted(async () => {
 		containerStyle.visibility === 'hidden'
 	) {
 		console.warn(
-			'[GamePage] onMounted: Canvas container is hidden, waiting for visibility...'
+			'[GamePage] onMounted: Canvas container is hidden, waiting for visibility...',
 		)
 		// Ждем, пока контейнер станет видимым
 		await new Promise((resolve) => {
@@ -1825,10 +1895,11 @@ onMounted(async () => {
 				if (style.display !== 'none' && style.visibility !== 'hidden') {
 					resolve(undefined)
 				} else if (
-					performance.now() - startedAt >= CONTAINER_VISIBILITY_TIMEOUT_MS
+					performance.now() - startedAt >=
+					CONTAINER_VISIBILITY_TIMEOUT_MS
 				) {
 					console.warn(
-						`[GamePage] onMounted: container visibility wait timeout after ${CONTAINER_VISIBILITY_TIMEOUT_MS}ms, continuing startup`
+						`[GamePage] onMounted: container visibility wait timeout after ${CONTAINER_VISIBILITY_TIMEOUT_MS}ms, continuing startup`,
 					)
 					resolve(undefined)
 				} else {
@@ -1842,7 +1913,7 @@ onMounted(async () => {
 	// КРИТИЧНО: Проверяем, что PixiService инициализирован
 	if (!PixiService.isReady()) {
 		console.warn(
-			'[GamePage] onMounted: PixiService not initialized. Initializing fallback...'
+			'[GamePage] onMounted: PixiService not initialized. Initializing fallback...',
 		)
 		// Попытка инициализировать в экстренном случае (fallback для прямого перехода на GamePage)
 		try {
@@ -1854,7 +1925,7 @@ onMounted(async () => {
 		} catch (error) {
 			console.error(
 				'[GamePage] onMounted: Failed to initialize PixiService:',
-				error
+				error,
 			)
 			return
 		}
@@ -1871,7 +1942,7 @@ onMounted(async () => {
 	} catch (error) {
 		console.error(
 			'[GamePage] onMounted: Failed to attach canvas to host:',
-			error
+			error,
 		)
 		return
 	}
@@ -1921,7 +1992,7 @@ onMounted(async () => {
 				computedHeight: window.getComputedStyle(container).height,
 				parentWidth: container.parentElement?.getBoundingClientRect().width,
 				parentHeight: container.parentElement?.getBoundingClientRect().height,
-			}
+			},
 		)
 		// Продолжаем с минимальными размерами вместо ошибки
 		console.warn('[GamePage] onMounted: Using fallback dimensions (320x400)')
@@ -1944,7 +2015,7 @@ onMounted(async () => {
 		// Принудительно устанавливаем видимость если нужно
 		if (canvasStyle.display === 'none' || canvasRect.width === 0) {
 			console.warn(
-				'[GamePage] onMounted: Canvas is hidden or has zero width, forcing visibility'
+				'[GamePage] onMounted: Canvas is hidden or has zero width, forcing visibility',
 			)
 			pixiCanvasAfterInit.style.display = 'block'
 			pixiCanvasAfterInit.style.visibility = 'visible'
@@ -2037,7 +2108,7 @@ onMounted(async () => {
 	const level = levelParam ? parseInt(String(levelParam), 10) : 1
 	if (isNaN(level) || level < 1) {
 		console.warn(
-			`[GamePage] Invalid level parameter: ${levelParam}, using default level 1`
+			`[GamePage] Invalid level parameter: ${levelParam}, using default level 1`,
 		)
 		gameStore.setCurrentLevel(1)
 	} else {
@@ -2061,7 +2132,7 @@ onMounted(async () => {
 	const pixiCanvasForHandlers = getPixiCanvas()
 	if (!pixiCanvasForHandlers) {
 		console.error(
-			'[GamePage] onMounted: Failed to get canvas for event handlers'
+			'[GamePage] onMounted: Failed to get canvas for event handlers',
 		)
 		return
 	}
@@ -2440,9 +2511,7 @@ onBeforeUnmount(() => {
 	// Скрываем баннер после основной очистки и не блокируем unmount
 	void Promise.race([
 		admob.hideBanner(),
-		new Promise<void>((resolve) =>
-			setTimeout(resolve, BANNER_HIDE_TIMEOUT_MS)
-		),
+		new Promise<void>((resolve) => setTimeout(resolve, BANNER_HIDE_TIMEOUT_MS)),
 	]).catch((error) => {
 		console.warn('[GamePage] Failed to hide banner ad:', error)
 	})
@@ -2501,6 +2570,11 @@ async function restart(): Promise<void> {
 }
 
 .game-page {
+	--ad-reserve-height: calc(
+		44px + 0.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px))
+	);
+	--level-indicator-width: 0.4rem;
+	--play-area-gap: 0.375rem;
 	flex: 1;
 	display: flex;
 	flex-direction: column;
@@ -2548,7 +2622,8 @@ async function restart(): Promise<void> {
 					rgba(220, 38, 38, 0.6) 100%
 				);
 				border-color: rgba(239, 68, 68, 0.5);
-				box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4),
+				box-shadow:
+					0 4px 16px rgba(239, 68, 68, 0.4),
 					0 0 0 1px rgba(255, 255, 255, 0.1),
 					inset 0 1px 2px rgba(255, 255, 255, 0.2);
 				animation: danger-glow 1.5s ease-in-out infinite;
@@ -2557,12 +2632,24 @@ async function restart(): Promise<void> {
 	}
 
 	@media (max-width: 640px) {
+		--level-indicator-width: 0.5rem;
 		padding-left: clamp(0.5rem, 1.5vw, 0.75rem);
 		padding-right: clamp(0.5rem, 1.5vw, 0.75rem);
 		gap: 0.5rem;
 	}
 
+	@media (max-width: 480px) {
+		--level-indicator-width: 0.6rem;
+	}
+
+	@media (max-width: 360px) {
+		--level-indicator-width: 0.7rem;
+	}
+
 	&--android {
+		--ad-reserve-height: calc(
+			8px + max(0.05rem, env(safe-area-inset-bottom, 0px))
+		);
 		gap: 0.125rem;
 
 		.game-page__bottom-section {
@@ -2576,9 +2663,12 @@ async function restart(): Promise<void> {
 	}
 
 	&__play-area {
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) var(--level-indicator-width);
+		grid-template-rows: minmax(0, 1fr) auto;
+		column-gap: var(--play-area-gap);
+		row-gap: 0.35rem;
 		align-items: stretch;
-		gap: 0.375rem;
 		flex: 1;
 		min-height: 0; // Важно для flex-контейнеров, чтобы они правильно ограничивали высоту
 		overflow: hidden; // Предотвращаем выход контента за пределы
@@ -2595,7 +2685,9 @@ async function restart(): Promise<void> {
 		padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
 		// Резервируем место под нижний баннер, но на мобильных уменьшаем запас,
 		// чтобы не съедать игровую область.
-		min-height: calc(44px + 0.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px)));
+		min-height: calc(
+			44px + 0.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px))
+		);
 
 		@media (max-width: 640px) {
 			gap: 0.4rem;
@@ -2614,12 +2706,16 @@ async function restart(): Promise<void> {
 	}
 
 	&__scroll-container {
+		grid-column: 1;
+		grid-row: 1;
 		flex: 1;
 		min-height: 0; // Важно для правильной работы flex
 		backdrop-filter: blur(24px);
 		-webkit-backdrop-filter: blur(24px);
-		box-shadow: inset 0 4px 32px rgba(0, 0, 0, 0.5),
-			0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+		box-shadow:
+			inset 0 4px 32px rgba(0, 0, 0, 0.5),
+			0 8px 32px rgba(0, 0, 0, 0.4),
+			0 0 0 1px rgba(255, 255, 255, 0.1);
 		border: 2px solid rgba(255, 255, 255, 0.25);
 		background: rgba(255, 255, 255, 0.05);
 		border-radius: 20px;
@@ -2655,6 +2751,8 @@ async function restart(): Promise<void> {
 }
 
 .level-indicator {
+	grid-column: 2;
+	grid-row: 1;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
@@ -2741,7 +2839,9 @@ async function restart(): Promise<void> {
 		right: 0;
 		width: 100%;
 		border-radius: 0 0 5px 5px;
-		transition: height 0.25s ease, background-color 0.2s ease;
+		transition:
+			height 0.25s ease,
+			background-color 0.2s ease;
 		// Улучшаем видимость заполнения на мобильных устройствах
 		box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.3);
 		visibility: visible !important;
@@ -2804,7 +2904,8 @@ async function restart(): Promise<void> {
 		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 		touch-action: manipulation;
 		flex-shrink: 0;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25),
+		box-shadow:
+			0 4px 12px rgba(0, 0, 0, 0.25),
 			0 0 0 1px rgba(255, 255, 255, 0.1),
 			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		padding: 0;
@@ -2816,7 +2917,8 @@ async function restart(): Promise<void> {
 				rgba(255, 255, 255, 0.2) 100%
 			);
 			transform: scale(1.1);
-			box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35),
+			box-shadow:
+				0 6px 20px rgba(0, 0, 0, 0.35),
 				0 0 0 1px rgba(255, 255, 255, 0.15),
 				inset 0 1px 3px rgba(255, 255, 255, 0.3);
 			border-color: rgba(255, 255, 255, 0.5);
@@ -2824,7 +2926,8 @@ async function restart(): Promise<void> {
 
 		&:active {
 			transform: scale(0.95);
-			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25),
+			box-shadow:
+				0 2px 8px rgba(0, 0, 0, 0.25),
 				inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		}
 
@@ -2884,7 +2987,8 @@ async function restart(): Promise<void> {
 		-webkit-backdrop-filter: blur(16px);
 		border-radius: 14px;
 		border: 1px solid rgba(255, 255, 255, 0.3);
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35),
+		box-shadow:
+			0 4px 16px rgba(0, 0, 0, 0.35),
 			0 0 0 1px rgba(255, 255, 255, 0.1),
 			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
@@ -2986,8 +3090,10 @@ async function restart(): Promise<void> {
 		text-align: center;
 		color: white;
 		border: 2px solid rgba(255, 255, 255, 0.2);
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15),
-			0 0 0 1px rgba(139, 92, 246, 0.25), 0 24px 48px rgba(0, 0, 0, 0.6),
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.15),
+			0 0 0 1px rgba(139, 92, 246, 0.25),
+			0 24px 48px rgba(0, 0, 0, 0.6),
 			0 0 80px rgba(139, 92, 246, 0.2);
 		animation: game-overlay-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
 	}
@@ -3033,6 +3139,77 @@ async function restart(): Promise<void> {
 			text-shadow: 0 0 20px rgba(196, 181, 253, 0.5);
 		}
 	}
+}
+
+.column-danger-indicator {
+	grid-column: 1;
+	grid-row: 2;
+	width: 100%;
+	box-sizing: border-box;
+	pointer-events: none;
+	display: flex;
+	flex-direction: column;
+	gap: 0.3rem;
+	padding: 0.35rem 1px 0.3rem;
+	border-radius: 12px;
+	background: linear-gradient(
+		135deg,
+		rgba(10, 12, 28, 0.78) 0%,
+		rgba(35, 21, 62, 0.74) 100%
+	);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+}
+
+.column-danger-indicator__track {
+	display: grid;
+	grid-template-columns: repeat(8, minmax(0, 1fr));
+	gap: 0;
+	align-items: end;
+	width: 100%;
+}
+
+.column-danger-indicator__col {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 0;
+}
+
+.column-danger-indicator__fill {
+	width: calc(100% - 4px);
+	margin: 0 auto;
+	min-height: 4px;
+	border-radius: 4px;
+	background: linear-gradient(
+		180deg,
+		rgba(74, 222, 128, 0.98) 0%,
+		rgba(34, 197, 94, 0.82) 100%
+	);
+	transition:
+		height 0.2s ease,
+		background-color 0.2s ease,
+		transform 0.2s ease;
+}
+
+.column-danger-indicator__col--tied .column-danger-indicator__fill {
+	background: linear-gradient(
+		180deg,
+		rgba(250, 204, 21, 0.98) 0%,
+		rgba(245, 158, 11, 0.88) 100%
+	);
+}
+
+.column-danger-indicator__col--active .column-danger-indicator__fill {
+	background: linear-gradient(
+		180deg,
+		rgba(248, 113, 113, 1) 0%,
+		rgba(239, 68, 68, 0.95) 100%
+	);
+	transform: translateY(-1px);
+	box-shadow: 0 0 10px rgba(239, 68, 68, 0.45);
 }
 
 @keyframes game-overlay-fade {
@@ -3110,15 +3287,18 @@ async function restart(): Promise<void> {
 	font-size: 1.2rem;
 	font-weight: 700;
 	border-radius: 18px;
-	box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4),
+	box-shadow:
+		0 4px 16px rgba(139, 92, 246, 0.4),
 		inset 0 1px 0 rgba(255, 255, 255, 0.2);
 	color: #fff;
 
 	&:hover {
 		background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 50%, #7c3aed 100%);
 		border-color: rgba(196, 181, 253, 0.6);
-		box-shadow: 0 6px 24px rgba(139, 92, 246, 0.5),
-			0 0 32px rgba(139, 92, 246, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+		box-shadow:
+			0 6px 24px rgba(139, 92, 246, 0.5),
+			0 0 32px rgba(139, 92, 246, 0.25),
+			inset 0 1px 0 rgba(255, 255, 255, 0.25);
 		transform: translateY(-2px);
 	}
 
@@ -3195,12 +3375,14 @@ async function restart(): Promise<void> {
 @keyframes danger-glow {
 	0%,
 	100% {
-		box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4),
+		box-shadow:
+			0 4px 16px rgba(239, 68, 68, 0.4),
 			0 0 0 1px rgba(255, 255, 255, 0.1),
 			inset 0 1px 2px rgba(255, 255, 255, 0.2);
 	}
 	50% {
-		box-shadow: 0 6px 24px rgba(239, 68, 68, 0.6),
+		box-shadow:
+			0 6px 24px rgba(239, 68, 68, 0.6),
 			0 0 0 1px rgba(255, 255, 255, 0.15),
 			inset 0 1px 3px rgba(255, 255, 255, 0.3);
 	}
