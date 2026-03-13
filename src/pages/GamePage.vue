@@ -40,60 +40,25 @@
 				'game-page--android': isAndroidPlatform,
 			}"
 		>
-			<div
-				ref="playAreaRef"
-				class="game-page__play-area"
-				@pointerdown="handlePlayAreaPointerDown"
-				@pointermove="handlePlayAreaPointerMove"
-				@pointerup="handlePlayAreaPointerUp"
-				@pointercancel="handlePlayAreaPointerUp"
-				@touchstart="handlePlayAreaTouchStart"
-				@touchmove="handlePlayAreaTouchMove"
-				@touchend="handlePlayAreaTouchEnd"
-				@touchcancel="handlePlayAreaTouchEnd"
-			>
-				<MomentumScroll
-					ref="momentumScroll"
-					:drag-mult="1.55"
-					:wheel-mult="2.2"
-					:max-overscroll="80"
-					:momentum-resistance="0.9"
-					:spring-k="90"
-					:spring-damping="0.88"
-					class="game-page__scroll-container"
-				>
-					<div class="game-page__canvas-container">
-						<!-- Canvas будет заменен на canvas из PixiService при attachToHost -->
-						<!-- Но нужен ref для получения контейнера -->
-						<canvas ref="canvas" class="game-canvas"></canvas>
-					</div>
-				</MomentumScroll>
+		<div
+			ref="playAreaRef"
+			class="game-page__play-area"
+		>
+			<div class="game-page__scroll-container">
+				<div class="game-page__canvas-container">
+					<!-- Canvas будет заменен на canvas из PixiService при attachToHost -->
+					<!-- Но нужен ref для получения контейнера -->
+					<canvas ref="canvas" class="game-canvas"></canvas>
+				</div>
+			</div>
 
-				<div
-					v-if="!gameStore.isGameOver"
-					ref="levelIndicatorRef"
-					class="level-indicator"
-					:title="`Rows to top: ${rowsToTop}`"
-					@pointerdown="handleLevelIndicatorPointerDown"
-					@pointermove="handleLevelIndicatorPointerMove"
-					@pointerup="handleLevelIndicatorPointerUp"
-					@pointercancel="handleLevelIndicatorPointerUp"
-					@click="handleLevelIndicatorClick"
-					@touchstart="handleLevelIndicatorTouchStart"
-					@touchmove="handleLevelIndicatorTouchMove"
-					@touchend="handleLevelIndicatorTouchEnd"
-					@touchcancel="handleLevelIndicatorTouchEnd"
-				>
-					<div
-						class="level-indicator__bar"
-						@pointerdown.stop="handleLevelIndicatorBarPointerDown"
-						@pointermove.stop="handleLevelIndicatorBarPointerMove"
-						@pointerup.stop="handleLevelIndicatorBarPointerUp"
-						@pointercancel.stop="handleLevelIndicatorBarPointerUp"
-						@touchstart.stop="handleLevelIndicatorBarTouchStart"
-						@touchmove.stop="handleLevelIndicatorBarTouchMove"
-						@touchend.stop="handleLevelIndicatorBarTouchEnd"
-					>
+			<div
+				v-if="!gameStore.isGameOver"
+				ref="levelIndicatorRef"
+				class="level-indicator"
+				:title="`Rows to top: ${rowsToTop}`"
+			>
+				<div class="level-indicator__bar">
 						<div
 							class="level-indicator__fill"
 							:style="{
@@ -166,6 +131,7 @@
 import {
 	ref,
 	computed,
+	watch,
 	onMounted,
 	onBeforeUnmount,
 	useTemplateRef,
@@ -176,7 +142,6 @@ import { ScreenOrientation } from '@capacitor/screen-orientation'
 import { Capacitor } from '@capacitor/core'
 import AppLayout from '@/shared/components/AppLayout.vue'
 import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
-import MomentumScroll from '@/shared/components/MomentumScroll.vue'
 import { GameRenderer } from '@/game/render'
 import { GameController } from '@/game/GameController'
 import { useGameStore } from '@/shared/stores/gameStore'
@@ -191,8 +156,6 @@ const gameStore = useGameStore()
 const isAndroidPlatform = Capacitor.getPlatform() === 'android'
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
-const momentumScrollRef =
-	useTemplateRef<InstanceType<typeof MomentumScroll>>('momentumScroll')
 const levelIndicatorRef = useTemplateRef<HTMLElement>('levelIndicator')
 const playAreaRef = useTemplateRef<HTMLElement>('playArea')
 const isExitDialogOpen = ref(false)
@@ -207,930 +170,6 @@ function getPixiCanvas(): HTMLCanvasElement | null {
 	return PixiService.isReady() ? PixiService.getCanvas() : canvas.value
 }
 
-// Состояние для обработки событий на level-indicator
-let levelIndicatorPointerId: number | null = null
-let levelIndicatorTouchId: number | null = null
-let levelIndicatorStartY = 0
-let levelIndicatorLastY = 0
-let levelIndicatorStartClientY = 0
-let levelIndicatorHasMoved = false // Флаг для определения, было ли движение (чтобы отличить клик от свайпа)
-let levelIndicatorDragStarted = false // Флаг для отслеживания начала drag через ElasticScroll
-let levelIndicatorScrollRatio = 1 // Коэффициент масштабирования для преобразования движения мыши в скролл
-
-// Состояние для обработки событий на level-indicator__bar
-let levelIndicatorBarPointerId: number | null = null
-let levelIndicatorBarTouchId: number | null = null
-let levelIndicatorBarStartY = 0
-let levelIndicatorBarLastY = 0
-let levelIndicatorBarStartClientY = 0
-let levelIndicatorBarElement: HTMLElement | null = null
-let levelIndicatorBarHasMoved = false
-let levelIndicatorBarDragStarted = false // Флаг для отслеживания начала drag через ElasticScroll
-let levelIndicatorBarScrollRatio = 1 // Коэффициент масштабирования для преобразования движения мыши в скролл
-
-// Состояние для обработки событий на play-area (dragging scroll на всем компоненте)
-let playAreaPointerId: number | null = null
-let playAreaTouchId: number | null = null
-let playAreaStartY = 0
-let playAreaLastY = 0
-let playAreaStartX = 0
-let playAreaLastX = 0
-let playAreaDragStarted = false
-let playAreaPressTimer: ReturnType<typeof setTimeout> | null = null
-const PLAY_AREA_PRESS_DELAY = 140 // ms
-const PLAY_AREA_PRESS_MOVE_TOLERANCE = 6 // px
-const PLAY_AREA_CLICK_THRESHOLD = 10 // px
-
-// Вспомогательная функция для проверки, является ли элемент интерактивным
-function isInteractiveElement(target: HTMLElement | null): boolean {
-	if (!target) return false
-	return (
-		target.tagName === 'CANVAS' ||
-		target.tagName === 'BUTTON' ||
-		target.closest('button') !== null ||
-		target.closest('canvas') !== null ||
-		target.closest('.level-indicator') !== null
-	)
-}
-
-// Вспомогательная функция для проверки, находится ли элемент внутри MomentumScroll
-function isInsideMomentumScroll(target: HTMLElement | null): boolean {
-	if (!target) return false
-	const momentumScrollElement = target.closest('.momentum-scroll')
-	if (!momentumScrollElement) return false
-	// Проверяем, что это не интерактивный элемент внутри MomentumScroll
-	return !isInteractiveElement(target)
-}
-
-// Вспомогательная функция для определения мобильных устройств
-function isMobileDevice(): boolean {
-	return (
-		/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-			navigator.userAgent,
-		) ||
-		'ontouchstart' in window ||
-		navigator.maxTouchPoints > 0
-	)
-}
-
-// Обработчики событий для play-area - dragging scroll на всем компоненте
-function clearPlayAreaPressTimer() {
-	if (playAreaPressTimer !== null) {
-		clearTimeout(playAreaPressTimer)
-		playAreaPressTimer = null
-	}
-}
-
-function activatePlayAreaDrag() {
-	if (!momentumScrollRef.value || playAreaDragStarted) return
-	playAreaDragStarted = true
-	momentumScrollRef.value.updateBounds()
-	momentumScrollRef.value.startDrag(performance.now())
-}
-
-function handlePlayAreaPointerDown(e: PointerEvent) {
-	if (e.button !== 0 && e.pointerType === 'mouse') return
-
-	// На мобильных устройствах игнорируем pointer события типа touch
-	if (isMobileDevice() && e.pointerType === 'touch') {
-		return
-	}
-
-	// Проверяем, является ли целевой элемент интерактивным
-	const target = e.target as HTMLElement
-	if (isInteractiveElement(target)) {
-		return // Позволяем интерактивным элементам обработать событие
-	}
-
-	// Если событие происходит на MomentumScroll (не на интерактивных элементах),
-	// полностью пропускаем его - MomentumScroll обработает его сам
-	if (isInsideMomentumScroll(target)) {
-		return
-	}
-
-	// Обрабатываем только события вне MomentumScroll (например, на play-area вокруг него)
-	if (!playAreaRef.value || !momentumScrollRef.value) return
-
-	// Завершаем предыдущий drag, если он был активен
-	if (playAreaDragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	// Захватываем pointer для отслеживания движения даже вне элемента
-	playAreaRef.value.setPointerCapture(e.pointerId)
-
-	playAreaPointerId = e.pointerId
-	playAreaStartY = e.clientY
-	playAreaLastY = e.clientY
-	playAreaDragStarted = false
-
-	clearPlayAreaPressTimer()
-	playAreaPressTimer = setTimeout(() => {
-		activatePlayAreaDrag()
-	}, PLAY_AREA_PRESS_DELAY)
-}
-
-function handlePlayAreaPointerMove(e: PointerEvent) {
-	if (
-		!momentumScrollRef.value ||
-		!playAreaRef.value ||
-		playAreaPointerId !== e.pointerId
-	)
-		return
-
-	// На мобильных устройствах игнорируем pointer события типа touch
-	if (isMobileDevice() && e.pointerType === 'touch') {
-		return
-	}
-
-	// Проверяем, находится ли pointer на MomentumScroll (не на интерактивных элементах)
-	const target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement
-	if (isInsideMomentumScroll(target)) {
-		// Если drag еще не активирован, прекращаем обработку
-		if (!playAreaDragStarted) {
-			playAreaPointerId = null
-			clearPlayAreaPressTimer()
-			if (playAreaRef.value.hasPointerCapture(e.pointerId)) {
-				playAreaRef.value.releasePointerCapture(e.pointerId)
-			}
-			return
-		} else {
-			// Если drag уже активирован, прекращаем скролл
-			handlePlayAreaPointerUp(e)
-			return
-		}
-	}
-
-	const deltaY = playAreaLastY - e.clientY
-	playAreaLastY = e.clientY
-
-	const moved = Math.abs(e.clientY - playAreaStartY)
-
-	// Если пользователь сдвинулся чуть-чуть — ждём long-press
-	if (!playAreaDragStarted) {
-		// если сильно потащил — можно активировать раньше, чем pressDelay
-		if (moved > PLAY_AREA_PRESS_MOVE_TOLERANCE) {
-			if (!playAreaRef.value.hasPointerCapture(e.pointerId)) {
-				playAreaRef.value.setPointerCapture(e.pointerId)
-			}
-			activatePlayAreaDrag()
-		} else {
-			return
-		}
-	}
-
-	// drag активирован => скроллим
-	if (e.cancelable) {
-		e.preventDefault()
-	}
-	e.stopPropagation()
-	momentumScrollRef.value.drag(deltaY, performance.now())
-}
-
-function handlePlayAreaPointerUp(e: PointerEvent) {
-	if (!playAreaRef.value || playAreaPointerId !== e.pointerId) return
-
-	// Освобождаем захват pointer
-	if (playAreaRef.value.hasPointerCapture(e.pointerId)) {
-		playAreaRef.value.releasePointerCapture(e.pointerId)
-	}
-
-	clearPlayAreaPressTimer()
-
-	const moved = Math.abs(e.clientY - playAreaStartY)
-	const dragStarted = playAreaDragStarted
-
-	// Завершаем drag через MomentumScroll, если он был начат
-	if (dragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	// Очищаем состояние
-	playAreaPointerId = null
-	playAreaDragStarted = false
-
-	// Если движения не было, это клик - не обрабатываем здесь
-	if (!dragStarted && moved <= PLAY_AREA_CLICK_THRESHOLD) {
-		// Позволяем событию клика пройти дальше
-		return
-	}
-}
-
-// Touch event handlers для play-area
-function handlePlayAreaTouchStart(e: TouchEvent) {
-	if (!playAreaRef.value || !momentumScrollRef.value) return
-
-	const touch = e.touches[0]
-	if (!touch) return
-
-	// Проверяем, является ли целевой элемент интерактивным
-	const target = e.target as HTMLElement
-	if (isInteractiveElement(target)) {
-		return // Позволяем интерактивным элементам обработать событие
-	}
-
-	// Если событие происходит на MomentumScroll (не на интерактивных элементах),
-	// позволяем MomentumScroll обработать его самому - не обрабатываем здесь вообще
-	if (isInsideMomentumScroll(target)) {
-		// Не вызываем preventDefault или stopPropagation, чтобы событие дошло до MomentumScroll
-		return
-	}
-
-	// Завершаем предыдущий drag, если он был активен
-	if (playAreaDragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	playAreaTouchId = touch.identifier
-	playAreaStartY = touch.clientY
-	playAreaLastY = touch.clientY
-	playAreaStartX = touch.clientX
-	playAreaLastX = touch.clientX
-	playAreaDragStarted = false
-
-	clearPlayAreaPressTimer()
-	playAreaPressTimer = setTimeout(() => {
-		activatePlayAreaDrag()
-	}, PLAY_AREA_PRESS_DELAY)
-}
-
-function handlePlayAreaTouchMove(e: TouchEvent) {
-	if (!momentumScrollRef.value || !playAreaRef.value) return
-
-	// Если playAreaTouchId не установлен, значит событие началось не на playArea
-	// (оно началось на canvas или MomentumScroll) - не обрабатываем здесь вообще
-	if (!playAreaTouchId) {
-		return
-	}
-
-	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === playAreaTouchId,
-	)
-	if (!touch) {
-		if (e.touches.length === 0) {
-			handlePlayAreaTouchEnd(e)
-		}
-		return
-	}
-
-	// Проверяем, не находится ли текущее касание на интерактивном элементе
-	const target = document.elementFromPoint(
-		touch.clientX,
-		touch.clientY,
-	) as HTMLElement
-	if (isInteractiveElement(target)) {
-		// Если касание переместилось на интерактивный элемент и скролл еще не активирован
-		if (!playAreaDragStarted) {
-			playAreaTouchId = null
-			clearPlayAreaPressTimer()
-			return
-		} else {
-			// Если drag уже активирован, прекращаем скролл
-			handlePlayAreaTouchEnd(e)
-			return
-		}
-	}
-
-	// Если касание находится на MomentumScroll (не на интерактивных элементах),
-	// позволяем MomentumScroll обработать его самому
-	if (isInsideMomentumScroll(target)) {
-		if (!playAreaDragStarted) {
-			// Если drag не был активирован, просто прекращаем обработку здесь
-			// и позволяем событию всплыть к MomentumScroll
-			playAreaTouchId = null
-			clearPlayAreaPressTimer()
-			// Не вызываем preventDefault или stopPropagation, чтобы событие дошло до MomentumScroll
-			return
-		} else {
-			// Если drag уже активирован, прекращаем скролл
-			handlePlayAreaTouchEnd(e)
-			return
-		}
-	}
-
-	const deltaY = playAreaLastY - touch.clientY
-	playAreaLastY = touch.clientY
-	playAreaLastX = touch.clientX // Обновляем для вычисления movedX
-
-	const movedY = Math.abs(touch.clientY - playAreaStartY)
-	const movedX = Math.abs(touch.clientX - playAreaStartX)
-
-	// Определяем направление движения
-	const isVerticalSwipe = movedY > movedX
-	const minSwipeDistance = 8 // Минимальное расстояние для активации скролла
-
-	// Активируем скролл только при вертикальном свайпе
-	if (!playAreaDragStarted) {
-		if (isVerticalSwipe && movedY > minSwipeDistance) {
-			clearPlayAreaPressTimer()
-			activatePlayAreaDrag()
-			if (e.cancelable) {
-				e.preventDefault()
-			}
-			e.stopPropagation()
-		} else if (movedX > minSwipeDistance && !isVerticalSwipe) {
-			// Горизонтальный свайп - отменяем обработку скролла
-			playAreaTouchId = null
-			clearPlayAreaPressTimer()
-			return
-		} else {
-			return
-		}
-	}
-
-	// drag активирован => скроллим только по вертикали
-	if (e.cancelable) {
-		e.preventDefault()
-	}
-	e.stopPropagation()
-	momentumScrollRef.value.drag(deltaY, performance.now())
-}
-
-function handlePlayAreaTouchEnd(e: TouchEvent) {
-	if (!playAreaRef.value || !momentumScrollRef.value || !playAreaTouchId) return
-
-	clearPlayAreaPressTimer()
-
-	const touch = e.changedTouches[0]
-	if (!touch || touch.identifier !== playAreaTouchId) return
-
-	const movedY = Math.abs(playAreaLastY - playAreaStartY)
-	const movedX = Math.abs(playAreaLastX - playAreaStartX)
-	const totalMoved = Math.sqrt(movedY * movedY + movedX * movedX)
-	const dragStarted = playAreaDragStarted
-
-	// Завершаем drag через MomentumScroll, если он был начат
-	if (dragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	// Очищаем состояние
-	playAreaTouchId = null
-	playAreaStartX = 0
-	playAreaLastX = 0
-	playAreaDragStarted = false
-
-	// Если движения не было, это клик - не обрабатываем здесь
-	if (!dragStarted && totalMoved <= PLAY_AREA_CLICK_THRESHOLD) {
-		return
-	}
-}
-
-// Обработчики событий для level-indicator - drag-scrolling через весь индикатор
-function handleLevelIndicatorPointerDown(e: PointerEvent) {
-	if (e.button !== 0 && e.pointerType === 'mouse') return
-
-	// Проверяем, что клик не на баре (бар обрабатывает свои события отдельно)
-	const target = e.target as HTMLElement
-	if (target.closest('.level-indicator__bar')) {
-		return // Бар обрабатывает свои события отдельно
-	}
-
-	if (!levelIndicatorRef.value || !momentumScrollRef.value) return
-
-	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
-	if (levelIndicatorDragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	const indicatorElement = levelIndicatorRef.value
-
-	// Захватываем pointer для отслеживания движения даже вне элемента
-	indicatorElement.setPointerCapture(e.pointerId)
-
-	levelIndicatorPointerId = e.pointerId
-	levelIndicatorStartY = e.clientY
-	levelIndicatorLastY = e.clientY
-	levelIndicatorStartClientY = e.clientY
-	levelIndicatorHasMoved = false
-	levelIndicatorDragStarted = false
-
-	// Вычисляем коэффициент масштабирования для преобразования движения мыши в скролл
-	const scrollState = momentumScrollRef.value.getScrollState()
-	const maxScroll = scrollState?.maxY ?? 0
-	const indicatorHeight = indicatorElement.getBoundingClientRect().height
-
-	if (indicatorHeight > 0 && maxScroll > 0) {
-		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения мыши
-		levelIndicatorScrollRatio = maxScroll / indicatorHeight
-	} else {
-		levelIndicatorScrollRatio = 1
-	}
-
-	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
-}
-
-function handleLevelIndicatorPointerMove(e: PointerEvent) {
-	if (
-		!momentumScrollRef.value ||
-		!levelIndicatorRef.value ||
-		levelIndicatorPointerId !== e.pointerId
-	)
-		return
-
-	// Всегда обновляем lastY для правильного расчета дельты
-	const deltaY = levelIndicatorLastY - e.clientY
-	levelIndicatorLastY = e.clientY
-
-	const moved = Math.abs(e.clientY - levelIndicatorStartY)
-	if (moved > 3) {
-		// Если движение больше 3px, это drag - выполняем скролл
-		levelIndicatorHasMoved = true
-		e.preventDefault()
-		e.stopPropagation()
-
-		// Начинаем drag через ElasticScroll при первом движении
-		if (!levelIndicatorDragStarted) {
-			levelIndicatorDragStarted = true
-			momentumScrollRef.value.updateBounds()
-			momentumScrollRef.value.startDrag(performance.now())
-		}
-
-		// Преобразуем дельту движения мыши в дельту скролла
-		const scrollDelta = deltaY * levelIndicatorScrollRatio
-
-		// Используем метод drag для плавного скролла с инерцией
-		momentumScrollRef.value.drag(scrollDelta, performance.now())
-	}
-}
-
-function handleLevelIndicatorPointerUp(e: PointerEvent) {
-	if (!levelIndicatorRef.value || levelIndicatorPointerId !== e.pointerId)
-		return
-
-	// Освобождаем захват pointer
-	if (levelIndicatorRef.value.hasPointerCapture(e.pointerId)) {
-		levelIndicatorRef.value.releasePointerCapture(e.pointerId)
-	}
-
-	// Сохраняем значения в локальные переменные перед nextTick
-	const indicatorElement = levelIndicatorRef.value
-	const startClientY = levelIndicatorStartClientY
-	const hasMoved = levelIndicatorHasMoved
-	const dragStarted = levelIndicatorDragStarted
-
-	// Завершаем drag через ElasticScroll, если он был начат
-	if (dragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	// Очищаем состояние сразу
-	levelIndicatorPointerId = null
-	levelIndicatorHasMoved = false
-	levelIndicatorDragStarted = false
-
-	// Если движения не было, это клик - выполняем скролл
-	if (!hasMoved) {
-		e.preventDefault()
-		e.stopPropagation()
-
-		// Используем nextTick для гарантии, что ref инициализирован
-		nextTick(() => {
-			if (!momentumScrollRef.value) {
-				console.warn('momentumScrollRef is still null after nextTick')
-				return
-			}
-
-			// Обновляем границы скролла перед вычислением позиции
-			momentumScrollRef.value.updateBounds()
-
-			// Получаем позицию клика относительно индикатора
-			const rect = indicatorElement.getBoundingClientRect()
-			const clickY = startClientY - rect.top
-			const indicatorHeight = rect.height
-
-			// Вычисляем процент от верха индикатора (0 = верх, 1 = низ)
-			const clickPercent = Math.max(0, Math.min(1, clickY / indicatorHeight))
-
-			// Получаем состояние скролла
-			const scrollState = momentumScrollRef.value.getScrollState()
-			const maxScroll = scrollState?.maxY ?? 0
-
-			// Вычисляем целевую позицию скролла на основе процента клика
-			const targetScroll = clickPercent * maxScroll
-
-			// Выполняем плавный скролл с анимацией
-			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
-		})
-	}
-}
-
-// Обработчик клика на level-indicator для скролла
-function handleLevelIndicatorClick(e: MouseEvent) {
-	if (!momentumScrollRef.value || !levelIndicatorRef.value) return
-	if (levelIndicatorHasMoved) return // Если было движение, это не клик
-
-	e.preventDefault()
-	e.stopPropagation()
-
-	// При клике на level-indicator__bar скроллим к низу сосуда,
-	// чтобы пользователь мог увидеть место, где появляются новые блоки
-	momentumScrollRef.value.scrollToBottomAnimated(1.0, 2000)
-}
-
-// Обработчики pointer событий для level-indicator__bar
-function handleLevelIndicatorBarPointerDown(e: PointerEvent) {
-	if (e.button !== 0 && e.pointerType === 'mouse') return
-
-	const barElement = e.currentTarget as HTMLElement
-
-	if (!momentumScrollRef.value) return
-
-	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
-	if (levelIndicatorBarDragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	// Захватываем pointer для отслеживания движения даже вне элемента
-	barElement.setPointerCapture(e.pointerId)
-
-	levelIndicatorBarPointerId = e.pointerId
-	levelIndicatorBarStartY = e.clientY
-	levelIndicatorBarLastY = e.clientY
-	levelIndicatorBarStartClientY = e.clientY
-	levelIndicatorBarElement = barElement
-	levelIndicatorBarHasMoved = false
-	levelIndicatorBarDragStarted = false
-
-	// Вычисляем коэффициент масштабирования для преобразования движения мыши в скролл
-	const scrollState = momentumScrollRef.value.getScrollState()
-	const maxScroll = scrollState?.maxY ?? 0
-	const barHeight = barElement.getBoundingClientRect().height
-
-	if (barHeight > 0 && maxScroll > 0) {
-		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения мыши
-		levelIndicatorBarScrollRatio = maxScroll / barHeight
-	} else {
-		levelIndicatorBarScrollRatio = 1
-	}
-
-	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
-}
-
-function handleLevelIndicatorBarPointerMove(e: PointerEvent) {
-	if (
-		!momentumScrollRef.value ||
-		!levelIndicatorBarPointerId ||
-		levelIndicatorBarPointerId !== e.pointerId ||
-		!levelIndicatorBarElement
-	)
-		return
-
-	// Всегда обновляем lastY для правильного расчета дельты
-	const deltaY = levelIndicatorBarLastY - e.clientY
-	levelIndicatorBarLastY = e.clientY
-
-	const moved = Math.abs(e.clientY - levelIndicatorBarStartY)
-	if (moved > 3) {
-		// Если движение больше 3px, это drag - выполняем скролл
-		levelIndicatorBarHasMoved = true
-		e.preventDefault()
-		e.stopPropagation()
-
-		// Начинаем drag через ElasticScroll при первом движении
-		if (!levelIndicatorBarDragStarted) {
-			levelIndicatorBarDragStarted = true
-			momentumScrollRef.value.updateBounds()
-			momentumScrollRef.value.startDrag(performance.now())
-		}
-
-		// Преобразуем дельту движения мыши в дельту скролла
-		const scrollDelta = deltaY * levelIndicatorBarScrollRatio
-
-		// Используем метод drag для плавного скролла с инерцией
-		momentumScrollRef.value.drag(scrollDelta, performance.now())
-	}
-}
-
-function handleLevelIndicatorBarPointerUp(e: PointerEvent) {
-	if (levelIndicatorBarPointerId !== e.pointerId || !levelIndicatorBarElement)
-		return
-
-	// Освобождаем захват pointer
-	if (levelIndicatorBarElement.hasPointerCapture(e.pointerId)) {
-		levelIndicatorBarElement.releasePointerCapture(e.pointerId)
-	}
-
-	// Сохраняем значения в локальные переменные перед nextTick
-	const barElement = levelIndicatorBarElement
-	const startClientY = levelIndicatorBarStartClientY
-	const hasMoved = levelIndicatorBarHasMoved
-	const dragStarted = levelIndicatorBarDragStarted
-
-	// Завершаем drag через ElasticScroll, если он был начат
-	if (dragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	// Очищаем состояние сразу
-	levelIndicatorBarPointerId = null
-	levelIndicatorBarElement = null
-	levelIndicatorBarHasMoved = false
-	levelIndicatorBarDragStarted = false
-
-	// Если движения не было, это клик - выполняем скролл
-	if (!hasMoved) {
-		e.preventDefault()
-		e.stopPropagation()
-
-		// Используем nextTick для гарантии, что ref инициализирован
-		nextTick(() => {
-			if (!momentumScrollRef.value) {
-				console.warn('momentumScrollRef is still null after nextTick')
-				return
-			}
-
-			// Обновляем границы скролла перед вычислением позиции
-			momentumScrollRef.value.updateBounds()
-
-			// Получаем позицию клика относительно бара (используем сохраненные координаты из pointerdown)
-			const rect = barElement.getBoundingClientRect()
-			const clickY = startClientY - rect.top
-			const barHeight = rect.height
-
-			// Вычисляем процент от верха бара (0 = верх, 1 = низ)
-			const clickPercent = Math.max(0, Math.min(1, clickY / barHeight))
-
-			// Получаем состояние скролла
-			const scrollState = momentumScrollRef.value.getScrollState()
-			const maxScroll = scrollState?.maxY ?? 0
-
-			// Вычисляем целевую позицию скролла на основе процента клика
-			const targetScroll = clickPercent * maxScroll
-
-			// Выполняем плавный скролл с анимацией
-			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
-		})
-	}
-}
-
-// Обработчики touch событий для level-indicator__bar
-function handleLevelIndicatorBarTouchStart(e: TouchEvent) {
-	if (!momentumScrollRef.value) return
-
-	const touch = e.touches[0]
-	if (!touch) return
-
-	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
-	if (levelIndicatorBarDragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	const barElement = e.currentTarget as HTMLElement
-
-	levelIndicatorBarTouchId = touch.identifier
-	levelIndicatorBarStartY = touch.clientY
-	levelIndicatorBarLastY = touch.clientY
-	levelIndicatorBarElement = barElement
-	levelIndicatorBarHasMoved = false
-	levelIndicatorBarDragStarted = false
-
-	// Вычисляем коэффициент масштабирования для преобразования движения касания в скролл
-	const scrollState = momentumScrollRef.value.getScrollState()
-	const maxScroll = scrollState?.maxY ?? 0
-	const barHeight = barElement.getBoundingClientRect().height
-
-	if (barHeight > 0 && maxScroll > 0) {
-		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения касания
-		levelIndicatorBarScrollRatio = maxScroll / barHeight
-	} else {
-		levelIndicatorBarScrollRatio = 1
-	}
-}
-
-function handleLevelIndicatorBarTouchMove(e: TouchEvent) {
-	if (
-		!momentumScrollRef.value ||
-		!levelIndicatorBarTouchId ||
-		!levelIndicatorBarElement
-	)
-		return
-
-	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === levelIndicatorBarTouchId,
-	)
-	if (!touch) return
-
-	// Всегда обновляем lastY для правильного расчета дельты
-	const deltaY = levelIndicatorBarLastY - touch.clientY
-	levelIndicatorBarLastY = touch.clientY
-
-	const moved = Math.abs(touch.clientY - levelIndicatorBarStartY)
-	if (moved > 3) {
-		// Если движение больше 3px, это drag - выполняем скролл
-		levelIndicatorBarHasMoved = true
-		e.preventDefault()
-		e.stopPropagation()
-
-		// Начинаем drag через ElasticScroll при первом движении
-		if (!levelIndicatorBarDragStarted) {
-			levelIndicatorBarDragStarted = true
-			momentumScrollRef.value.updateBounds()
-			momentumScrollRef.value.startDrag(performance.now())
-		}
-
-		// Преобразуем дельту движения касания в дельту скролла
-		const scrollDelta = deltaY * levelIndicatorBarScrollRatio
-
-		// Используем метод drag для плавного скролла с инерцией
-		momentumScrollRef.value.drag(scrollDelta, performance.now())
-	}
-}
-
-function handleLevelIndicatorBarTouchEnd(e: TouchEvent) {
-	if (!levelIndicatorBarElement) return
-
-	const touch = e.changedTouches[0]
-	if (!touch || touch.identifier !== levelIndicatorBarTouchId) return
-
-	const moved = Math.abs(touch.clientY - levelIndicatorBarStartY)
-
-	// Сохраняем значения в локальные переменные перед nextTick
-	const barElement = levelIndicatorBarElement
-	const startY = levelIndicatorBarStartY
-	const hasMoved = levelIndicatorBarHasMoved
-	const dragStarted = levelIndicatorBarDragStarted
-
-	// Завершаем drag через ElasticScroll, если он был начат
-	if (dragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	// Очищаем состояние сразу
-	levelIndicatorBarTouchId = null
-	levelIndicatorBarElement = null
-	levelIndicatorBarHasMoved = false
-	levelIndicatorBarDragStarted = false
-
-	// Если движения не было, это клик - вычисляем позицию скролла
-	if (!hasMoved && moved <= 10) {
-		e.preventDefault()
-		e.stopPropagation()
-
-		// Используем nextTick для гарантии, что ref инициализирован
-		nextTick(() => {
-			if (!momentumScrollRef.value) {
-				console.warn('momentumScrollRef is still null after nextTick')
-				return
-			}
-
-			// Обновляем границы скролла перед вычислением позиции
-			momentumScrollRef.value.updateBounds()
-
-			// Получаем позицию касания относительно бара (используем сохраненные координаты из touchstart)
-			const rect = barElement.getBoundingClientRect()
-			const touchY = startY - rect.top
-			const barHeight = rect.height
-
-			// Вычисляем процент от верха бара (0 = верх, 1 = низ)
-			const touchPercent = Math.max(0, Math.min(1, touchY / barHeight))
-
-			// Получаем состояние скролла
-			const scrollState = momentumScrollRef.value.getScrollState()
-			const maxScroll = scrollState?.maxY ?? 0
-
-			// Вычисляем целевую позицию скролла на основе процента касания
-			const targetScroll = touchPercent * maxScroll
-
-			// Выполняем плавный скролл с анимацией
-			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
-		})
-	}
-}
-
-function handleLevelIndicatorTouchStart(e: TouchEvent) {
-	// Проверяем, что касание не на баре (бар обрабатывает свои события отдельно)
-	const target = e.target as HTMLElement
-	if (target.closest('.level-indicator__bar')) {
-		return // Бар обрабатывает свои события отдельно
-	}
-
-	if (!levelIndicatorRef.value || !momentumScrollRef.value) return
-
-	const touch = e.touches[0]
-	if (!touch) return
-
-	// Завершаем предыдущий drag, если он был активен (на случай если предыдущий drag не завершился)
-	if (levelIndicatorDragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	const indicatorElement = levelIndicatorRef.value
-
-	levelIndicatorTouchId = touch.identifier
-	levelIndicatorStartY = touch.clientY
-	levelIndicatorLastY = touch.clientY
-	levelIndicatorHasMoved = false
-	levelIndicatorDragStarted = false
-
-	// Вычисляем коэффициент масштабирования для преобразования движения касания в скролл
-	const scrollState = momentumScrollRef.value.getScrollState()
-	const maxScroll = scrollState?.maxY ?? 0
-	const indicatorHeight = indicatorElement.getBoundingClientRect().height
-
-	if (indicatorHeight > 0 && maxScroll > 0) {
-		// Коэффициент показывает, сколько пикселей скролла соответствует одному пикселю движения касания
-		levelIndicatorScrollRatio = maxScroll / indicatorHeight
-	} else {
-		levelIndicatorScrollRatio = 1
-	}
-
-	// Не вызываем preventDefault здесь, чтобы клик мог пройти дальше
-}
-
-function handleLevelIndicatorTouchMove(e: TouchEvent) {
-	if (!momentumScrollRef.value || !levelIndicatorRef.value) return
-
-	const touch = Array.from(e.touches).find(
-		(t) => t.identifier === levelIndicatorTouchId,
-	)
-	if (!touch) return
-
-	// Всегда обновляем lastY для правильного расчета дельты
-	const deltaY = levelIndicatorLastY - touch.clientY
-	levelIndicatorLastY = touch.clientY
-
-	const moved = Math.abs(touch.clientY - levelIndicatorStartY)
-	if (moved > 3) {
-		// Если движение больше 3px, это drag - выполняем скролл
-		levelIndicatorHasMoved = true
-		e.preventDefault()
-		e.stopPropagation()
-
-		// Начинаем drag через ElasticScroll при первом движении
-		if (!levelIndicatorDragStarted) {
-			levelIndicatorDragStarted = true
-			momentumScrollRef.value.updateBounds()
-			momentumScrollRef.value.startDrag(performance.now())
-		}
-
-		// Преобразуем дельту движения касания в дельту скролла
-		const scrollDelta = deltaY * levelIndicatorScrollRatio
-
-		// Используем метод drag для плавного скролла с инерцией
-		momentumScrollRef.value.drag(scrollDelta, performance.now())
-	}
-}
-
-function handleLevelIndicatorTouchEnd(e: TouchEvent) {
-	if (!levelIndicatorRef.value) return
-
-	const touch = e.changedTouches[0]
-	if (!touch || touch.identifier !== levelIndicatorTouchId) return
-
-	const moved = Math.abs(touch.clientY - levelIndicatorStartY)
-
-	// Сохраняем значения в локальные переменные перед nextTick
-	const indicatorElement = levelIndicatorRef.value
-	const startY = levelIndicatorStartY
-	const hasMoved = levelIndicatorHasMoved
-	const dragStarted = levelIndicatorDragStarted
-
-	// Завершаем drag через ElasticScroll, если он был начат
-	if (dragStarted && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-	}
-
-	// Очищаем состояние сразу
-	levelIndicatorTouchId = null
-	levelIndicatorHasMoved = false
-	levelIndicatorDragStarted = false
-
-	// Если движения не было, это клик - вычисляем позицию скролла
-	if (!hasMoved && moved <= 10) {
-		e.preventDefault()
-		e.stopPropagation()
-
-		// Используем nextTick для гарантии, что ref инициализирован
-		nextTick(() => {
-			if (!momentumScrollRef.value) {
-				console.warn('momentumScrollRef is still null after nextTick')
-				return
-			}
-
-			// Обновляем границы скролла перед вычислением позиции
-			momentumScrollRef.value.updateBounds()
-
-			// Получаем позицию касания относительно индикатора
-			const rect = indicatorElement.getBoundingClientRect()
-			const touchY = startY - rect.top
-			const indicatorHeight = rect.height
-
-			// Вычисляем процент от верха индикатора (0 = верх, 1 = низ)
-			const touchPercent = Math.max(0, Math.min(1, touchY / indicatorHeight))
-
-			// Получаем состояние скролла
-			const scrollState = momentumScrollRef.value.getScrollState()
-			const maxScroll = scrollState?.maxY ?? 0
-
-			// Вычисляем целевую позицию скролла на основе процента касания
-			const targetScroll = touchPercent * maxScroll
-
-			// Выполняем плавный скролл с анимацией
-			momentumScrollRef.value.scrollToAnimated(targetScroll, 0.3)
-		})
-	}
-}
 
 let gameController: GameController | null = null
 let renderer: GameRenderer | null = null
@@ -1144,6 +183,9 @@ let touchMoveHandler: ((e: TouchEvent) => void) | null = null
 // Кэш для getBoundingClientRect контейнера (используется только в initCanvas)
 let cachedContainerRect: DOMRect | null = null
 
+// Stub retained for onBeforeUnmount compatibility after MomentumScroll removal
+function clearPlayAreaPressTimer() {}
+
 // Drag state for input handling
 let dragStart: { r: number; c: number } | null = null
 let dragStartClient: { x: number; y: number } | null = null
@@ -1154,14 +196,150 @@ let isDragging = false
 let lastEventTime = 0
 let lastEventType: string | null = null
 
-// Состояние для drag scrolling на canvas
-let canvasDragStartTime = 0 // Время начала касания на canvas
-let canvasDragScrolling = false // Флаг активации drag scrolling вместо обработки игры
-let canvasDragStartedOnBlock = false // Флаг: было ли начальное касание на плитке (блоке)
-let canvasPressTimer: ReturnType<typeof setTimeout> | null = null // Таймер для активации скроллинга при долгом удержании
-const CANVAS_PRESS_DELAY_EMPTY = 140 // ms - время удержания для активации drag scrolling на пустом месте
-const CANVAS_PRESS_DELAY_BLOCK = 300 // ms - время удержания для активации drag scrolling на плитке (больше, чтобы дать время для быстрого свайпа)
-const CANVAS_PRESS_MOVE_TOLERANCE = 6 // px - порог движения для ранней активации
+const USER_ACTION_COOLDOWN_MS = 140 // Ограничение частоты действий, чтобы избежать спама ввода
+
+type PendingUserAction = {
+	action: 'swap' | 'slide'
+	fromCubeId: number
+	targetCubeId?: number
+	dr: number
+	dc: number
+}
+
+let lastUserActionAt = 0
+let pendingUserAction: PendingUserAction | null = null
+let pendingUserActionTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearPendingUserActionFlushTimer() {
+	if (pendingUserActionTimer !== null) {
+		clearTimeout(pendingUserActionTimer)
+		pendingUserActionTimer = null
+	}
+}
+
+function schedulePendingUserActionFlush(delayMs = 0) {
+	clearPendingUserActionFlushTimer()
+	pendingUserActionTimer = setTimeout(() => {
+		pendingUserActionTimer = null
+		flushPendingUserAction()
+	}, Math.max(0, delayMs))
+}
+
+function getCubePositionById(
+	cubeId: number,
+): { r: number; c: number } | null {
+	const grid = gameStore.grid
+	if (!grid?.length) return null
+
+	for (let r = 0; r < grid.length; r++) {
+		for (let c = 0; c < WIDTH; c++) {
+			if (grid[r]?.[c]?.id === cubeId) return { r, c }
+		}
+	}
+	return null
+}
+
+function buildPendingUserAction(
+	action: 'swap' | 'slide',
+	from: { r: number; c: number },
+	to: { r: number; c: number },
+): PendingUserAction | null {
+	const fromCube = gameStore.grid[from.r]?.[from.c]
+	if (!fromCube) return null
+
+	const dr = to.r - from.r
+	const dc = to.c - from.c
+
+	if (action === 'swap') {
+		const targetCube = gameStore.grid[to.r]?.[to.c]
+		if (!targetCube) return null
+		return {
+			action,
+			fromCubeId: fromCube.id,
+			targetCubeId: targetCube.id,
+			dr,
+			dc,
+		}
+	}
+
+	return {
+		action,
+		fromCubeId: fromCube.id,
+		dr,
+		dc,
+	}
+}
+
+function flushPendingUserAction() {
+	if (!pendingUserAction || !gameController || gameStore.isGameOver) return
+	if (gameStore.isLocked) return
+
+	const now = Date.now()
+	const elapsed = now - lastUserActionAt
+	if (elapsed < USER_ACTION_COOLDOWN_MS) {
+		schedulePendingUserActionFlush(USER_ACTION_COOLDOWN_MS - elapsed)
+		return
+	}
+
+	const action = pendingUserAction
+	pendingUserAction = null
+
+	const from = getCubePositionById(action.fromCubeId)
+	if (!from) return
+
+	let to: { r: number; c: number } | null = null
+	if (action.action === 'swap') {
+		if (action.targetCubeId === undefined) return
+		const target = getCubePositionById(action.targetCubeId)
+		if (!target) return
+		to = target
+	} else {
+		to = { r: from.r + action.dr, c: from.c + action.dc }
+	}
+
+	const height = gameStore.grid?.length ?? 0
+	if (!to || to.r < 0 || to.r >= height || to.c < 0 || to.c >= WIDTH) return
+
+	lastUserActionAt = now
+	void gameController.applyUserAction(action.action, from, to)
+}
+
+function submitUserAction(
+	action: 'swap' | 'slide',
+	from: { r: number; c: number },
+	to: { r: number; c: number },
+) {
+	if (!gameController || gameStore.isGameOver) return
+
+	const now = Date.now()
+	const nextAction = buildPendingUserAction(action, from, to)
+	if (!nextAction) return
+
+	// Если игра в анимации (locked), сохраняем последнее действие игрока и применим его сразу после unlock.
+	if (gameStore.isLocked) {
+		pendingUserAction = nextAction
+		return
+	}
+
+	const elapsed = now - lastUserActionAt
+	if (elapsed < USER_ACTION_COOLDOWN_MS) {
+		pendingUserAction = nextAction
+		schedulePendingUserActionFlush(USER_ACTION_COOLDOWN_MS - elapsed)
+		return
+	}
+
+	lastUserActionAt = now
+	void gameController.applyUserAction(action, from, to)
+}
+
+watch(
+	() => gameStore.isLocked,
+	(isLocked) => {
+		if (!isLocked) {
+			schedulePendingUserActionFlush()
+		}
+	},
+)
 
 const formattedTime = computed(() => {
 	const time = Math.max(0, Math.floor(gameStore.remainingTime))
@@ -1244,7 +422,7 @@ const columnHeightPercents = computed(() => {
 // Danger state: tiles are near the top (less than 20% remaining)
 const isDangerState = computed(() => levelFillPercent.value >= 80)
 
-/** При расширении сосуда: только переразмер канваса и Pixi. Скролл (updateBounds, scrollToBottom) — в MomentumScroll по ResizeObserver. */
+/** При расширении сосуда: переразмер канваса и Pixi. */
 async function handleVesselExpanded(): Promise<void> {
 	if (!renderer) return
 
@@ -1284,19 +462,8 @@ async function handleVesselExpanded(): Promise<void> {
 	// Это важно при расширении сосуда, когда canvas становится выше
 	await renderer.syncGridPositions(gameStore.grid, true)
 
-	// КРИТИЧНО: Обновляем bounds для MomentumScroll после изменения размера canvas
-	// Ждем, чтобы браузер успел пересчитать layout
-	await nextTick()
-	await new Promise((resolve) => requestAnimationFrame(resolve))
-	// Принудительно пересчитываем layout перед обновлением bounds
-	if (pixiCanvas.parentElement) {
-		// Принудительный reflow для обновления scrollHeight
-		void pixiCanvas.parentElement.offsetHeight
-	}
-	if (momentumScrollRef.value) {
-		momentumScrollRef.value.updateBounds()
-	}
 }
+
 
 function initCanvas(): void {
 	// КРИТИЧНО: Получаем контейнер из canvas ref или из DOM
@@ -1363,7 +530,7 @@ function initCanvas(): void {
 	// Это важно, чтобы высота канваса всегда соответствовала фактической высоте grid
 	const h = gameStore.grid?.length ?? gameStore.getHeight()
 
-	// Всегда делим на WIDTH (8) для получения размера плитки
+	// Всегда делим на WIDTH (6) для получения размера плитки
 	const tileSize = maxWidth / WIDTH
 	const canvasHeight = h * tileSize
 
@@ -1441,32 +608,12 @@ function getPositionFromEvent(
 	return null
 }
 
-function clearCanvasPressTimer() {
-	if (canvasPressTimer !== null) {
-		clearTimeout(canvasPressTimer)
-		canvasPressTimer = null
-	}
-}
-
-function activateCanvasDragScrolling() {
-	if (!momentumScrollRef.value || canvasDragScrolling) return
-	canvasDragScrolling = true
-	momentumScrollRef.value.updateBounds()
-	momentumScrollRef.value.startDrag(performance.now())
-
-	// Теперь блокируем события игры
-	const pixiCanvas = getPixiCanvas()
-	if (pixiCanvas) {
-		// События уже обрабатываются через pointerMoveHandler
-	}
-}
-
 function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// КРИТИЧНО: Блокируем ввод до тех пор, пока игра не запущена
 	if (!gameStore.isGameStarted) {
 		return
 	}
-	if (gameStore.isLocked || gameStore.isGameOver) return
+	if (gameStore.isGameOver) return
 
 	// Защита от двойной обработки событий на мобильных устройствах
 	// На мобильных устройствах pointerdown и touchstart могут срабатывать одновременно
@@ -1487,8 +634,6 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	// Unlock audio context on first interaction (iOS/Android)
 	AudioManager.unlock()
 
-	// КРИТИЧНО: НЕ блокируем события сразу - позволяем MomentumScroll обработать их
-	// Блокируем только если это точно не скроллинг (определится в pointerMove)
 	const pixiCanvas = getPixiCanvas()
 
 	// Захватываем pointer для отслеживания движения (но не блокируем события)
@@ -1511,47 +656,21 @@ function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
 	}
 	dragStartClient = { x: clientX, y: clientY }
 	isDragging = false
-	canvasDragScrolling = false
-	canvasDragStartedOnBlock = false // Сбрасываем флаг
-	canvasDragStartTime = performance.now() // Запоминаем время начала касания
 
 	const pos = getPositionFromEvent(e)
 	if (pos) {
 		dragStart = pos
 		const cube = gameStore.grid[pos.r]?.[pos.c]
-		// Определяем, было ли касание на плитке (блоке) или на пустом месте
-		canvasDragStartedOnBlock = !!cube
 		// Highlight selected tile (only if it has moves > 0)
 		if (cube && cube.moves > 0) {
 			renderer?.setSelectedPosition(pos.r, pos.c)
 		} else {
 			renderer?.setSelectedPosition(null, null)
 		}
-	} else {
-		// Касание вне canvas или вне границ - считаем пустым местом
-		canvasDragStartedOnBlock = false
 	}
-
-	// Запускаем таймер для активации скроллинга при долгом удержании
-	clearCanvasPressTimer()
-	const pressDelay = canvasDragStartedOnBlock
-		? CANVAS_PRESS_DELAY_BLOCK
-		: CANVAS_PRESS_DELAY_EMPTY
-	canvasPressTimer = setTimeout(() => {
-		activateCanvasDragScrolling()
-	}, pressDelay)
 }
 
 function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
-	// Очищаем таймер
-	clearCanvasPressTimer()
-
-	// Если был активирован drag scrolling, завершаем его
-	const wasDragScrolling = canvasDragScrolling
-	if (canvasDragScrolling && momentumScrollRef.value) {
-		momentumScrollRef.value.endDrag()
-		canvasDragScrolling = false
-	}
 
 	// Освобождаем pointer, если был захвачен
 	// КРИТИЧНО: Используем canvas из PixiService
@@ -1563,38 +682,21 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		}
 	}
 
-	if (!dragStart || gameStore.isLocked || gameStore.isGameOver) {
+	if (!dragStart || gameStore.isGameOver) {
 		dragStart = null
 		dragStartClient = null
 		isDragging = false
-		canvasDragStartTime = 0
-		canvasDragStartedOnBlock = false
 		return
 	}
 
-	// Предотвращаем скролл при взаимодействии с canvas (только если не был drag scrolling)
-	if (!wasDragScrolling) {
-		if (e instanceof PointerEvent) {
-			e.preventDefault()
-			e.stopPropagation()
-		} else if (e instanceof TouchEvent) {
-			// Для touch событий также предотвращаем скролл
-			e.preventDefault()
-			e.stopPropagation()
-		} else if (e instanceof MouseEvent) {
-			e.stopPropagation()
-		}
-	}
-
-	// Если был активирован drag scrolling, не обрабатываем события игры
-	if (wasDragScrolling) {
-		dragStart = null
-		dragStartClient = null
-		isDragging = false
-		canvasDragStartTime = 0
-		canvasDragStartedOnBlock = false
-		renderer?.setSelectedPosition(null, null)
-		return
+	if (e instanceof PointerEvent) {
+		e.preventDefault()
+		e.stopPropagation()
+	} else if (e instanceof TouchEvent) {
+		e.preventDefault()
+		e.stopPropagation()
+	} else if (e instanceof MouseEvent) {
+		e.stopPropagation()
 	}
 
 	const pos = getPositionFromEvent(e)
@@ -1603,8 +705,6 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		dragStartClient = null
 		selectedForSwap = null
 		isDragging = false
-		canvasDragStartTime = 0
-		canvasDragStartedOnBlock = false
 		renderer?.setSelectedPosition(null, null)
 		return
 	}
@@ -1627,7 +727,7 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 			// IMPORTANT: Check that starting cube has moves > 0
 			if (targetCube && fromCube && fromCube.moves > 0) {
 				// Both have cubes - swap
-				gameController?.applyUserAction('swap', dragStart, pos)
+				submitUserAction('swap', dragStart, pos)
 			} else if (
 				!targetCube &&
 				fromCube &&
@@ -1636,7 +736,7 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 				dr === 0
 			) {
 				// Target empty and horizontal move - slide
-				gameController?.applyUserAction('slide', dragStart, pos)
+				submitUserAction('slide', dragStart, pos)
 			}
 		}
 
@@ -1646,8 +746,6 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		dragStart = null
 		dragStartClient = null
 		isDragging = false
-		canvasDragStartTime = 0
-		canvasDragStartedOnBlock = false
 		return
 	}
 
@@ -1690,7 +788,7 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		const fromCubeSel = gameStore.grid[selectedForSwap.r]?.[selectedForSwap.c]
 		// IMPORTANT: Check that starting cube has moves > 0
 		if (isAdjacentClick && targetCube && fromCubeSel && fromCubeSel.moves > 0) {
-			gameController?.applyUserAction('swap', selectedForSwap, pos)
+			submitUserAction('swap', selectedForSwap, pos)
 			selectedForSwap = null
 			renderer?.setSelectedPosition(null, null)
 			dragStart = null
@@ -1705,7 +803,7 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 			pos.r === selectedForSwap.r
 		) {
 			// Horizontal slide into empty
-			gameController?.applyUserAction('slide', selectedForSwap, pos)
+			submitUserAction('slide', selectedForSwap, pos)
 			selectedForSwap = null
 			renderer?.setSelectedPosition(null, null)
 			dragStart = null
@@ -1729,11 +827,6 @@ function handlePointerUp(e: MouseEvent | TouchEvent | PointerEvent): void {
 		dragStartClient = null
 	}
 
-	// Очищаем состояние drag scrolling
-	clearCanvasPressTimer()
-	canvasDragStartTime = 0
-	canvasDragScrolling = false
-	canvasDragStartedOnBlock = false
 }
 
 // Функция для запуска игры с проверкой рекламы
@@ -1825,12 +918,15 @@ async function startGameWithAds(): Promise<void> {
 	}
 
 	// Запускаем игру после закрытия рекламы (или если реклама не нужна)
+	// Повторная проверка: компонент мог размонтироваться пока шли await выше
+	if (!gameController || !renderer) return
 	await gameController.startGame()
 
 	const tilesAddedTime = performance.now()
 	gameStore.setDiagnostic('tilesAdded', tilesAddedTime)
 
 	// Запускаем boot-цепочку
+	if (!gameController) return
 	await gameController.bootGame()
 }
 
@@ -2023,12 +1119,6 @@ onMounted(async () => {
 		}
 	}
 
-	// КРИТИЧНО: Обновляем bounds для MomentumScroll после установки размеров canvas
-	if (momentumScrollRef.value) {
-		await nextTick()
-		momentumScrollRef.value.updateBounds()
-	}
-
 	// Create renderer с правильным tileSize (всегда ширина / 8)
 	// Используем кэшированное значение из initCanvas
 	const containerWidth =
@@ -2066,13 +1156,6 @@ onMounted(async () => {
 	// Обновляем размеры через renderer, чтобы PixiJS правильно их обработал
 	renderer.resizeCanvas(canvasWidth, canvasHeight, gridHeight)
 
-	// КРИТИЧНО: Обновляем bounds для MomentumScroll после установки размеров canvas
-	await nextTick()
-	await new Promise((resolve) => requestAnimationFrame(resolve))
-	if (momentumScrollRef.value) {
-		momentumScrollRef.value.updateBounds()
-	}
-
 	const controllerInitStartTime = performance.now()
 
 	// Create game controller с callback'ами для boot-цепочки
@@ -2085,23 +1168,12 @@ onMounted(async () => {
 			isGenerating.value = false
 		},
 		onStartScrollAnimation: async () => {
-			// Callback для запуска анимации скроллинга
-			const scrollStartTime = performance.now()
-			gameStore.setDiagnostic('scrollStarted', scrollStartTime)
-
-			// Update scroll bounds после того, как игра запущена
-			momentumScrollRef.value?.updateBounds()
-
-			// Animate scroll to bottom
-			await momentumScrollRef.value?.scrollToBottomAnimated(1.5, 3000)
+			gameStore.setDiagnostic('scrollStarted', performance.now())
 		},
 	})
 
 	// Initialize controller - текстуры уже загружены в PixiService
 	await gameController.init()
-
-	// Set initial scroll position to top
-	momentumScrollRef.value?.scrollToTop()
 
 	// Читаем уровень из URL query параметров (для level mode)
 	const levelParam = route.query.level
@@ -2153,78 +1225,27 @@ onMounted(async () => {
 		if (
 			!dragStart ||
 			!dragStartClient ||
-			gameStore.isLocked ||
 			gameStore.isGameOver
 		) {
 			return
 		}
 
-		// Проверяем, было ли движение достаточно большим
 		const dx = Math.abs(e.clientX - dragStartClient.x)
 		const dy = Math.abs(e.clientY - dragStartClient.y)
-		const threshold = 10 // Порог в пикселях для определения свайпа
+		const threshold = 10
 		const moved = Math.sqrt(dx * dx + dy * dy)
 
-		// Определяем задержку в зависимости от того, было ли начальное касание на блоке
-		const pressDelay = canvasDragStartedOnBlock
-			? CANVAS_PRESS_DELAY_BLOCK
-			: CANVAS_PRESS_DELAY_EMPTY
-
-		// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
-		const elapsedTime = performance.now() - canvasDragStartTime
-		const isFastSwipe = elapsedTime < pressDelay
-
-		// Если drag scrolling уже активирован, обрабатываем только скроллинг
-		if (canvasDragScrolling && momentumScrollRef.value) {
-			e.preventDefault()
-			e.stopPropagation()
-
-			const deltaY = dragStartClient.y - e.clientY
-			momentumScrollRef.value.drag(deltaY, performance.now())
-			// Обновляем dragStartClient для следующего движения
-			dragStartClient.y = e.clientY
-			return
-		}
-
-		// КРИТИЧНО: Скроллинг активируется ТОЛЬКО при долгом удержании (elapsedTime >= pressDelay)
-		// Быстрые свайпы всегда обрабатываются как игра
-		if (elapsedTime >= pressDelay && moved > CANVAS_PRESS_MOVE_TOLERANCE) {
-			// Долгое удержание + движение - активируем drag scrolling
-			if (!canvasDragScrolling) {
-				clearCanvasPressTimer()
-				activateCanvasDragScrolling()
-			}
-
-			// Если drag scrolling активирован, обрабатываем скроллинг
-			if (canvasDragScrolling && momentumScrollRef.value) {
-				e.preventDefault()
-				e.stopPropagation()
-
-				const deltaY = dragStartClient.y - e.clientY
-				momentumScrollRef.value.drag(deltaY, performance.now())
-				// Обновляем dragStartClient для следующего движения
-				dragStartClient.y = e.clientY
-				return
-			}
-		}
-
-		// Если движение быстрое (до истечения pressDelay) - обрабатываем как игру
-		if (isFastSwipe && moved > threshold) {
+		if (moved > threshold) {
 			isDragging = true
-
-			// Предотвращаем скролл при движении по canvas
 			e.preventDefault()
 			e.stopPropagation()
 
-			// Обновляем выделение при движении
 			const pos = getPositionFromEvent(e)
 			if (pos) {
-				// Highlight tile under pointer (only if it has moves > 0)
 				const cube = gameStore.grid[pos.r]?.[pos.c]
 				if (cube && cube.moves > 0) {
 					renderer?.setSelectedPosition(pos.r, pos.c)
 				} else {
-					// Highlight starting tile if it has moves > 0
 					const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
 					if (startCube && startCube.moves > 0) {
 						renderer?.setSelectedPosition(dragStart.r, dragStart.c)
@@ -2234,8 +1255,6 @@ onMounted(async () => {
 				}
 			}
 		}
-		// Если движение недостаточное и время еще не истекло - не блокируем события
-		// Позволяем MomentumScroll обработать их, если нужно
 	}
 	pixiCanvasForHandlers.addEventListener('pointermove', pointerMoveHandler, {
 		passive: false,
@@ -2257,7 +1276,6 @@ onMounted(async () => {
 		if (
 			!dragStart ||
 			!dragStartClient ||
-			gameStore.isLocked ||
 			gameStore.isGameOver
 		) {
 			return
@@ -2265,72 +1283,22 @@ onMounted(async () => {
 
 		if (e.touches.length > 0) {
 			const touch = e.touches[0]
-			// Проверяем, было ли движение достаточно большим
 			const dx = Math.abs(touch.clientX - dragStartClient!.x)
 			const dy = Math.abs(touch.clientY - dragStartClient!.y)
-			const threshold = 10 // Порог в пикселях для определения свайпа
+			const threshold = 10
 			const moved = Math.sqrt(dx * dx + dy * dy)
 
-			// Определяем задержку в зависимости от того, было ли начальное касание на блоке
-			const pressDelay = canvasDragStartedOnBlock
-				? CANVAS_PRESS_DELAY_BLOCK
-				: CANVAS_PRESS_DELAY_EMPTY
-
-			// Определяем, было ли движение быстрым (произошло до истечения pressDelay)
-			const elapsedTime = performance.now() - canvasDragStartTime
-			const isFastSwipe = elapsedTime < pressDelay
-
-			// Если drag scrolling уже активирован, обрабатываем только скроллинг
-			if (canvasDragScrolling && momentumScrollRef.value) {
-				e.preventDefault()
-				e.stopPropagation()
-
-				const deltaY = dragStartClient.y - touch.clientY
-				momentumScrollRef.value.drag(deltaY, performance.now())
-				// Обновляем dragStartClient для следующего движения
-				dragStartClient.y = touch.clientY
-				return
-			}
-
-			// КРИТИЧНО: Скроллинг активируется ТОЛЬКО при долгом удержании (elapsedTime >= pressDelay)
-			// Быстрые свайпы всегда обрабатываются как игра
-			if (elapsedTime >= pressDelay && moved > CANVAS_PRESS_MOVE_TOLERANCE) {
-				// Долгое удержание + движение - активируем drag scrolling
-				if (!canvasDragScrolling) {
-					clearCanvasPressTimer()
-					activateCanvasDragScrolling()
-				}
-
-				// Если drag scrolling активирован, обрабатываем скроллинг
-				if (canvasDragScrolling && momentumScrollRef.value) {
-					e.preventDefault()
-					e.stopPropagation()
-
-					const deltaY = dragStartClient.y - touch.clientY
-					momentumScrollRef.value.drag(deltaY, performance.now())
-					// Обновляем dragStartClient для следующего движения
-					dragStartClient.y = touch.clientY
-					return
-				}
-			}
-
-			// Если движение быстрое (до истечения pressDelay) - обрабатываем как игру
-			if (isFastSwipe && moved > threshold) {
+			if (moved > threshold) {
 				isDragging = true
-
-				// Предотвращаем скролл при движении по canvas
 				e.preventDefault()
 				e.stopPropagation()
 
-				// Обновляем выделение при движении
 				const pos = getPositionFromEvent(e)
 				if (pos) {
-					// Highlight tile under pointer (only if it has moves > 0)
 					const cube = gameStore.grid[pos.r]?.[pos.c]
 					if (cube && cube.moves > 0) {
 						renderer?.setSelectedPosition(pos.r, pos.c)
 					} else {
-						// Highlight starting tile if it has moves > 0
 						const startCube = gameStore.grid[dragStart.r]?.[dragStart.c]
 						if (startCube && startCube.moves > 0) {
 							renderer?.setSelectedPosition(dragStart.r, dragStart.c)
@@ -2340,8 +1308,6 @@ onMounted(async () => {
 					}
 				}
 			}
-			// Если движение недостаточное и время еще не истекло - не блокируем события
-			// Позволяем MomentumScroll обработать их, если нужно
 		}
 	}
 	pixiCanvasForHandlers.addEventListener('touchmove', touchMoveHandler, {
@@ -2393,7 +1359,6 @@ onMounted(async () => {
 				// Синхронизировать позиции после изменения размера
 				await renderer.syncGridPositions(gameStore.grid)
 			}
-			momentumScrollRef.value?.updateBounds()
 		}, 150)
 	}
 
@@ -2438,6 +1403,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
 	// Очищаем таймеры play-area
 	clearPlayAreaPressTimer()
+	clearPendingUserActionFlushTimer()
+	pendingUserAction = null
 
 	// Разблокируем ориентацию при размонтировании
 	if (Capacitor.isNativePlatform()) {
@@ -2537,9 +1504,9 @@ async function restart(): Promise<void> {
 	dragStart = null
 	dragStartClient = null
 	isDragging = false
-	canvasDragStartTime = 0
-	canvasDragScrolling = false
-	canvasDragStartedOnBlock = false
+	clearPendingUserActionFlushTimer()
+	pendingUserAction = null
+	lastUserActionAt = 0
 	renderer?.setSelectedPosition(null, null)
 	if (gameController) {
 		gameController.stop()
@@ -2721,9 +1688,7 @@ async function restart(): Promise<void> {
 		border-radius: 20px;
 		position: relative;
 		z-index: 1;
-		// MomentumScroll сам управляет overflow
 		width: 100%;
-		// КРИТИЧНО: MomentumScroll требует height: 100% для правильной работы
 		height: 100%;
 		// Высота также будет установлена через flex от родителя
 		display: flex;
@@ -2732,6 +1697,8 @@ async function restart(): Promise<void> {
 		visibility: visible;
 		opacity: 1;
 		overflow: hidden;
+		// Прижимаем канвас к низу, чтобы видеть нижнюю часть (где появляются плитки)
+		justify-content: flex-end;
 	}
 
 	&__canvas-container {
@@ -3164,7 +2131,7 @@ async function restart(): Promise<void> {
 
 .column-danger-indicator__track {
 	display: grid;
-	grid-template-columns: repeat(8, minmax(0, 1fr));
+	grid-template-columns: repeat(6, minmax(0, 1fr));
 	gap: 0;
 	align-items: end;
 	width: 100%;

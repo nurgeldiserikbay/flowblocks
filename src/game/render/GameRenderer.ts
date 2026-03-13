@@ -211,14 +211,15 @@ export class GameRenderer {
 		for (const cubeId of cubesToRemove) {
 			const cubeContainer = this.cubeContainers.get(cubeId)
 			if (cubeContainer && cubeContainer.container) {
-				// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
 				gsap.killTweensOf(cubeContainer.container)
+				if (cubeContainer.container.scale) {
+					gsap.killTweensOf(cubeContainer.container.scale)
+				}
 
 				if (cubeContainer.container.parent) {
 					cubeContainer.container.parent.removeChild(cubeContainer.container)
 				}
 
-				// Проверяем, что контейнер еще существует перед destroy
 				if (cubeContainer.container && cubeContainer.container.scale) {
 					cubeContainer.container.destroy({ children: true })
 				}
@@ -667,6 +668,11 @@ export class GameRenderer {
 					duration: 0.22,
 					ease: 'power2.out',
 					onComplete: resolve,
+					onInterrupt: () => {
+						containerA.container.x = posBX
+						containerA.container.y = posBY
+						resolve()
+					},
 				})
 			}),
 			new Promise<void>((resolve) => {
@@ -677,6 +683,11 @@ export class GameRenderer {
 					duration: 0.22,
 					ease: 'power2.out',
 					onComplete: resolve,
+					onInterrupt: () => {
+						containerB.container.x = posAX
+						containerB.container.y = posAY
+						resolve()
+					},
 				})
 			}),
 		])
@@ -698,19 +709,24 @@ export class GameRenderer {
 		const targetX = to.c * this.tileSize
 		const targetY = this.calculateYFromBottom(to.r)
 
-		await new Promise<void>((resolve) => {
-			gsap.killTweensOf(cubeContainer.container)
-			gsap.to(cubeContainer.container, {
-				x: targetX,
-				y: targetY,
-				duration: 0.22,
-				ease: 'power2.out',
-				onComplete: resolve,
-			})
+	await new Promise<void>((resolve) => {
+		gsap.killTweensOf(cubeContainer.container)
+		gsap.to(cubeContainer.container, {
+			x: targetX,
+			y: targetY,
+			duration: 0.22,
+			ease: 'power2.out',
+			onComplete: resolve,
+			onInterrupt: () => {
+				cubeContainer.container.x = targetX
+				cubeContainer.container.y = targetY
+				resolve()
+			},
 		})
-	}
+	})
+}
 
-	private async animateFall(
+private async animateFall(
 		items: Array<{
 			id?: number
 			from: { r: number; c: number }
@@ -750,7 +766,10 @@ export class GameRenderer {
 			const targetX = item.to.c * this.tileSize
 			const targetY = this.calculateYFromBottom(item.to.r)
 			const fallDistance = Math.max(1, Math.abs(item.to.r - item.from.r))
-			const duration = Math.min(0.5, 0.16 + fallDistance * 0.06)
+			// Faster fall keeps the animation snappy so the lock is released sooner.
+			// Old formula: min(0.5, 0.16 + distance * 0.06) → up to 500 ms
+			// New formula: min(0.22, 0.08 + distance * 0.04) → up to 220 ms (~2× faster)
+			const duration = Math.min(0.22, 0.08 + fallDistance * 0.04)
 
 			return new Promise<void>((resolve) => {
 				gsap.killTweensOf(cubeContainer.container)
@@ -760,6 +779,12 @@ export class GameRenderer {
 					duration,
 					ease: 'power2.out',
 					onComplete: resolve,
+					onInterrupt: () => {
+						// Snap to target so the grid stays consistent
+						cubeContainer.container.x = targetX
+						cubeContainer.container.y = targetY
+						resolve()
+					},
 				})
 			})
 		})
@@ -922,41 +947,55 @@ export class GameRenderer {
 			containers.map(
 				(cubeContainer) =>
 					new Promise<void>((resolve) => {
-						// КРИТИЧНО: Проверяем, что контейнер еще существует
 						if (!cubeContainer || !cubeContainer.container) {
 							resolve()
 							return
 						}
 
 						const container = cubeContainer.container
+						let resolved = false
 
+						const finish = () => {
+							if (resolved) return
+							resolved = true
+
+							gsap.killTweensOf(container)
+							if (container.scale) gsap.killTweensOf(container.scale)
+
+							if (container.parent) {
+								container.parent.removeChild(container)
+							}
+							if (container && container.scale) {
+								container.destroy({ children: true })
+							}
+							resolve()
+						}
+
+						// Animate alpha separately (safe on PixiJS containers)
 						gsap.to(container, {
 							alpha: 0,
-							scale: 0,
-							duration: 0.15,
+							duration: 0.12,
 							ease: 'back.in',
-							onComplete: () => {
-								// КРИТИЧНО: Проверяем, что контейнер еще существует и не уничтожен
-								if (!container || !container.scale) {
-									resolve()
-									return
-								}
-
-								// КРИТИЧНО: Убиваем все GSAP анимации на контейнере перед уничтожением
-								gsap.killTweensOf(container)
-
-								if (container.parent) {
-									container.parent.removeChild(container)
-								}
-
-								// Проверяем еще раз перед destroy
-								if (container && container.scale) {
-									container.destroy({ children: true })
-								}
-
-								resolve()
-							},
 						})
+						// Animate scale via ObservablePoint properties to avoid PixiJS setter issues
+						if (container.scale) {
+							gsap.to(container.scale, {
+								x: 0,
+								y: 0,
+								duration: 0.12,
+								ease: 'back.in',
+								onComplete: finish,
+								onInterrupt: finish,
+							})
+						} else {
+							gsap.to(container, {
+								alpha: 0,
+								duration: 0.12,
+								ease: 'back.in',
+								onComplete: finish,
+								onInterrupt: finish,
+							})
+						}
 					})
 			)
 		)
@@ -1089,20 +1128,25 @@ export class GameRenderer {
 				cubeContainer.sprite.visible = true
 				cubeContainer.sprite.alpha = 1
 
-				return new Promise<void>((resolve) => {
-					gsap.to(container, {
-						y: targetY,
-						duration: 0.6,
-						ease: 'power2.out',
-						onComplete: () => {
-							// КРИТИЧНО: Проверяем, что контейнер еще существует
-							if (container && container.y !== undefined) {
-								container.y = targetY
-							}
-							resolve()
-						},
-					})
+			return new Promise<void>((resolve) => {
+				gsap.to(container, {
+					y: targetY,
+					duration: 0.6,
+					ease: 'power2.out',
+					onComplete: () => {
+						if (container && container.y !== undefined) {
+							container.y = targetY
+						}
+						resolve()
+					},
+					onInterrupt: () => {
+						if (container && container.y !== undefined) {
+							container.y = targetY
+						}
+						resolve()
+					},
 				})
+			})
 			} else {
 				// Для появления на месте: спрайт уже создан с alpha=0, scale=0
 				// КРИТИЧНО: Убеждаемся, что контейнер видим перед анимацией
@@ -1129,21 +1173,27 @@ export class GameRenderer {
 						duration: 0.2,
 						ease: 'power2.out',
 					})
-					if (container.scale) {
-						gsap.to(container.scale, {
-							x: 1,
-							y: 1,
-							duration: 0.24,
-							ease: 'back.out(1.5)',
-							onComplete: () => {
-								container.alpha = 1
-								container.scale?.set(1)
-								resolve()
-							},
-						})
-					} else {
-						resolve()
-					}
+				if (container.scale) {
+					gsap.to(container.scale, {
+						x: 1,
+						y: 1,
+						duration: 0.24,
+						ease: 'back.out(1.5)',
+						onComplete: () => {
+							container.alpha = 1
+							container.scale?.set(1)
+							resolve()
+						},
+						onInterrupt: () => {
+							// Tween killed mid-flight — resolve anyway to avoid infinite lock
+							container.alpha = 1
+							container.scale?.set(1)
+							resolve()
+						},
+					})
+				} else {
+					resolve()
+				}
 				})
 			}
 		})
@@ -1733,15 +1783,16 @@ export class GameRenderer {
 		for (const cubeId of cubesToRemove) {
 			const cubeContainer = this.cubeContainers.get(cubeId)
 			if (cubeContainer && cubeContainer.container) {
-				// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
 				gsap.killTweensOf(cubeContainer.container)
+				if (cubeContainer.container.scale) {
+					gsap.killTweensOf(cubeContainer.container.scale)
+				}
 
 				// Only remove if still in parent (wasn't already removed by animateRemove)
 				if (cubeContainer.container.parent) {
 					cubeContainer.container.parent.removeChild(cubeContainer.container)
 				}
 
-				// Проверяем, что контейнер еще существует перед destroy
 				if (cubeContainer.container && cubeContainer.container.scale) {
 					cubeContainer.container.destroy({ children: true })
 				}
@@ -2177,8 +2228,12 @@ export class GameRenderer {
 	destroy(): void {
 		this.cubeContainers.forEach((cubeContainer) => {
 			if (cubeContainer && cubeContainer.container) {
-				// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением
+				// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением,
+				// включая tweens на scale (иначе GSAP обратится к уже уничтоженному scale.x)
 				gsap.killTweensOf(cubeContainer.container)
+				if (cubeContainer.container.scale) {
+					gsap.killTweensOf(cubeContainer.container.scale)
+				}
 
 				if (cubeContainer.container.parent) {
 					cubeContainer.container.parent.removeChild(cubeContainer.container)

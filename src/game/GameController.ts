@@ -767,39 +767,39 @@ export class GameController {
 				this.store.addScore(baseScore + comboBonus)
 			}
 
-			// Apply resolve events (remove, fall, etc.)
-			// Note: We don't re-render grid after events because:
-			// 1. Remove events already remove sprites by ID
-			// 2. Fall events already animate sprites to new positions
-			// 3. Re-rendering would recreate all sprites and lose animations
-			// Only sync positions after animations complete
-			if (this.renderer && resolveResult.events.length > 0) {
-				await this.renderer.applyEvents(resolveResult.events)
-				// After animations, sync positions with grid state
-				// This will update positions of cubes that moved due to gravity
-				// animateRemove already removed cubes from maps, so syncGridPositions won't try to remove them again
-				await this.renderer.syncGridPositions(grid)
-			}
+		// Apply resolve events (remove, fall, etc.)
+		// Note: We don't re-render grid after events because:
+		// 1. Remove events already remove sprites by ID
+		// 2. Fall events already animate sprites to new positions
+		// 3. Re-rendering would recreate all sprites and lose animations
+		// Only sync positions after animations complete
+		if (this.renderer && resolveResult.events.length > 0) {
+			await this.renderer.applyEvents(resolveResult.events)
+			// After animations, sync positions with grid state
+			// This will update positions of cubes that moved due to gravity
+			// animateRemove already removed cubes from maps, so syncGridPositions won't try to remove them again
+			await this.renderer.syncGridPositions(grid)
+		}
 
-			// Check for vessel clear bonus
-			let isEmpty = true
-			for (let r = 0; r < grid.length; r++) {
-				for (let c = 0; c < WIDTH; c++) {
-					if (grid[r]?.[c]) {
-						isEmpty = false
-						break
-					}
+		// Check for vessel clear bonus
+		let isEmpty = true
+		for (let r = 0; r < grid.length; r++) {
+			for (let c = 0; c < WIDTH; c++) {
+				if (grid[r]?.[c]) {
+					isEmpty = false
+					break
 				}
-				if (!isEmpty) break
 			}
+			if (!isEmpty) break
+		}
 
-			if (isEmpty) {
-				const clearBonus = getVesselClearBonus(grid)
-				this.store.addScore(clearBonus)
-				await this.renderer?.showGreatMessage(clearBonus)
-				// Play clear sound
-				AudioManager.playClear()
-			}
+		if (isEmpty) {
+			const clearBonus = getVesselClearBonus(grid)
+			this.store.addScore(clearBonus)
+			await this.renderer?.showGreatMessage(clearBonus)
+			// Play clear sound
+			AudioManager.playClear()
+		}
 
 			// Check game state: cubes finished or no moves
 			await this.checkGameState(grid)

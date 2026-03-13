@@ -5,12 +5,12 @@
 
 import type { Cube, Position } from './types'
 
-const WIDTH = 8
+const WIDTH = 6
 
 export function getCube(
 	grid: (Cube | null)[][],
 	r: number,
-	c: number
+	c: number,
 ): Cube | null {
 	if (r < 0 || r >= grid.length || c < 0 || c >= WIDTH) return null
 	return grid[r]?.[c] ?? null
@@ -20,7 +20,7 @@ export function setCube(
 	grid: (Cube | null)[][],
 	r: number,
 	c: number,
-	cube: Cube | null
+	cube: Cube | null,
 ): void {
 	if (r < 0 || r >= grid.length || c < 0 || c >= WIDTH) return
 	if (!grid[r]) grid[r] = []
@@ -52,7 +52,7 @@ export function cloneGrid(grid: (Cube | null)[][]): (Cube | null)[][] {
 export function swapCubes(
 	grid: (Cube | null)[][],
 	a: Position,
-	b: Position
+	b: Position,
 ): void {
 	const cubeA = getCube(grid, a.r, a.c)
 	const cubeB = getCube(grid, b.r, b.c)
