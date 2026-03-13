@@ -766,10 +766,9 @@ private async animateFall(
 			const targetX = item.to.c * this.tileSize
 			const targetY = this.calculateYFromBottom(item.to.r)
 			const fallDistance = Math.max(1, Math.abs(item.to.r - item.from.r))
-			// Faster fall keeps the animation snappy so the lock is released sooner.
-			// Old formula: min(0.5, 0.16 + distance * 0.06) → up to 500 ms
-			// New formula: min(0.22, 0.08 + distance * 0.04) → up to 220 ms (~2× faster)
-			const duration = Math.min(0.22, 0.08 + fallDistance * 0.04)
+		// Balanced fall speed: visible and smooth, but not slow.
+		// Formula: min(0.35, 0.1 + distance * 0.06) → 1-tile: 0.16s, 3-tile: 0.28s, max: 0.35s
+		const duration = Math.min(0.35, 0.1 + fallDistance * 0.06)
 
 			return new Promise<void>((resolve) => {
 				gsap.killTweensOf(cubeContainer.container)

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
 	<AppLayout>
 		<template #title>
 			<div class="game-header">
@@ -609,6 +609,12 @@ function getPositionFromEvent(
 }
 
 function handlePointerDown(e: MouseEvent | TouchEvent | PointerEvent): void {
+	// For touch events: claim the gesture immediately so the browser never decides
+	// this is a scroll — prevents subsequent touchmove from having cancelable=false.
+	if (e instanceof TouchEvent && e.cancelable) {
+		e.preventDefault()
+	}
+
 	// КРИТИЧНО: Блокируем ввод до тех пор, пока игра не запущена
 	if (!gameStore.isGameStarted) {
 		return
@@ -1290,8 +1296,12 @@ onMounted(async () => {
 
 			if (moved > threshold) {
 				isDragging = true
-				e.preventDefault()
-				e.stopPropagation()
+				// Guard: touchstart now calls preventDefault() so the browser never
+				// sets cancelable=false on touchmove, but defend on edge-case paths.
+				if (e.cancelable) {
+					e.preventDefault()
+					e.stopPropagation()
+				}
 
 				const pos = getPositionFromEvent(e)
 				if (pos) {

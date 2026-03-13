@@ -57,6 +57,12 @@ export class GameController {
 	private readonly STATE_CHECK_INTERVAL = 2000 // Проверяем состояние не чаще чем раз в 2 секунды
 	private lastHasMovesCheck: { gridHash: string; result: boolean } | null = null // Кэш последней проверки hasPossibleMoves
 	private readonly isAndroidDevice = /Android/i.test(navigator.userAgent)
+	/**
+	 * Promise for the post-swap cascade chain (fall + remove + resolve).
+	 * Runs after the swap animation completes while input is already unlocked.
+	 * Any new applyUserAction awaits this before proceeding.
+	 */
+	private pendingChainPromise: Promise<void> | null = null
 
 	constructor(renderer: GameRenderer, opts?: GameControllerOptions) {
 		this.renderer = renderer
@@ -370,12 +376,10 @@ export class GameController {
 			return
 		}
 
-		// Если игра заблокирована, планируем следующий тик без обновления времени
-		// Это позволяет таймеру продолжать работать и возобновиться после разблокировки
-		if (this.store.isLocked) {
+		// Treat an active post-move chain the same as a lock so that onWaveEnd
+		// is never triggered while fall/remove animations are still playing.
+		if (this.store.isLocked || this.pendingChainPromise !== null) {
 			const now = Date.now()
-			// Планируем следующий тик через 1 секунду от текущего момента
-			// Это гарантирует, что таймер продолжит работать даже при длительной блокировке
 			this.expectedNextTick = now + 1000
 			this.scheduleNextTick()
 			return
@@ -634,14 +638,17 @@ export class GameController {
 		from: Position,
 		to: Position
 	): Promise<void> {
-		// КРИТИЧНО: Дополнительная проверка перед блокировкой
-		// Предотвращает race conditions с checkGameStateAsync
+		// Wait for any ongoing post-move cascade chain before starting a new action.
+		// This prevents grid state conflicts while keeping input visually responsive.
+		if (this.pendingChainPromise) {
+			await this.pendingChainPromise
+		}
+
 		if (this.store.isLocked || this.store.isGameOver) return
 
-		// Очищаем кэш проверки hasPossibleMoves при действии пользователя
+		// Clear hasPossibleMoves cache on user action
 		this.lastHasMovesCheck = null
 
-		// КРИТИЧНО: Блокируем игру и используем try-finally для гарантированной разблокировки
 		this.store.setLocked(true)
 
 		try {
@@ -651,14 +658,11 @@ export class GameController {
 
 			// Perform move
 			if (action === 'swap') {
-				// Запомнить, был ли у куба в to 0 ходов (до обмена)
 				const replacedHadNoMoves = (grid[to.r]?.[to.c]?.moves ?? 0) === 0
 				success = trySwap(grid, from, to)
 				if (success) {
-					// После swap: from = куб с которым меняли, to = куб которого двигали
-					const cubeReplaced = grid[from.r]?.[from.c] // бывший в to
-					const cubeMoved = grid[to.r]?.[to.c] // бывший в from
-					// Двигаемый: -1 обычно; -2 если блок с которым меняли не имел ходов
+					const cubeReplaced = grid[from.r]?.[from.c]
+					const cubeMoved = grid[to.r]?.[to.c]
 					if (cubeMoved) {
 						const delta = replacedHadNoMoves ? 2 : 1
 						cubeMoved.moves = Math.max(0, cubeMoved.moves - delta)
@@ -677,7 +681,6 @@ export class GameController {
 				if (success) {
 					const cube = grid[to.r]?.[to.c]
 					if (cube) {
-						// Слайд: цель пустая, «блок с которым заменили» нет — минус 1 ход
 						cube.moves = Math.max(0, cube.moves - 1)
 						if (this.renderer)
 							this.renderer.updateCubeMoves(cube.id, cube.moves)
@@ -692,127 +695,122 @@ export class GameController {
 				}
 			}
 
-			if (!success || !moveEvent) {
-				return
-			}
+			if (!success || !moveEvent) return
 
-			// Play move sound
 			AudioManager.playMove()
 
-			// Animate move first (this updates positions in renderer)
+			// Animate the swap/move — user sees blocks physically move (0.22s)
 			if (this.renderer) {
 				await this.renderer.applyEvents([moveEvent])
 			}
 
-			// Update store grid AFTER animation completes
-			// This ensures renderer cubePositions are synced with grid before resolveAfterMove
+			// Sync grid state after move animation
 			this.store.setGrid(grid)
 
-			// Positions of moved tiles for match resolution (only matches touching these are removed)
-			let checkPositions: Position[] = [from, to]
+			// Unlock input immediately after the visual swap.
+			// The cascade chain (gravity → match resolve → remove → fall) runs in the background.
+			// The next applyUserAction will await pendingChainPromise before proceeding.
+			this.store.setLocked(false)
 
-			// After slide move: from is always empty — blocks above it must fall. Always apply gravity.
-			// КРИТИЧНО: Применяем гравитацию до полного заполнения всех пустот
-			if (action === 'slide' && success) {
-				const fallItems = applyGravityUntilSettled(grid)
-				this.store.setGrid(grid)
-
-				if (fallItems.length > 0 && this.renderer) {
-					const fallEvent: GameEvent = {
-						type: 'fall',
-						items: fallItems,
-					}
-					await this.renderer.applyEvents([fallEvent])
-					await this.renderer.syncGridPositions(grid)
-				}
-
-				// For resolve: all landing positions; add to if the moved cube did not fall
-				const movedCubeFell = fallItems.some(
-					(f) => f.from.r === to.r && f.from.c === to.c
-				)
-				checkPositions = fallItems.map((f) => f.to)
-				if (!movedCubeFell) checkPositions.push(to)
+			this.pendingChainPromise = this._postMoveChain(grid, action, from, to)
+			this.pendingChainPromise
+				.catch((err) => {
+					console.error('[GameController] _postMoveChain error:', err)
+				})
+				.finally(() => {
+					this.pendingChainPromise = null
+				})
+		} catch (error) {
+			console.error('[GameController] applyUserAction: error during move', error)
+		} finally {
+			// Only unlock if we never reached the early-unlock above (e.g. early return / error)
+			if (this.store.isLocked) {
+				this.store.setLocked(false)
 			}
+		}
+	}
 
-			// Apply gravity and resolve matches
-			// Note: resolveAfterMove works on grid where cubes are already swapped/moved
-			// On first check, only matches that touch moved positions are removed
-			const resolveResult = resolveAfterMove(grid, checkPositions)
+	/**
+	 * Runs the cascade chain after the swap/move animation completes.
+	 * Executes while input is already unlocked so the player can queue the next move.
+	 * The next applyUserAction awaits this promise before touching the grid.
+	 */
+	private async _postMoveChain(
+		grid: (Cube | null)[][],
+		action: 'swap' | 'slide',
+		from: Position,
+		to: Position
+	): Promise<void> {
+		if (!this.renderer) return
+
+		let checkPositions: Position[] = [from, to]
+
+		// For slide: apply gravity to fill the vacated cell
+		if (action === 'slide') {
+			const fallItems = applyGravityUntilSettled(grid)
 			this.store.setGrid(grid)
 
-			// Enrich remove events with baseScore/comboBonus and add score
-			// Store chainIndex in events for sound playback during animation
-			let removeEventIndex = 0
-			for (const ev of resolveResult.events) {
-				if (ev.type !== 'remove') continue
-				removeEventIndex++
-				const chainIndex = removeEventIndex
-
-				const baseScore = calculateBaseRemovalScore(ev.cells)
-				let comboBonus = 0
-				if (this.comboTimer !== null) {
-					this.comboLevel++
-					comboBonus = calculateComboBonus(this.comboLevel, ev.cells.length)
-					clearTimeout(this.comboTimer)
-				} else {
-					this.comboLevel = 1
-				}
-				this.comboTimer = setTimeout(() => {
-					this.comboTimer = null
-					this.comboLevel = 0
-				}, COMBO_WINDOW_MS)
-				ev.baseScore = baseScore
-				ev.comboBonus = comboBonus
-				ev.chainIndex = chainIndex // Сохраняем chainIndex для воспроизведения звука во время анимации
-				this.store.addScore(baseScore + comboBonus)
+			if (fallItems.length > 0 && this.renderer) {
+				const fallEvent: GameEvent = { type: 'fall', items: fallItems }
+				await this.renderer.applyEvents([fallEvent])
+				await this.renderer.syncGridPositions(grid)
 			}
 
-		// Apply resolve events (remove, fall, etc.)
-		// Note: We don't re-render grid after events because:
-		// 1. Remove events already remove sprites by ID
-		// 2. Fall events already animate sprites to new positions
-		// 3. Re-rendering would recreate all sprites and lose animations
-		// Only sync positions after animations complete
+			const movedCubeFell = fallItems.some(
+				(f) => f.from.r === to.r && f.from.c === to.c
+			)
+			checkPositions = fallItems.map((f) => f.to)
+			if (!movedCubeFell) checkPositions.push(to)
+		}
+
+		if (this.store.isGameOver) return
+
+		// Resolve matches and cascades
+		const resolveResult = resolveAfterMove(grid, checkPositions)
+		this.store.setGrid(grid)
+
+		// Enrich remove events with score
+		let removeEventIndex = 0
+		for (const ev of resolveResult.events) {
+			if (ev.type !== 'remove') continue
+			removeEventIndex++
+			const chainIndex = removeEventIndex
+			const baseScore = calculateBaseRemovalScore(ev.cells)
+			let comboBonus = 0
+			if (this.comboTimer !== null) {
+				this.comboLevel++
+				comboBonus = calculateComboBonus(this.comboLevel, ev.cells.length)
+				clearTimeout(this.comboTimer)
+			} else {
+				this.comboLevel = 1
+			}
+			this.comboTimer = setTimeout(() => {
+				this.comboTimer = null
+				this.comboLevel = 0
+			}, COMBO_WINDOW_MS)
+			ev.baseScore = baseScore
+			ev.comboBonus = comboBonus
+			ev.chainIndex = chainIndex
+			this.store.addScore(baseScore + comboBonus)
+		}
+
 		if (this.renderer && resolveResult.events.length > 0) {
 			await this.renderer.applyEvents(resolveResult.events)
-			// After animations, sync positions with grid state
-			// This will update positions of cubes that moved due to gravity
-			// animateRemove already removed cubes from maps, so syncGridPositions won't try to remove them again
 			await this.renderer.syncGridPositions(grid)
 		}
 
-		// Check for vessel clear bonus
-		let isEmpty = true
-		for (let r = 0; r < grid.length; r++) {
-			for (let c = 0; c < WIDTH; c++) {
-				if (grid[r]?.[c]) {
-					isEmpty = false
-					break
-				}
-			}
-			if (!isEmpty) break
-		}
+		if (this.store.isGameOver) return
 
-		if (isEmpty) {
+		// Check vessel clear bonus
+		if (isGridEmpty(grid)) {
 			const clearBonus = getVesselClearBonus(grid)
 			this.store.addScore(clearBonus)
 			await this.renderer?.showGreatMessage(clearBonus)
-			// Play clear sound
 			AudioManager.playClear()
 		}
 
-			// Check game state: cubes finished or no moves
-			await this.checkGameState(grid)
-		} catch (error) {
-			console.error(
-				'[GameController] applyUserAction: error during move',
-				error
-			)
-			// В случае ошибки все равно разблокируем игру через finally
-		} finally {
-			// КРИТИЧНО: Гарантированная разблокировка игры в любом случае
-			this.store.setLocked(false)
-		}
+		// Check game state: cubes finished or no moves
+		await this.checkGameState(grid)
 	}
 
 	/**
@@ -1236,7 +1234,8 @@ export class GameController {
 			clearTimeout(this.comboTimer)
 			this.comboTimer = null
 		}
-		// Очищаем кэш при остановке
+		// Drop any pending chain reference (animations may still finish, but we ignore the result)
+		this.pendingChainPromise = null
 		this.lastHasMovesCheck = null
 	}
 
