@@ -272,20 +272,14 @@ const patternStyles = computed(() =>
 	position: relative;
 	overflow-x: hidden;
 	overflow-y: auto;
-	// Background image is inherited from #app, but add subtle overlay for better contrast
-	background-image:
-		linear-gradient(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.15)),
-		url('./assets/img/bg-sky.png');
-	background-attachment: fixed;
-	background-size: cover;
-	background-position: center;
-	background-repeat: no-repeat;
+	// Тёмный градиент главного экрана
+	background: linear-gradient(160deg, #1e3a8a 0%, #312e81 40%, #4c1d95 100%);
 	padding-top: env(safe-area-inset-top, 0px);
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
 	margin-bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
 
-	// Subtle decorative overlay for depth (lighter than game screen)
+	// Мягкие декоративные блики (приглушённые на тёмном фоне)
 	&::before {
 		content: '';
 		position: fixed;
@@ -295,18 +289,18 @@ const patternStyles = computed(() =>
 		bottom: 0;
 		background:
 			radial-gradient(
-				circle at 20% 30%,
-				rgba(59, 130, 246, 0.25) 0%,
-				transparent 50%
+				circle at 15% 20%,
+				rgba(100, 150, 255, 0.12) 0%,
+				transparent 45%
 			),
 			radial-gradient(
-				circle at 80% 70%,
-				rgba(139, 92, 246, 0.25) 0%,
-				transparent 50%
+				circle at 85% 75%,
+				rgba(180, 100, 220, 0.1) 0%,
+				transparent 45%
 			),
 			radial-gradient(
-				circle at 50% 50%,
-				rgba(236, 72, 153, 0.2) 0%,
+				circle at 50% 55%,
+				rgba(255, 200, 100, 0.06) 0%,
 				transparent 50%
 			);
 		pointer-events: none;
@@ -502,76 +496,64 @@ const patternStyles = computed(() =>
 	flex-shrink: 0;
 }
 
-// Play button
+// Play button – Block Blast hot-pink gradient pill
 .play-button {
 	width: 70%;
 	padding: clamp(1.25rem, 5vw, 1.75rem) clamp(1.5rem, 5vw, 2.5rem);
-	border-radius: clamp(24px, 5vw, 28px);
-	border: 2px solid rgba(255, 255, 255, 0.25);
+	border-radius: 24px;
+	border: 2px solid rgba(255, 255, 255, 0.35);
 	text-decoration: none;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
-	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 	touch-action: manipulation;
 	position: relative;
 	overflow: hidden;
 	box-shadow:
-		0 8px 32px rgba(0, 0, 0, 0.4),
-		0 0 0 1px rgba(255, 255, 255, 0.1),
-		inset 0 2px 4px rgba(255, 255, 255, 0.25);
+		0 8px 36px rgba(255, 79, 176, 0.55),
+		inset 0 2px 0 rgba(255, 255, 255, 0.35);
 	min-height: clamp(70px, 11vw, 90px);
 	box-sizing: border-box;
-	background: linear-gradient(135deg, #ec4899 0%, #d946ef 50%, #a855f7 100%);
-	border-color: rgba(249, 168, 212, 0.5);
-	backdrop-filter: blur(10px);
-	-webkit-backdrop-filter: blur(10px);
+	background: linear-gradient(135deg, #ff7ad9 0%, #ff4fb0 100%);
 
+	// Gloss sheen on top half
 	&::before {
 		content: '';
 		position: absolute;
 		top: 0;
-		left: -100%;
-		width: 100%;
-		height: 100%;
+		left: 0;
+		right: 0;
+		height: 50%;
 		background: linear-gradient(
-			90deg,
-			transparent,
-			rgba(255, 255, 255, 0.35),
-			transparent
+			180deg,
+			rgba(255, 255, 255, 0.22) 0%,
+			transparent 100%
 		);
-		transition: left 0.6s ease;
+		border-radius: 22px 22px 0 0;
+		pointer-events: none;
 	}
 
 	&:hover {
-		transform: translateY(-6px) scale(1.02);
-		background: linear-gradient(135deg, #f472b6 0%, #e879f9 50%, #c084fc 100%);
+		transform: translateY(-4px) scale(1.03);
+		background: linear-gradient(135deg, #ff92e3 0%, #ff6cc4 100%);
 		box-shadow:
-			0 12px 48px rgba(236, 72, 153, 0.6),
-			0 6px 24px rgba(0, 0, 0, 0.4),
-			0 0 0 1px rgba(255, 255, 255, 0.2),
-			inset 0 2px 6px rgba(255, 255, 255, 0.4);
-		border-color: rgba(249, 168, 212, 0.7);
-
-		&::before {
-			left: 100%;
-		}
+			0 14px 50px rgba(255, 79, 176, 0.7),
+			inset 0 2px 0 rgba(255, 255, 255, 0.4);
 	}
 
 	&:active {
-		transform: translateY(-3px) scale(0.97);
-		box-shadow:
-			0 4px 16px rgba(236, 72, 153, 0.4),
-			inset 0 2px 4px rgba(255, 255, 255, 0.3);
+		transform: scale(0.95);
+		box-shadow: 0 4px 16px rgba(255, 79, 176, 0.4);
 	}
 
 	&__text {
 		font-size: clamp(1.375rem, 5vw, 1.875rem);
-		font-weight: 800;
+		font-weight: 900;
 		color: white;
-		letter-spacing: 0.02em;
-		text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+		letter-spacing: 0.04em;
+		text-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 		position: relative;
 		z-index: 1;
 	}
@@ -613,7 +595,7 @@ const patternStyles = computed(() =>
 	}
 }
 
-// Decorative pattern overlay
+// Decorative pattern overlay – soft blurred colour blobs
 .pattern-overlay {
 	position: fixed;
 	top: 0;
@@ -626,14 +608,25 @@ const patternStyles = computed(() =>
 
 	&__shape {
 		position: absolute;
-		background: rgba(255, 255, 255, 0.06);
+		background: rgba(255, 255, 255, 0.08);
 		border-radius: 50%;
-		backdrop-filter: blur(2px);
-		animation: patternFloat 15s ease-in-out infinite;
+		animation: patternFloat 18s ease-in-out infinite;
 
 		&:nth-child(odd) {
-			animation-duration: 20s;
+			animation-duration: 24s;
 			animation-direction: reverse;
+		}
+
+		&:nth-child(3n) {
+			background: rgba(100, 220, 255, 0.07);
+		}
+
+		&:nth-child(3n + 1) {
+			background: rgba(255, 120, 220, 0.07);
+		}
+
+		&:nth-child(3n + 2) {
+			background: rgba(255, 210, 80, 0.06);
 		}
 	}
 }

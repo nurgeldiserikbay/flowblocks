@@ -10,7 +10,15 @@ import Admob from '@/utils/admob'
 import { loadBlockTextures } from '@/game/blockTextures'
 
 onMounted(async () => {
-	if (Capacitor.getPlatform() === 'android') Admob.initialize()
+	// КРИТИЧНО: Инициализируем AdMob до использования (showBanner, interstitial)
+	// Без await showBanner может зависнуть при повторном заходе в игру
+	if (Capacitor.getPlatform() === 'android') {
+		try {
+			await Admob.initialize()
+		} catch (error) {
+			console.warn('[App] AdMob initialization failed:', error)
+		}
+	}
 
 	if (Capacitor.getPlatform() === 'android') {
 		await Fullscreen.activateImmersiveMode()

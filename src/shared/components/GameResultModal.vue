@@ -14,7 +14,7 @@
 							'game-result-modal__title--defeat': !isVictory,
 						}"
 					>
-						{{ isVictory ? '🎉 Victory!' : '😔 No Moves' }}
+						{{ isVictory ? '🎉 Victory!' : '📦 New arrival' }}
 					</div>
 
 					<div class="game-result-modal__stats">
@@ -139,22 +139,22 @@ function handleClose() {
 .game-result-modal {
 	background: linear-gradient(
 		135deg,
-		rgba(255, 255, 255, 0.2) 0%,
-		rgba(255, 255, 255, 0.1) 100%
+		rgba(255, 255, 255, 0.12) 0%,
+		rgba(255, 255, 255, 0.06) 100%
 	);
-	backdrop-filter: blur(20px);
-	border-radius: 24px;
-	border: 2px solid rgba(255, 255, 255, 0.3);
+	backdrop-filter: blur(16px);
+	border-radius: 12px;
+	border: 1px solid rgba(255, 255, 255, 0.2);
 	padding: 2.5rem 2rem;
 	max-width: 450px;
 	width: 100%;
-	box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4);
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 	position: relative;
 	z-index: 10001;
 
 	@media (max-width: 640px) {
 		padding: 2rem 1.5rem;
-		border-radius: 20px;
+		border-radius: 10px;
 		max-width: 90%;
 	}
 
@@ -178,7 +178,8 @@ function handleClose() {
 		}
 
 		&--defeat {
-			color: rgba(255, 255, 255, 0.9);
+			color: rgba(255, 255, 255, 0.95);
+			text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 		}
 	}
 
@@ -207,8 +208,8 @@ function handleClose() {
 
 	&__btn {
 		padding: clamp(1rem, 3vw, 1.125rem) clamp(1.5rem, 4vw, 2rem);
-		border-radius: clamp(14px, 3vw, 16px);
-		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-radius: 8px;
+		border: 1px solid rgba(255, 255, 255, 0.25);
 		background: rgba(255, 255, 255, 0.1);
 		backdrop-filter: blur(10px);
 		color: white;
@@ -287,9 +288,9 @@ function handleClose() {
 	gap: 0.5rem;
 	padding: 1rem 1.5rem;
 	background: rgba(255, 255, 255, 0.05);
-	backdrop-filter: blur(10px);
-	border-radius: 16px;
-	border: 1px solid rgba(255, 255, 255, 0.1);
+	backdrop-filter: blur(8px);
+	border-radius: 8px;
+	border: 1px solid rgba(255, 255, 255, 0.12);
 	min-width: 120px;
 
 	@media (max-width: 640px) {

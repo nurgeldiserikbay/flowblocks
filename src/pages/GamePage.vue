@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<AppLayout>
 		<template #title>
 			<div class="game-header">
@@ -105,6 +105,22 @@
 				cancel-text="Cancel"
 				@confirm="handleExit"
 			/>
+
+			<Transition name="toast-fade">
+				<div
+					v-if="gameStore.gameMessageToast"
+					class="game-message-toast"
+				>
+					<div class="game-message-toast__panel">
+						<div class="game-message-toast__text">
+							{{ gameStore.gameMessageToast.text }}
+						</div>
+						<div class="game-message-toast__bonus">
+							+{{ gameStore.gameMessageToast.bonus }}
+						</div>
+					</div>
+				</div>
+			</Transition>
 
 			<div v-if="gameStore.isGameOver" class="game-overlay">
 				<div class="game-overlay__content">
@@ -942,11 +958,13 @@ onMounted(async () => {
 	// КРИТИЧНО: Сбрасываем состояние игры при монтировании компонента
 	// Это гарантирует, что игра всегда запускается с чистого состояния
 	// даже если пользователь вернулся на страницу после выхода
+	shouldUseHardResetOnUnmount = false
 	gameStore.reset()
 	isGenerating.value = true
 
-	// Initialize AudioManager
-	await AudioManager.init()
+	try {
+		// Initialize AudioManager
+		await AudioManager.init()
 
 	// КРИТИЧНО: Получаем контейнер для canvas
 	// Используем canvas ref для получения контейнера, но сам canvas будет заменен на canvas из PixiService
@@ -1193,12 +1211,15 @@ onMounted(async () => {
 		gameStore.setCurrentLevel(level)
 	}
 
-	// Показываем баннерную рекламу снизу экрана
-	try {
-		await admob.showBanner()
-	} catch (error) {
+	// Показываем баннерную рекламу снизу экрана (не блокируем запуск игры)
+	// showBannerIfNeeded: при первом заходе — showBanner, при повторном — resumeBanner
+	const BANNER_SHOW_TIMEOUT_MS = 5000
+	void Promise.race([
+		admob.showBannerIfNeeded(),
+		new Promise<void>((resolve) => setTimeout(resolve, BANNER_SHOW_TIMEOUT_MS)),
+	]).catch((error) => {
 		console.warn('[GamePage] Failed to show banner ad:', error)
-	}
+	})
 
 	const gameStartTime = performance.now()
 
@@ -1408,6 +1429,13 @@ onMounted(async () => {
 		})
 		resizeObserver.observe(canvasContainer)
 	}
+	} catch (error) {
+		console.error('[GamePage] onMounted failed:', error)
+	} finally {
+		// КРИТИЧНО: Всегда сбрасываем loading при ошибке или раннем выходе
+		// При успешном запуске onHideLoading уже установит false
+		isGenerating.value = false
+	}
 })
 
 onBeforeUnmount(() => {
@@ -1573,7 +1601,7 @@ async function restart(): Promise<void> {
 
 	// Danger state: tiles near top
 	&--danger {
-		// Subtle red tint overlay
+		// Red vignette from top
 		&::before {
 			content: '';
 			position: absolute;
@@ -1582,28 +1610,27 @@ async function restart(): Promise<void> {
 			right: 0;
 			bottom: 0;
 			background: radial-gradient(
-				circle at 50% 0%,
-				rgba(239, 68, 68, 0.15) 0%,
-				transparent 60%
+				ellipse at 50% 0%,
+				rgba(239, 68, 68, 0.22) 0%,
+				transparent 65%
 			);
 			pointer-events: none;
 			z-index: 0;
-			animation: danger-pulse 2s ease-in-out infinite;
+			animation: danger-pulse 1.8s ease-in-out infinite;
 		}
 
 		.game-header {
 			&__time {
 				background: linear-gradient(
 					135deg,
-					rgba(239, 68, 68, 0.6) 0%,
-					rgba(220, 38, 38, 0.6) 100%
+					rgba(239, 68, 68, 0.75) 0%,
+					rgba(220, 38, 38, 0.75) 100%
 				);
-				border-color: rgba(239, 68, 68, 0.5);
+				border-color: rgba(248, 113, 113, 0.6);
 				box-shadow:
-					0 4px 16px rgba(239, 68, 68, 0.4),
-					0 0 0 1px rgba(255, 255, 255, 0.1),
-					inset 0 1px 2px rgba(255, 255, 255, 0.2);
-				animation: danger-glow 1.5s ease-in-out infinite;
+					0 4px 20px rgba(239, 68, 68, 0.5),
+					inset 0 1px 0 rgba(255, 255, 255, 0.25);
+				animation: danger-glow 1.2s ease-in-out infinite;
 			}
 		}
 	}
@@ -1686,28 +1713,29 @@ async function restart(): Promise<void> {
 		grid-column: 1;
 		grid-row: 1;
 		flex: 1;
-		min-height: 0; // Важно для правильной работы flex
-		backdrop-filter: blur(24px);
-		-webkit-backdrop-filter: blur(24px);
+		min-height: 0;
+		background:
+			linear-gradient(
+				180deg,
+				rgba(255, 255, 255, 0.06) 0%,
+				transparent 30%,
+				transparent 100%
+			),
+			linear-gradient(180deg, #3b5fb8 0%, #2a3e87 100%);
 		box-shadow:
-			inset 0 4px 32px rgba(0, 0, 0, 0.5),
-			0 8px 32px rgba(0, 0, 0, 0.4),
-			0 0 0 1px rgba(255, 255, 255, 0.1);
-		border: 2px solid rgba(255, 255, 255, 0.25);
-		background: rgba(255, 255, 255, 0.05);
+			inset 0 1px 0 rgba(255, 255, 255, 0.08),
+			0 8px 32px rgba(0, 0, 0, 0.35);
+		border: 1px solid rgba(0, 0, 0, 0.15);
 		border-radius: 20px;
 		position: relative;
 		z-index: 1;
 		width: 100%;
 		height: 100%;
-		// Высота также будет установлена через flex от родителя
 		display: flex;
 		flex-direction: column;
-		// Гарантируем видимость
 		visibility: visible;
 		opacity: 1;
 		overflow: hidden;
-		// Прижимаем канвас к низу, чтобы видеть нижнюю часть (где появляются плитки)
 		justify-content: flex-end;
 	}
 
@@ -1952,49 +1980,41 @@ async function restart(): Promise<void> {
 	&__score,
 	&__wave {
 		font-size: clamp(0.875rem, 3vw, 1rem);
-		font-weight: 700;
-		color: white;
-		padding: 0.5rem 1rem;
-		background: linear-gradient(
-			135deg,
-			rgba(102, 126, 234, 0.5) 0%,
-			rgba(118, 75, 162, 0.5) 100%
-		);
+		font-weight: 800;
+		color: #ffffff;
+		padding: 0.45rem 0.9rem;
+		background: rgba(255, 255, 255, 0.15);
 		backdrop-filter: blur(16px);
 		-webkit-backdrop-filter: blur(16px);
-		border-radius: 14px;
-		border: 1px solid rgba(255, 255, 255, 0.3);
+		border-radius: 18px;
+		border: 1.5px solid rgba(255, 255, 255, 0.25);
 		box-shadow:
-			0 4px 16px rgba(0, 0, 0, 0.35),
-			0 0 0 1px rgba(255, 255, 255, 0.1),
-			inset 0 1px 2px rgba(255, 255, 255, 0.2);
-		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+			0 4px 16px rgba(0, 0, 0, 0.3),
+			inset 0 1px 0 rgba(255, 255, 255, 0.25);
+		text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 		white-space: nowrap;
-		/* Оптимизация для предотвращения пересчета layout */
 		flex-shrink: 0;
 		flex-grow: 0;
-		/* Минимальная ширина для предотвращения сжатия */
 		min-width: fit-content;
 		will-change: transform;
-		/* Изоляция от изменений layout родителя */
 		contain: layout style paint;
 		display: flex;
 		align-items: center;
-		gap: 0.4rem;
-		transition: all 0.3s ease;
+		gap: 0.35rem;
+		transition: all 0.2s ease;
 
 		@media (max-width: 360px) {
 			font-size: clamp(0.75rem, 2.5vw, 0.875rem);
-			padding: 0.4rem 0.6rem;
-			border-radius: 8px;
-			gap: 0.3rem;
+			padding: 0.35rem 0.65rem;
+			border-radius: 14px;
+			gap: 0.25rem;
 		}
 
 		@media (max-width: 320px) {
 			font-size: clamp(0.7rem, 2vw, 0.8rem);
-			padding: 0.35rem 0.5rem;
-			border-radius: 6px;
-			gap: 0.25rem;
+			padding: 0.3rem 0.5rem;
+			border-radius: 12px;
+			gap: 0.2rem;
 		}
 	}
 
@@ -2036,6 +2056,56 @@ async function restart(): Promise<void> {
 	z-index: 1;
 }
 
+.game-message-toast {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 9;
+	pointer-events: none;
+
+	&__panel {
+		background: linear-gradient(
+			135deg,
+			rgba(249, 115, 22, 0.95) 0%,
+			rgba(234, 88, 12, 0.95) 100%
+		);
+		border: 2px solid rgba(255, 255, 255, 0.4);
+		border-radius: 12px;
+		padding: 1rem 1.5rem;
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+		text-align: center;
+	}
+
+	&__text {
+		font-size: clamp(1.1rem, 4vw, 1.35rem);
+		font-weight: 700;
+		color: white;
+		text-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+		margin-bottom: 0.35rem;
+	}
+
+	&__bonus {
+		font-size: clamp(1.25rem, 4.5vw, 1.5rem);
+		font-weight: 800;
+		color: #fde047;
+		text-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+	}
+}
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+	transition: opacity 0.25s ease;
+}
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+	opacity: 0;
+}
+
 .game-overlay {
 	position: absolute;
 	top: 0;
@@ -2053,67 +2123,65 @@ async function restart(): Promise<void> {
 
 	&__content {
 		background: linear-gradient(
-			145deg,
-			rgba(30, 31, 58, 0.95) 0%,
-			rgba(43, 47, 108, 0.9) 50%,
-			rgba(30, 31, 58, 0.95) 100%
+			160deg,
+			rgba(30, 27, 75, 0.97) 0%,
+			rgba(49, 46, 129, 0.95) 50%,
+			rgba(30, 27, 75, 0.97) 100%
 		);
-		backdrop-filter: blur(28px);
-		-webkit-backdrop-filter: blur(28px);
+		backdrop-filter: blur(24px);
+		-webkit-backdrop-filter: blur(24px);
 		padding: clamp(2rem, 5vw, 2.75rem) clamp(2rem, 5vw, 3rem);
-		border-radius: 24px;
+		border-radius: 28px;
 		max-width: min(500px, 80vw);
 		width: 70%;
 		text-align: center;
 		color: white;
-		border: 2px solid rgba(255, 255, 255, 0.2);
+		border: 2px solid rgba(255, 255, 255, 0.18);
 		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.15),
-			0 0 0 1px rgba(139, 92, 246, 0.25),
-			0 24px 48px rgba(0, 0, 0, 0.6),
-			0 0 80px rgba(139, 92, 246, 0.2);
-		animation: game-overlay-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
+			inset 0 1px 0 rgba(255, 255, 255, 0.2),
+			0 24px 60px rgba(0, 0, 0, 0.7),
+			0 0 0 1px rgba(255, 255, 255, 0.06);
+		animation: game-overlay-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) 0.05s both;
 	}
 
 	&__icon {
-		width: 64px;
-		height: 64px;
+		width: 68px;
+		height: 68px;
 		margin: 0 auto 1.15rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 1.65rem;
+		font-size: 1.8rem;
 		font-weight: 700;
-		color: rgba(248, 113, 113, 0.95);
-		background: rgba(248, 113, 113, 0.15);
+		color: #ffffff;
+		background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
 		border-radius: 50%;
-		border: 2px solid rgba(248, 113, 113, 0.35);
-		box-shadow: 0 0 24px rgba(248, 113, 113, 0.2);
+		border: 3px solid rgba(255, 255, 255, 0.3);
+		box-shadow:
+			0 0 28px rgba(239, 68, 68, 0.5),
+			inset 0 1px 0 rgba(255, 255, 255, 0.3);
 	}
 
 	&__title {
 		margin: 0 0 0.9rem;
 		font-size: clamp(1.9rem, 5.5vw, 2.5rem);
-		font-weight: 800;
+		font-weight: 900;
 		letter-spacing: -0.02em;
-		background: linear-gradient(135deg, #f8f4ff 0%, #e9e0ff 50%, #c4b5fd 100%);
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;
-		text-shadow: none;
+		color: #ffffff;
+		text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 	}
 
 	&__score {
 		margin: 0 0 2rem;
-		font-size: 1.25rem;
-		color: rgba(255, 255, 255, 0.85);
+		font-size: 1.2rem;
+		color: rgba(255, 255, 255, 0.8);
 		line-height: 1.5;
 
 		strong {
-			font-size: 1.65rem;
-			font-weight: 800;
-			color: #c4b5fd;
-			text-shadow: 0 0 20px rgba(196, 181, 253, 0.5);
+			font-size: 1.8rem;
+			font-weight: 900;
+			color: #fde047;
+			text-shadow: 0 0 20px rgba(253, 224, 71, 0.5);
 		}
 	}
 }
@@ -2255,33 +2323,32 @@ async function restart(): Promise<void> {
 	justify-content: center;
 	gap: 0.5rem;
 	cursor: pointer;
-	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+	transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 	touch-action: manipulation;
 	-webkit-tap-highlight-color: transparent;
-	background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 50%, #5b21b6 100%);
-	border: 2px solid rgba(196, 181, 253, 0.4);
-	padding: 1.1rem 2.25rem;
+	background: linear-gradient(135deg, #ff7ad9 0%, #ff4fb0 100%);
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	padding: 1.1rem 2.5rem;
 	font-size: 1.2rem;
-	font-weight: 700;
-	border-radius: 18px;
+	font-weight: 800;
+	border-radius: 20px;
 	box-shadow:
-		0 4px 16px rgba(139, 92, 246, 0.4),
-		inset 0 1px 0 rgba(255, 255, 255, 0.2);
+		0 6px 24px rgba(236, 72, 153, 0.5),
+		inset 0 1px 0 rgba(255, 255, 255, 0.35);
 	color: #fff;
+	text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 
 	&:hover {
-		background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 50%, #7c3aed 100%);
-		border-color: rgba(196, 181, 253, 0.6);
+		background: linear-gradient(135deg, #ff92e3 0%, #ff6cc4 100%);
 		box-shadow:
-			0 6px 24px rgba(139, 92, 246, 0.5),
-			0 0 32px rgba(139, 92, 246, 0.25),
-			inset 0 1px 0 rgba(255, 255, 255, 0.25);
-		transform: translateY(-2px);
+			0 8px 32px rgba(236, 72, 153, 0.65),
+			inset 0 1px 0 rgba(255, 255, 255, 0.4);
+		transform: translateY(-3px) scale(1.02);
 	}
 
 	&:active {
-		transform: translateY(0) scale(0.98);
-		box-shadow: 0 2px 12px rgba(139, 92, 246, 0.4);
+		transform: scale(0.95);
+		box-shadow: 0 2px 12px rgba(236, 72, 153, 0.4);
 	}
 
 	&__icon {
@@ -2308,12 +2375,12 @@ async function restart(): Promise<void> {
 	animation: generation-loading-fade 0.3s ease-out;
 
 	&__spinner {
-		width: 60px;
-		height: 60px;
-		border: 6px solid rgba(255, 255, 255, 0.3);
-		border-top-color: rgba(196, 181, 253, 0.9);
+		width: 56px;
+		height: 56px;
+		border: 5px solid rgba(255, 255, 255, 0.2);
+		border-top-color: #ff7ad9;
 		border-radius: 50%;
-		animation: generation-loading-spin 1s linear infinite;
+		animation: generation-loading-spin 0.8s linear infinite;
 	}
 
 	&__text {

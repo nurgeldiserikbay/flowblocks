@@ -21,6 +21,8 @@ const AdMobInitializationOptions = {
 }
 
 class Admob {
+	private bannerWasShown = false
+
 	async initialize() {
 		await AdMob.initialize(AdMobInitializationOptions)
 
@@ -69,6 +71,7 @@ class Admob {
 		}
 
 		await AdMob.showBanner(options)
+		this.bannerWasShown = true
 	}
 
 	async resumeBanner() {
@@ -77,6 +80,18 @@ class Admob {
 
 	async hideBanner() {
 		await AdMob.hideBanner()
+	}
+
+	/**
+	 * Показать баннер. При первом заходе — showBanner, при повторном — resumeBanner
+	 * (после hideBanner нужно вызывать resumeBanner, иначе баннер не появится снова).
+	 */
+	async showBannerIfNeeded() {
+		if (this.bannerWasShown) {
+			await this.resumeBanner()
+		} else {
+			await this.showBanner()
+		}
 	}
 
 	async removeBanner() {

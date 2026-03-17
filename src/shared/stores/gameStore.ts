@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { Cube } from '@/game/logic/types'
-import { WIDTH } from '@/game/logic/grid'
+import { WIDTH, cloneGrid } from '@/game/logic/grid'
 const BASE_HEIGHT = 30
 const BASE_WAVE_DURATION = 24
 const MIN_WAVE_DURATION = 10
@@ -72,6 +72,9 @@ export const useGameStore = defineStore('game', () => {
 	const isGameOver = ref(false)
 	const gamesPlayed = ref(0) // Счетчик запущенных игр для показа рекламы
 
+	// Toast-сообщение во время игры (New blocks incoming!, Great! и т.д.)
+	const gameMessageToast = ref<{ text: string; bonus: number } | null>(null)
+
 	// Состояния готовности для правильного старта игры
 	const isAssetsReady = ref(false)
 	const isSceneReady = ref(false)
@@ -110,6 +113,7 @@ export const useGameStore = defineStore('game', () => {
 		currentLevel.value = 1
 		isLocked.value = false
 		isGameOver.value = false
+		gameMessageToast.value = null
 		// Сбрасываем состояния готовности
 		isAssetsReady.value = false
 		isSceneReady.value = false
@@ -135,8 +139,8 @@ export const useGameStore = defineStore('game', () => {
 	}
 
 	function shouldShowInterstitial(): boolean {
-		// Показываем рекламу каждые 3 игры (на 3-й, 6-й, 9-й и т.д.)
-		return gamesPlayed.value > 0 && gamesPlayed.value % 3 === 0
+		// Показываем рекламу только при третьем запуске новой игры
+		return gamesPlayed.value === 3
 	}
 
 	function setCurrentLevel(level: number) {
@@ -206,7 +210,10 @@ export const useGameStore = defineStore('game', () => {
 	}
 
 	function setGrid(newGrid: (Cube | null)[][]) {
-		grid.value = newGrid
+		// КРИТИЧНО: Всегда создаём новую ссылку, чтобы Vue обнаружил изменение.
+		// При мутации grid in-place и setGrid(grid) с той же ссылкой computed (topmostRow и т.д.)
+		// могли не пересчитываться — особенно после исчезновения блоков или спавна.
+		grid.value = cloneGrid(newGrid)
 	}
 
 	function addScore(points: number) {
@@ -233,6 +240,10 @@ export const useGameStore = defineStore('game', () => {
 		isGameOver.value = over
 	}
 
+	function setGameMessageToast(msg: { text: string; bonus: number } | null) {
+		gameMessageToast.value = msg
+	}
+
 	return {
 		// State
 		grid,
@@ -245,6 +256,8 @@ export const useGameStore = defineStore('game', () => {
 		isLocked,
 		isGameOver,
 		gamesPlayed,
+		gameMessageToast,
+		setGameMessageToast,
 		// Readiness states
 		isAssetsReady,
 		isSceneReady,

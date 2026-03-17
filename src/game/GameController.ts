@@ -50,6 +50,7 @@ export class GameController {
 	private timerTimeout: ReturnType<typeof setTimeout> | null = null
 	private timerStartTime: number = 0 // Время начала текущего таймера
 	private expectedNextTick: number = 0 // Ожидаемое время следующего тика
+	private lastTickTime: number = 0 // Защита от двойного тика
 	private comboLevel: number = 0
 	private comboTimer: ReturnType<typeof setTimeout> | null = null
 	private opts: GameControllerOptions
@@ -327,6 +328,7 @@ export class GameController {
 	private startTimer(): void {
 		const now = Date.now()
 		this.timerStartTime = now
+		this.lastTickTime = now
 		this.expectedNextTick = now + 1000 // Первый тик через 1 секунду
 		this.scheduleNextTick()
 	}
@@ -349,21 +351,23 @@ export class GameController {
 		}
 
 		const now = Date.now()
-		const delay = Math.max(0, this.expectedNextTick - now)
+		let rawDelay = this.expectedNextTick - now
 
 		// Если задержка слишком большая (больше 2 секунд), значит что-то пошло не так
-		// В этом случае сбрасываем ожидаемое время
-		if (delay > 2000) {
+		if (rawDelay > 2000) {
 			console.warn(
-				`[GameController] scheduleNextTick: large delay detected: ${delay}ms, resetting timer`
+				`[GameController] scheduleNextTick: large delay detected: ${rawDelay}ms, resetting timer`
 			)
 			this.expectedNextTick = now + 1000
+			rawDelay = 1000
 		}
 
+		// Если отстали (rawDelay <= 0), планируем через 1 сек, чтобы не догонять rapid-fire
+		const delay = rawDelay <= 0 ? 1000 : Math.max(100, rawDelay)
 		this.timerTimeout = window.setTimeout(() => {
 			this.timerTimeout = null // Очищаем перед вызовом tick
 			this.tick()
-		}, Math.max(0, this.expectedNextTick - Date.now()))
+		}, delay)
 	}
 
 	private tick(): void {
@@ -386,6 +390,14 @@ export class GameController {
 		}
 
 		const now = Date.now()
+
+		// Защита от двойного тика: не чаще чем раз в 900ms
+		if (now - this.lastTickTime < 900) {
+			this.expectedNextTick = this.lastTickTime + 1000
+			this.scheduleNextTick()
+			return
+		}
+		this.lastTickTime = now
 
 		// Всегда вычитаем ровно 1 секунду для точности
 		// Это гарантирует, что таймер уменьшается равномерно
@@ -483,9 +495,6 @@ export class GameController {
 
 			// КРИТИЧНО: НЕ разблокируем игру до завершения всех анимаций
 			// Это гарантирует правильную последовательность: сначала все анимации завершаются, потом игра разблокируется
-			// Play spawn sound (once per wave)
-			AudioManager.playSpawn()
-
 			// КРИТИЧНО: Обрабатываем события последовательно и ждем завершения всех анимаций
 			// Правильный порядок событий: fall (существующие) -> spawn -> fall (новые кубы) -> пауза -> remove (матчи) -> fall (каскад)
 			let hasGameOver = false
@@ -539,6 +548,9 @@ export class GameController {
 					await this.renderer.applyEvents(newCubesFallEvents)
 					await this.waitRendererFrames(this.isAndroidDevice ? 1 : 2)
 				}
+
+				// Звук спавна — после того как плитки стали видимы (после анимации fall)
+				AudioManager.playSpawn()
 
 				// Обновляем moves для новых плиток после завершения всех анимаций
 				const newCubeIdsAfterAnim = new Set<number>()
@@ -805,8 +817,11 @@ export class GameController {
 		if (isGridEmpty(grid)) {
 			const clearBonus = getVesselClearBonus(grid)
 			this.store.addScore(clearBonus)
-			await this.renderer?.showGreatMessage(clearBonus)
 			AudioManager.playClear()
+			this.pauseTimer()
+			this.store.setGameMessageToast({ text: '🎉 Great!', bonus: clearBonus })
+			await new Promise((r) => setTimeout(r, 2000))
+			this.store.setGameMessageToast(null)
 		}
 
 		// Check game state: cubes finished or no moves
@@ -829,25 +844,26 @@ export class GameController {
 
 		// Case 1: Cubes finished and timer still running
 		if (isEmpty && remainingTime > 0) {
-			// Show "Great" message and add bonus
 			const greatBonus = getGreatBonus(currentGrid)
 			this.store.addScore(greatBonus)
 			AudioManager.playClear()
-			await this.renderer?.showGreatMessage(greatBonus)
-
-			// Spawn new wave with half vessel height rows
+			this.pauseTimer()
+			this.store.setGameMessageToast({ text: '🎉 Great!', bonus: greatBonus })
+			await new Promise((r) => setTimeout(r, 2000))
+			this.store.setGameMessageToast(null)
 			const halfHeight = Math.floor(this.store.getHeight() / 2)
 			await this.spawnMidWave(currentGrid, halfHeight)
 			return
 		}
 
-		// Case 2: Cubes finished (timer expired)
+		// Case 2: Cubes finished (timer expired) — не паузим таймер, он уже 0
 		if (isEmpty) {
-			// Show "Great" message and add bonus
 			const greatBonus = getGreatBonus(currentGrid)
 			this.store.addScore(greatBonus)
 			AudioManager.playClear()
-			await this.renderer?.showGreatMessage(greatBonus)
+			this.store.setGameMessageToast({ text: '🎉 Great!', bonus: greatBonus })
+			await new Promise((r) => setTimeout(r, 2000))
+			this.store.setGameMessageToast(null)
 			return
 		}
 
@@ -878,10 +894,15 @@ export class GameController {
 				if (!hasMoves) {
 					// Очищаем кэш перед спавном
 					this.lastHasMovesCheck = null
-					// Show "No moves" message and add bonus based on remaining time
 					const noMovesBonus = getNoMovesBonus(remainingTime)
 					this.store.addScore(noMovesBonus)
-					await this.renderer?.showNoMovesMessage(noMovesBonus)
+					this.pauseTimer()
+					this.store.setGameMessageToast({
+						text: '📦 New blocks incoming!',
+						bonus: noMovesBonus,
+					})
+					await new Promise((r) => setTimeout(r, 2000))
+					this.store.setGameMessageToast(null)
 					// Spawn new wave with half vessel height rows
 					const halfHeight = Math.floor(this.store.getHeight() / 2)
 					await this.spawnMidWave(currentGrid, halfHeight)
@@ -928,12 +949,13 @@ export class GameController {
 				// КРИТИЧНО: Повторная проверка после блокировки (может измениться состояние)
 				if (this.store.isGameOver) return
 
-				// Show "Great" message and add bonus
 				const greatBonus = getGreatBonus(currentGrid)
 				this.store.addScore(greatBonus)
-				await this.renderer?.showGreatMessage(greatBonus)
 				AudioManager.playClear()
-
+				this.pauseTimer()
+				this.store.setGameMessageToast({ text: '🎉 Great!', bonus: greatBonus })
+				await new Promise((r) => setTimeout(r, 2000))
+				this.store.setGameMessageToast(null)
 				// Spawn new wave with half vessel height rows
 				// КРИТИЧНО: spawnMidWave уже заблокирует игру, но мы используем try-finally для гарантии
 				const halfHeight = Math.floor(this.store.getHeight() / 2)
@@ -996,10 +1018,15 @@ export class GameController {
 						// КРИТИЧНО: Повторная проверка после блокировки (может измениться состояние)
 						if (this.store.isGameOver) return
 
-						// Show "No moves" message and add bonus based on remaining time
 						const noMovesBonus = getNoMovesBonus(remainingTime)
 						this.store.addScore(noMovesBonus)
-						await this.renderer?.showNoMovesMessage(noMovesBonus)
+						this.pauseTimer()
+						this.store.setGameMessageToast({
+							text: '📦 New blocks incoming!',
+							bonus: noMovesBonus,
+						})
+						await new Promise((r) => setTimeout(r, 2000))
+						this.store.setGameMessageToast(null)
 						// Spawn new wave with half vessel height rows
 						// КРИТИЧНО: spawnMidWave уже заблокирует игру, но мы используем try-finally для гарантии
 						const halfHeight = Math.floor(this.store.getHeight() / 2)
@@ -1074,9 +1101,6 @@ export class GameController {
 				newCubeIds.size > 0 ? newCubeIds : undefined
 			)
 
-			// Play spawn sound
-			AudioManager.playSpawn()
-
 			// КРИТИЧНО: Обрабатываем события последовательно и ждем завершения всех анимаций
 			// Правильный порядок событий: spawn -> fall (новые кубы) -> пауза -> remove (матчи) -> fall (каскад)
 			if (this.renderer && result.events.length > 0) {
@@ -1129,6 +1153,9 @@ export class GameController {
 					await this.renderer.applyEvents(newCubesFallEvents)
 					await this.waitRendererFrames(this.isAndroidDevice ? 1 : 2)
 				}
+
+				// Звук спавна — после того как плитки стали видимы (после анимации fall)
+				AudioManager.playSpawn()
 
 				// Обновляем moves для новых плиток после завершения всех анимаций
 				const newCubeIdsAfterAnim = new Set<number>()
@@ -1194,6 +1221,14 @@ export class GameController {
 		}
 	}
 
+	/** Останавливает таймер на время паузы (сообщение, спавн). restartTimer() запустит снова. */
+	private pauseTimer(): void {
+		if (this.timerTimeout !== null) {
+			clearTimeout(this.timerTimeout)
+			this.timerTimeout = null
+		}
+	}
+
 	private restartTimer(): void {
 		// Останавливаем текущий таймер
 		if (this.timerTimeout !== null) {
@@ -1203,6 +1238,7 @@ export class GameController {
 		// Перезапускаем с новым временем (принудительно, даже если игра заблокирована)
 		const now = Date.now()
 		this.timerStartTime = now
+		this.lastTickTime = now
 		this.expectedNextTick = now + 1000
 		this.scheduleNextTick(true) // Принудительный запуск
 	}

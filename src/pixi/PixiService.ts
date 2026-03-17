@@ -98,7 +98,7 @@ class PixiServiceClass {
 
 		// Загружаем и создаем текстуры
 		const assetsLoadedTime = performance.now()
-		this.tileTextures = await createTileTextures()
+		this.tileTextures = await createTileTextures(this.app)
 
 		// Прогреваем текстуры GPU
 		const warmupStartTime = performance.now()

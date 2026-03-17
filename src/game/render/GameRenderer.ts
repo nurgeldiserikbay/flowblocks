@@ -8,7 +8,6 @@ import {
 	Text,
 	TextStyle,
 	Graphics,
-	BlurFilter,
 } from 'pixi.js'
 import { gsap } from 'gsap'
 import type { GameEvent, Cube } from '../logic/types'
@@ -87,6 +86,10 @@ export class GameRenderer {
 		// КРИТИЧНО: Получаем игровую сцену из PixiService
 		const gameScene = PixiService.getGameScene()
 		this.gameContainer = gameScene
+
+		// КРИТИЧНО: Очищаем сцену при повторном входе (после выхода и возврата)
+		// Иначе остаются элементы от предыдущей сессии и игра не генерируется заново
+		gameScene.removeChildren()
 
 		// КРИТИЧНО: Переключаемся на игровую сцену
 		PixiService.switchToGameScene()
@@ -300,6 +303,29 @@ export class GameRenderer {
 	}
 
 	/**
+	 * Center of the canvas element (игровая область).
+	 */
+	private getCanvasCenterInCanvasCoordinates(): { x: number; y: number } {
+		if (!this.app || !this.canvas) {
+			return {
+				x: Number(this?.app?.renderer?.width) / 2 || 0,
+				y: Number(this?.app?.renderer?.height) / 2 || 0,
+			}
+		}
+		const canvasRect = this.canvas.getBoundingClientRect()
+		const centerX = canvasRect.left + canvasRect.width / 2
+		const centerY = canvasRect.top + canvasRect.height / 2
+		const relativeX = centerX - canvasRect.left
+		const relativeY = centerY - canvasRect.top
+		const scaleX = this.app.renderer.width / canvasRect.width
+		const scaleY = this.app.renderer.height / canvasRect.height
+		return {
+			x: relativeX * scaleX,
+			y: relativeY * scaleY,
+		}
+	}
+
+	/**
 	 * Position popup in the visual center of the phone viewport.
 	 */
 	private positionPopupAtViewportCenter(
@@ -310,6 +336,19 @@ export class GameRenderer {
 		const screenCenter = this.getScreenCenterInCanvasCoordinates()
 		popup.x = screenCenter.x - width / 2
 		popup.y = screenCenter.y - height / 2
+	}
+
+	/**
+	 * Position popup in the center of the canvas (игровая область).
+	 */
+	private positionPopupAtCanvasCenter(
+		popup: Container,
+		width: number,
+		height: number
+	): void {
+		const center = this.getCanvasCenterInCanvasCoordinates()
+		popup.x = center.x - width / 2
+		popup.y = center.y - height / 2
 	}
 
 	/**
@@ -327,6 +366,33 @@ export class GameRenderer {
 
 		const updatePosition = () => {
 			this.positionPopupAtViewportCenter(popup, width, height)
+		}
+
+		updatePosition()
+		this.app.ticker.add(updatePosition)
+
+		return () => {
+			if (this.app) {
+				this.app.ticker.remove(updatePosition)
+			}
+		}
+	}
+
+	/**
+	 * Keep popup pinned to canvas center (центр игровой области).
+	 */
+	private pinPopupToCanvasCenter(
+		popup: Container,
+		width: number,
+		height: number
+	): () => void {
+		if (!this.app) {
+			this.positionPopupAtCanvasCenter(popup, width, height)
+			return () => {}
+		}
+
+		const updatePosition = () => {
+			this.positionPopupAtCanvasCenter(popup, width, height)
 		}
 
 		updatePosition()
@@ -421,38 +487,39 @@ export class GameRenderer {
 			})
 		}
 
-		// Create text for moves
+		// Create text for moves (color #1F2937, small white shadow for visibility)
 		let text: Text | null = null
 		if (cube.moves > 0) {
 			text = new Text({
 				text: String(cube.moves),
 				style: new TextStyle({
-					fontFamily: 'Arial',
-					fontSize: Math.max(10, this.tileSize / 3),
-					fill: 0xffffff,
+					fontFamily: 'Inter, Arial',
+					fontSize: Math.max(11, this.tileSize / 2.8),
+					fill: 0x1f2937,
 					align: 'center',
 					fontWeight: 'bold',
+					dropShadow: {
+						color: 0xffffff,
+						blur: 2,
+						distance: 1,
+						alpha: 0.3,
+					},
 				}),
 			})
-			text.style.stroke = { color: 0x000000, width: 2 }
-			text.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
+			text.resolution = window.devicePixelRatio || 1
 			text.anchor.set(0.5)
 			text.x = this.tileSize / 2
 			text.y = this.tileSize / 2
 			container.addChild(text)
 		}
 
-		// Create highlight (initially hidden)
+		// Create highlight (initially hidden) – subtle selection ring
 		const highlight = new Graphics()
-		highlight.rect(TILE_PADDING, TILE_PADDING, spriteSize, spriteSize)
-		highlight.stroke({ color: 0xffffff, width: 4, alpha: 1 })
-		highlight.rect(
-			TILE_PADDING + 2,
-			TILE_PADDING + 2,
-			spriteSize - 4,
-			spriteSize - 4
-		)
-		highlight.stroke({ color: 0x000000, width: 2, alpha: 0.5 })
+		const hlR = Math.round(spriteSize * 0.2)
+		highlight.roundRect(TILE_PADDING - 1, TILE_PADDING - 1, spriteSize + 2, spriteSize + 2, hlR + 1)
+		highlight.stroke({ color: 0xffffff, width: 2, alpha: 0.6 })
+		highlight.roundRect(TILE_PADDING, TILE_PADDING, spriteSize, spriteSize, hlR)
+		highlight.fill({ color: 0xffffff, alpha: 0.12 })
 		highlight.visible = false
 		container.addChild(highlight)
 		this.gameContainer.addChild(container)
@@ -543,19 +610,24 @@ export class GameRenderer {
 
 		if (moves > 0) {
 			if (!cubeContainer.text) {
-				// Create text if it doesn't exist
+				// Create text if it doesn't exist (matches createCubeSprite style)
 				cubeContainer.text = new Text({
 					text: String(moves),
 					style: new TextStyle({
-						fontFamily: 'Arial',
-						fontSize: Math.max(10, this.tileSize / 3),
-						fill: 0xffffff,
+						fontFamily: 'Inter, Arial',
+						fontSize: Math.max(11, this.tileSize / 2.8),
+						fill: 0x1f2937,
 						align: 'center',
 						fontWeight: 'bold',
+						dropShadow: {
+							color: 0xffffff,
+							blur: 2,
+							distance: 1,
+							alpha: 0.3,
+						},
 					}),
 				})
-				cubeContainer.text.style.stroke = { color: 0x000000, width: 2 }
-				cubeContainer.text.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
+				cubeContainer.text.resolution = window.devicePixelRatio || 1
 				cubeContainer.text.anchor.set(0.5)
 				cubeContainer.text.x = this.tileSize / 2
 				cubeContainer.text.y = this.tileSize / 2
@@ -578,10 +650,7 @@ export class GameRenderer {
 	}
 
 	setSelectedPosition(r: number | null, c: number | null): void {
-		// Remove previous selection: clear highlight on ALL cubes.
-		// We cannot use findCubeIdAt(selectedPosition) because after swap/move
-		// the highlighted cube has moved to another cell; the cube now at
-		// selectedPosition is a different one, so the old highlight would stay.
+		// Remove previous selection
 		this.cubeContainers.forEach((cc) => {
 			if (cc.highlight) cc.highlight.visible = false
 		})
@@ -659,38 +728,38 @@ export class GameRenderer {
 		this.setCubePosition(cubeIdA, b.r, b.c)
 		this.setCubePosition(cubeIdB, a.r, a.c)
 
-		await Promise.all([
-			new Promise<void>((resolve) => {
-				gsap.killTweensOf(containerA.container)
-				gsap.to(containerA.container, {
-					x: posBX,
-					y: posBY,
-					duration: 0.22,
-					ease: 'power2.out',
-					onComplete: resolve,
-					onInterrupt: () => {
-						containerA.container.x = posBX
-						containerA.container.y = posBY
-						resolve()
-					},
-				})
-			}),
-			new Promise<void>((resolve) => {
-				gsap.killTweensOf(containerB.container)
-				gsap.to(containerB.container, {
-					x: posAX,
-					y: posAY,
-					duration: 0.22,
-					ease: 'power2.out',
-					onComplete: resolve,
-					onInterrupt: () => {
-						containerB.container.x = posAX
-						containerB.container.y = posAY
-						resolve()
-					},
-				})
-			}),
-		])
+	await Promise.all([
+		new Promise<void>((resolve) => {
+			gsap.killTweensOf(containerA.container)
+			gsap.to(containerA.container, {
+				x: posBX,
+				y: posBY,
+				duration: 0.1,
+				ease: 'power2.out',
+				onComplete: resolve,
+				onInterrupt: () => {
+					containerA.container.x = posBX
+					containerA.container.y = posBY
+					resolve()
+				},
+			})
+		}),
+		new Promise<void>((resolve) => {
+			gsap.killTweensOf(containerB.container)
+			gsap.to(containerB.container, {
+				x: posAX,
+				y: posAY,
+				duration: 0.1,
+				ease: 'power2.out',
+				onComplete: resolve,
+				onInterrupt: () => {
+					containerB.container.x = posAX
+					containerB.container.y = posAY
+					resolve()
+				},
+			})
+		}),
+	])
 	}
 
 	private async animateMove(
@@ -714,7 +783,7 @@ export class GameRenderer {
 		gsap.to(cubeContainer.container, {
 			x: targetX,
 			y: targetY,
-			duration: 0.22,
+			duration: 0.1,
 			ease: 'power2.out',
 			onComplete: resolve,
 			onInterrupt: () => {
@@ -766,9 +835,9 @@ private async animateFall(
 			const targetX = item.to.c * this.tileSize
 			const targetY = this.calculateYFromBottom(item.to.r)
 			const fallDistance = Math.max(1, Math.abs(item.to.r - item.from.r))
-		// Balanced fall speed: visible and smooth, but not slow.
-		// Formula: min(0.35, 0.1 + distance * 0.06) → 1-tile: 0.16s, 3-tile: 0.28s, max: 0.35s
-		const duration = Math.min(0.35, 0.1 + fallDistance * 0.06)
+		// Block Blast fall: snappy with tiny landing bounce.
+		// Formula: min(0.30, 0.08 + distance * 0.055) → fast drops
+		const duration = Math.min(0.30, 0.08 + fallDistance * 0.055)
 
 			return new Promise<void>((resolve) => {
 				gsap.killTweensOf(cubeContainer.container)
@@ -776,10 +845,9 @@ private async animateFall(
 					x: targetX,
 					y: targetY,
 					duration,
-					ease: 'power2.out',
+					ease: 'bounce.out',
 					onComplete: resolve,
 					onInterrupt: () => {
-						// Snap to target so the grid stays consistent
 						cubeContainer.container.x = targetX
 						cubeContainer.container.y = targetY
 						resolve()
@@ -838,43 +906,55 @@ private async animateFall(
 				Math.max(16, this.tileSize * 0.8)
 			)
 
-			const baseVal = baseScore ?? 0
-			let baseText: Text | null = null
-			if (baseVal > 0) {
-				baseText = new Text({
-					text: `+${baseVal}`,
-					style: new TextStyle({
-						fontFamily: 'Arial',
-						fontSize: baseFontSize,
-						fill: 0x7cff7c,
-						align: 'center',
-						fontWeight: 'bold',
-					}),
-				})
-				baseText.resolution = window.devicePixelRatio || 1
-				baseText.anchor.set(0.5)
-				baseText.style.stroke = { color: 0x000000, width: 2 }
-				popup.addChild(baseText)
-			}
+		const baseVal = baseScore ?? 0
+		let baseText: Text | null = null
+		if (baseVal > 0) {
+			baseText = new Text({
+				text: `+${baseVal}`,
+				style: new TextStyle({
+					fontFamily: 'Inter, Arial',
+					fontSize: baseFontSize,
+					fill: 0xffffff,
+					align: 'center',
+					fontWeight: 'bold',
+					dropShadow: {
+						color: 0x000000,
+						blur: 6,
+						distance: 2,
+						alpha: 0.7,
+					},
+				}),
+			})
+			baseText.resolution = window.devicePixelRatio || 1
+			baseText.anchor.set(0.5)
+			baseText.style.stroke = { color: 0x22c55e, width: 3 }
+			popup.addChild(baseText)
+		}
 
-			const comboVal = comboBonus ?? 0
-			let comboText: Text | null = null
-			if (comboVal > 0) {
-				comboText = new Text({
-					text: `+${comboVal} COMBO`,
-					style: new TextStyle({
-						fontFamily: 'Arial',
-						fontSize: comboFontSize,
-						fill: 0xffaa00,
-						align: 'center',
-						fontWeight: 'bold',
-					}),
-				})
-				comboText.resolution = window.devicePixelRatio || 1
-				comboText.anchor.set(0.5)
-				comboText.style.stroke = { color: 0x000000, width: 2 }
-				popup.addChild(comboText)
-			}
+		const comboVal = comboBonus ?? 0
+		let comboText: Text | null = null
+		if (comboVal > 0) {
+			comboText = new Text({
+				text: `🔥 x${comboVal} COMBO`,
+				style: new TextStyle({
+					fontFamily: 'Inter, Arial',
+					fontSize: comboFontSize,
+					fill: 0xfde047,
+					align: 'center',
+					fontWeight: 'bold',
+					dropShadow: {
+						color: 0x000000,
+						blur: 6,
+						distance: 2,
+						alpha: 0.7,
+					},
+				}),
+			})
+			comboText.resolution = window.devicePixelRatio || 1
+			comboText.anchor.set(0.5)
+			comboText.style.stroke = { color: 0xf97316, width: 3 }
+			popup.addChild(comboText)
+		}
 
 			// Рассчитываем размеры текстов для правильного позиционирования
 			const baseTextWidth = baseText?.width ?? 0
@@ -913,7 +993,8 @@ private async animateFall(
 
 			// Добавляем на stage для отображения поверх всего
 			this.app.stage.addChild(popup)
-			this.app.stage.children.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
+			// High zIndex = drawn last = on top (Pixi draws children in array order)
+		this.app.stage.children.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
 
 			// Анимация появления и исчезновения
 			popup.alpha = 0
@@ -970,31 +1051,30 @@ private async animateFall(
 							resolve()
 						}
 
-						// Animate alpha separately (safe on PixiJS containers)
+					// Match animation: scale 1→1.1, fade out
+					if (container.scale) {
+						gsap.to(container.scale, {
+							x: 1.1,
+							y: 1.1,
+							duration: 0.15,
+							ease: 'power2.out',
+						})
 						gsap.to(container, {
 							alpha: 0,
-							duration: 0.12,
-							ease: 'back.in',
+							duration: 0.15,
+							ease: 'power1.in',
+							onComplete: finish,
+							onInterrupt: finish,
 						})
-						// Animate scale via ObservablePoint properties to avoid PixiJS setter issues
-						if (container.scale) {
-							gsap.to(container.scale, {
-								x: 0,
-								y: 0,
-								duration: 0.12,
-								ease: 'back.in',
-								onComplete: finish,
-								onInterrupt: finish,
-							})
-						} else {
-							gsap.to(container, {
-								alpha: 0,
-								duration: 0.12,
-								ease: 'back.in',
-								onComplete: finish,
-								onInterrupt: finish,
-							})
-						}
+					} else {
+						gsap.to(container, {
+							alpha: 0,
+							duration: 0.18,
+							ease: 'power1.in',
+							onComplete: finish,
+							onInterrupt: finish,
+						})
+					}
 					})
 			)
 		)
@@ -1056,14 +1136,13 @@ private async animateFall(
 						1
 					)
 				} else {
-					// Для появления на месте: создаем с alpha=0, scale=0 (будет анимироваться scale/alpha)
-					// Используем 0, но убедимся, что спрайт видим перед анимацией
+					// Для появления на месте: scale 0.9 → 1, 0.12s
 					cubeContainer = this.createCubeSprite(
 						tempCube,
 						targetRow,
 						cell.c,
-						0,
-						0
+						1,
+						0.9
 					)
 				}
 
@@ -1147,53 +1226,37 @@ private async animateFall(
 				})
 			})
 			} else {
-				// Для появления на месте: спрайт уже создан с alpha=0, scale=0
-				// КРИТИЧНО: Убеждаемся, что контейнер видим перед анимацией
-				cubeContainer.container.visible = true
-				cubeContainer.sprite.visible = true
+			// Spawn: scale 0.9 → 1, 0.12s
+			cubeContainer.container.visible = true
+			cubeContainer.sprite.visible = true
+			cubeContainer.container.alpha = 1
+			if (cubeContainer.container.scale) {
+				cubeContainer.container.scale.set(0.9)
+			}
 
-				// Убеждаемся, что начальные значения установлены правильно
-				cubeContainer.container.alpha = 0
-				if (cubeContainer.container.scale) {
-					cubeContainer.container.scale.set(0)
-				}
+			return new Promise<void>((resolve) => {
+				const container = cubeContainer.container
 
-				// Анимируем от 0 до 1 (текстуры уже прогреты в warmUpTextures)
-				return new Promise<void>((resolve) => {
-					const container = cubeContainer.container
-
-					gsap.killTweensOf(container)
-					if (container.scale) {
-						gsap.killTweensOf(container.scale)
-						gsap.set(container.scale, { x: 0, y: 0 })
-					}
-					gsap.to(container, {
-						alpha: 1,
-						duration: 0.2,
-						ease: 'power2.out',
-					})
+				gsap.killTweensOf(container)
 				if (container.scale) {
-					gsap.to(container.scale, {
-						x: 1,
-						y: 1,
-						duration: 0.24,
-						ease: 'back.out(1.5)',
-						onComplete: () => {
-							container.alpha = 1
-							container.scale?.set(1)
-							resolve()
-						},
-						onInterrupt: () => {
-							// Tween killed mid-flight — resolve anyway to avoid infinite lock
-							container.alpha = 1
-							container.scale?.set(1)
-							resolve()
-						},
-					})
-				} else {
-					resolve()
+					gsap.killTweensOf(container.scale)
+					gsap.set(container.scale, { x: 0.9, y: 0.9 })
 				}
+				gsap.to(container.scale, {
+					x: 1,
+					y: 1,
+					duration: 0.12,
+					ease: 'power2.out',
+					onComplete: () => {
+						container.scale?.set(1)
+						resolve()
+					},
+					onInterrupt: () => {
+						container.scale?.set(1)
+						resolve()
+					},
 				})
+			})
 			}
 		})
 
@@ -1297,38 +1360,21 @@ private async animateFall(
 
 					// Обновить размер текста (если есть)
 					if (cubeContainer.text) {
-						cubeContainer.text.style.fontSize = Math.max(10, this.tileSize / 3)
-						cubeContainer.text.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
+						cubeContainer.text.style.fontSize = Math.max(11, this.tileSize / 2.8)
+						cubeContainer.text.resolution = window.devicePixelRatio || 1
 						cubeContainer.text.x = this.tileSize / 2
 						cubeContainer.text.y = this.tileSize / 2
 					}
 
-					// Обновить highlight (если есть)
-					if (cubeContainer.highlight) {
-						cubeContainer.highlight.clear()
-						cubeContainer.highlight.rect(
-							TILE_PADDING,
-							TILE_PADDING,
-							spriteSize,
-							spriteSize
-						)
-						cubeContainer.highlight.stroke({
-							color: 0xffffff,
-							width: 4,
-							alpha: 1,
-						})
-						cubeContainer.highlight.rect(
-							TILE_PADDING + 2,
-							TILE_PADDING + 2,
-							spriteSize - 4,
-							spriteSize - 4
-						)
-						cubeContainer.highlight.stroke({
-							color: 0x000000,
-							width: 2,
-							alpha: 0.5,
-						})
-					}
+				// Обновить highlight (если есть)
+				if (cubeContainer.highlight) {
+					cubeContainer.highlight.clear()
+					const hlR = Math.round(spriteSize * 0.2)
+					cubeContainer.highlight.roundRect(TILE_PADDING - 1, TILE_PADDING - 1, spriteSize + 2, spriteSize + 2, hlR + 1)
+					cubeContainer.highlight.stroke({ color: 0xffffff, width: 2, alpha: 0.6 })
+					cubeContainer.highlight.roundRect(TILE_PADDING, TILE_PADDING, spriteSize, spriteSize, hlR)
+					cubeContainer.highlight.fill({ color: 0xffffff, alpha: 0.12 })
+				}
 				}
 			})
 		}
@@ -1380,21 +1426,30 @@ private async animateFall(
 		popup.x = this.canvas.width / 2
 		popup.y = this.canvas.height / 2
 
+		// Block Blast style: bright pill background
+		const fontSize = Math.max(28, this.tileSize * 1.2)
+		const bgW = fontSize * 5
+		const bgH = fontSize * 1.8
+		const bg = new Graphics()
+		bg.roundRect(-bgW / 2, -bgH / 2, bgW, bgH, bgH / 2)
+		bg.fill({ color: 0xfacc15, alpha: 0.95 })
+		bg.stroke({ color: 0xffffff, width: 3, alpha: 0.8 })
+		popup.addChild(bg)
+
 		const t = new Text({
-			text: `CLEAR! +${bonus}`,
+			text: `⭐ CLEAR! +${bonus}`,
 			style: new TextStyle({
-				fontFamily: 'Arial',
-				fontSize: Math.max(28, this.tileSize * 1.2),
-				fill: 0xffdd00,
+				fontFamily: 'Inter, Arial',
+				fontSize: fontSize,
+				fill: 0x1e293b,
 				align: 'center',
 				fontWeight: 'bold',
 			}),
 		})
-		t.resolution = window.devicePixelRatio || 1 // Улучшаем качество текста
+		t.resolution = window.devicePixelRatio || 1
 		t.anchor.set(0.5)
 		t.x = 0
 		t.y = 0
-		t.style.stroke = { color: 0x000000, width: 4 }
 		popup.addChild(t)
 
 		popup.alpha = 0
@@ -1454,11 +1509,11 @@ private async animateFall(
 		const bonusFontSize = Math.min(Math.max(16, window.innerWidth * 0.038), 24)
 
 		const mainText = new Text({
-			text: `Block Cleared!`,
+			text: `✨ Block Cleared!`,
 			style: new TextStyle({
 				fontFamily: 'Inter, Arial',
 				fontSize: baseFontSize,
-				fill: 0xf5e8ff, // Brighter text for stronger contrast
+				fill: 0xffffff,
 				align: 'center',
 				fontWeight: 'bold',
 				letterSpacing: 0.2,
@@ -1472,7 +1527,7 @@ private async animateFall(
 			style: new TextStyle({
 				fontFamily: 'Inter, Arial',
 				fontSize: bonusFontSize,
-				fill: 0x86efac, // Softer green to match popup palette
+				fill: 0xfde047,
 				align: 'center',
 				fontWeight: 'bold',
 			}),
@@ -1495,37 +1550,35 @@ private async animateFall(
 		popup.zIndex = 999999 // Maximum zIndex to be above all tiles
 		this.app.stage.sortableChildren = true
 
-		// Create background with blur effect (адаптивный размер)
+		// Block Blast style: colourful rounded pill panel
 		const bg = new Graphics()
 		const padding = Math.max(16, window.innerWidth * 0.04)
-		const bgWidth = Math.max(maxTextWidth + padding * 2, 140)
-		const bgHeight = Math.max(totalTextHeight + padding * 2, 60)
+		const bgWidth = Math.max(maxTextWidth + padding * 2, 160)
+		const bgHeight = Math.max(totalTextHeight + padding * 2, 64)
+		const bgRadius = bgHeight / 2
 
 		// Центрируем в viewport и дальше пиним к центру во время показа
 		const unpinPopup = this.pinPopupToViewportCenter(popup, bgWidth, bgHeight)
-		bg.roundRect(0, 0, bgWidth, bgHeight, 14)
-		bg.fill({ color: 0x14172e, alpha: 0.95 })
-		bg.stroke({ color: 0xb388ff, width: 2.5, alpha: 0.45 })
+		bg.roundRect(0, 0, bgWidth, bgHeight, bgRadius)
+		bg.fill({ color: 0x7c3aed, alpha: 0.95 })
+		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.5 })
 		popup.addChild(bg)
 
-		const innerGlow = new Graphics()
-		innerGlow.roundRect(4, 4, bgWidth - 8, bgHeight - 8, 10)
-		innerGlow.stroke({ color: 0xffffff, width: 1, alpha: 0.2 })
-		popup.addChild(innerGlow)
-
-		// Add blur filter to background
-		const blurFilter = new BlurFilter({ strength: 6 })
-		bg.filters = [blurFilter]
+		// Top highlight strip for gloss
+		const hlGlow = new Graphics()
+		hlGlow.roundRect(4, 4, bgWidth - 8, bgHeight * 0.45, bgRadius - 2)
+		hlGlow.fill({ color: 0xffffff, alpha: 0.15 })
+		popup.addChild(hlGlow)
 
 		// Позиционируем тексты относительно popup (учитывая размеры)
 		mainText.x = bgWidth / 2
 		mainText.y = padding + mainTextHeight / 2
-		mainText.style.stroke = { color: 0x8b5cf6, width: 3, alpha: 0.8 }
+		mainText.style.stroke = { color: 0x000000, width: 0 }
 		popup.addChild(mainText)
 
 		bonusText.x = bgWidth / 2
 		bonusText.y = padding + mainTextHeight + 10 + bonusTextHeight / 2
-		bonusText.style.stroke = { color: 0x16a34a, width: 2, alpha: 0.7 }
+		bonusText.style.stroke = { color: 0x000000, width: 0 }
 		popup.addChild(bonusText)
 
 		popup.alpha = 0
@@ -1536,7 +1589,8 @@ private async animateFall(
 		this.app.stage.addChild(popup)
 		// Force sort by zIndex to ensure popup renders on top
 		this.app.stage.sortableChildren = true
-		this.app.stage.children.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
+		// High zIndex = drawn last = on top (Pixi draws children in array order)
+		this.app.stage.children.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
 
 		// Воспроизводим звук combo5 в момент появления надписи
 		AudioManager.playCombo5()
@@ -1592,11 +1646,11 @@ private async animateFall(
 		const bonusFontSize = Math.min(Math.max(16, window.innerWidth * 0.038), 24)
 
 		const noMovesText = new Text({
-			text: 'No Moves Left',
+			text: '📦 New blocks incoming!',
 			style: new TextStyle({
 				fontFamily: 'Inter, Arial',
 				fontSize: baseFontSize,
-				fill: 0xfff1e8, // Warm high-contrast tone for warning state
+				fill: 0xffffff,
 				align: 'center',
 				fontWeight: 'bold',
 				letterSpacing: 0.15,
@@ -1610,7 +1664,7 @@ private async animateFall(
 			style: new TextStyle({
 				fontFamily: 'Inter, Arial',
 				fontSize: bonusFontSize,
-				fill: 0xa7f3d0, // Brighter mint for bonus
+				fill: 0xfde047,
 				align: 'center',
 				fontWeight: 'bold',
 			}),
@@ -1633,37 +1687,35 @@ private async animateFall(
 		popup.zIndex = 999999 // Maximum zIndex to be above all tiles
 		this.app.stage.sortableChildren = true
 
-		// Create background with blur effect (адаптивный размер)
+		// Block Blast style: orange warning pill panel
 		const bg = new Graphics()
 		const padding = Math.max(16, window.innerWidth * 0.04)
 		const bgWidth = Math.max(maxTextWidth + padding * 2, 160)
 		const bgHeight = Math.max(totalTextHeight + padding * 2, 70)
+		const bgRadius = bgHeight / 2
 
-		// Центрируем в viewport и дальше пиним к центру во время показа
-		const unpinPopup = this.pinPopupToViewportCenter(popup, bgWidth, bgHeight)
-		bg.roundRect(0, 0, bgWidth, bgHeight, 14)
-		bg.fill({ color: 0x2a1721, alpha: 0.94 })
-		bg.stroke({ color: 0xff9f6e, width: 2.5, alpha: 0.55 })
+		// Центрируем в центре canvas (надёжнее при скролле)
+		const unpinPopup = this.pinPopupToCanvasCenter(popup, bgWidth, bgHeight)
+		bg.roundRect(0, 0, bgWidth, bgHeight, bgRadius)
+		bg.fill({ color: 0xf97316, alpha: 0.95 })
+		bg.stroke({ color: 0xffffff, width: 2, alpha: 0.5 })
 		popup.addChild(bg)
 
-		const innerGlow = new Graphics()
-		innerGlow.roundRect(4, 4, bgWidth - 8, bgHeight - 8, 10)
-		innerGlow.stroke({ color: 0xffffff, width: 1, alpha: 0.2 })
-		popup.addChild(innerGlow)
-
-		// Add blur filter to background
-		const blurFilter = new BlurFilter({ strength: 6 })
-		bg.filters = [blurFilter]
+		// Top highlight strip for gloss
+		const hlGlow = new Graphics()
+		hlGlow.roundRect(4, 4, bgWidth - 8, bgHeight * 0.45, bgRadius - 2)
+		hlGlow.fill({ color: 0xffffff, alpha: 0.18 })
+		popup.addChild(hlGlow)
 
 		// Позиционируем тексты относительно popup (учитывая размеры)
 		noMovesText.x = bgWidth / 2
 		noMovesText.y = padding + noMovesTextHeight / 2
-		noMovesText.style.stroke = { color: 0xff7a59, width: 3, alpha: 0.85 }
+		noMovesText.style.stroke = { color: 0x000000, width: 0 }
 		popup.addChild(noMovesText)
 
 		bonusText.x = bgWidth / 2
 		bonusText.y = padding + noMovesTextHeight + 10 + bonusTextHeight / 2
-		bonusText.style.stroke = { color: 0x059669, width: 2, alpha: 0.7 }
+		bonusText.style.stroke = { color: 0x000000, width: 0 }
 		popup.addChild(bonusText)
 
 		popup.alpha = 0
@@ -1674,7 +1726,9 @@ private async animateFall(
 		this.app.stage.addChild(popup)
 		// Force sort by zIndex to ensure popup renders on top
 		this.app.stage.sortableChildren = true
-		this.app.stage.children.sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
+		// High zIndex = drawn last = on top (Pixi draws children in array order)
+		this.app.stage.children.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
+		this.forceRender()
 
 		// Воспроизводим звук combo4 в момент появления надписи
 		AudioManager.playCombo4()
