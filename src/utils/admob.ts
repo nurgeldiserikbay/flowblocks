@@ -10,56 +10,69 @@ import {
 	AdLoadInfo,
 	AdOptions,
 } from '@capacitor-community/admob'
-
-const isProduction = import.meta.env.VITE_APP_MODE === 'PROD'
+import type { PluginListenerHandle } from '@capacitor/core'
 
 const AdMobInitializationOptions = {
 	testingDevices: ['8a1b4b83d67add00', '1f6e845f97c74f32', 'e81b6ee74e7f26dc'],
-	// В проде обязательно false — иначе реклама может не показываться
-	initializeForTesting: !isProduction,
-	tagForChildDirectedTreatment: true,
+	// В dev-сборке используем тестовый режим AdMob, в проде — реальные объявления
+	initializeForTesting: import.meta.env.DEV,
+	// Трафик не считаем детским — иначе персонализация и доход искусственно ограничены
+	tagForChildDirectedTreatment: false,
 }
 
 class Admob {
 	private bannerWasShown = false
+	private bannerListeners: PluginListenerHandle[] = []
+	private interstitialListeners: PluginListenerHandle[] = []
 
 	async initialize() {
 		await AdMob.initialize(AdMobInitializationOptions)
 
-		const [trackingInfo, consentInfo] = await Promise.all([
-			AdMob.trackingAuthorizationStatus(),
-			AdMob.requestConsentInfo(),
-		])
-
-		if (trackingInfo.status === 'notDetermined') {
-			// console.log('Display information before ads load first time')
-		} else if (
-			trackingInfo.status === 'authorized' &&
-			consentInfo.isConsentFormAvailable &&
-			consentInfo.status === AdmobConsentStatus.REQUIRED
-		) {
-			// Показываем форму согласия и ждем её закрытия после отправки запроса
-			try {
+		// UMP / GDPR consent flow.
+		// ВАЖНО: показ формы согласия НЕ должен зависеть от статуса ATT
+		// (trackingAuthorizationStatus — это iOS/App Tracking Transparency).
+		// Для EU-пользователей форму нужно показывать всегда, когда UMP
+		// сообщает status === REQUIRED и форма доступна.
+		try {
+			const consentInfo = await AdMob.requestConsentInfo()
+			if (
+				consentInfo.isConsentFormAvailable &&
+				consentInfo.status === AdmobConsentStatus.REQUIRED
+			) {
+				// Форма автоматически закроется после отправки согласия;
+				// Promise резолвится после закрытия формы.
 				await AdMob.showConsentForm()
-				// Форма автоматически закроется после того, как пользователь отправит запрос на подписание
-				// Promise резолвится после закрытия формы
-			} catch (error) {
-				console.warn('[AdMob] Error showing consent form:', error)
 			}
+		} catch (error) {
+			console.warn('[AdMob] Error during consent flow:', error)
 		}
 	}
 
-	async showBanner() {
-		AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
-			// Subscribe Banner Event Listener
-		})
-
-		AdMob.addListener(
-			BannerAdPluginEvents.SizeChanged,
-			(size: AdMobBannerSize) => {
-				// Subscribe Change Banner Size
-			},
+	private async removeInterstitialListeners() {
+		await Promise.all(
+			this.interstitialListeners.map((l) => l.remove().catch(() => {})),
 		)
+		this.interstitialListeners = []
+	}
+
+	async showBanner() {
+		// Регистрируем слушатели только один раз, чтобы не накапливать их
+		// при повторных показах баннера (утечка слушателей).
+		if (this.bannerListeners.length === 0) {
+			this.bannerListeners.push(
+				await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
+					// Subscribe Banner Event Listener
+				}),
+			)
+			this.bannerListeners.push(
+				await AdMob.addListener(
+					BannerAdPluginEvents.SizeChanged,
+					(_size: AdMobBannerSize) => {
+						// Subscribe Change Banner Size
+					},
+				),
+			)
+		}
 
 		const options: BannerAdOptions = {
 			adId: 'ca-app-pub-9702825788968948/2833006189',
@@ -96,6 +109,11 @@ class Admob {
 
 	async removeBanner() {
 		await AdMob.removeBanner()
+		await Promise.all(
+			this.bannerListeners.map((l) => l.remove().catch(() => {})),
+		)
+		this.bannerListeners = []
+		this.bannerWasShown = false
 	}
 
 	async interstitial({
@@ -106,24 +124,37 @@ class Admob {
 		onInterstitialAdClosed: () => void
 	}) {
 		let isClosed = false
-		function closeAds() {
-			onInterstitialAdClosed()
+		const closeAds = () => {
 			isClosed = true
+			// Снимаем слушатели этого показа, чтобы они не накапливались
+			void this.removeInterstitialListeners()
+			onInterstitialAdClosed()
 		}
 
-		AdMob.addListener(
-			InterstitialAdPluginEvents.Loaded,
-			(info: AdLoadInfo) => {},
+		// Убираем возможные слушатели предыдущего показа перед регистрацией новых
+		await this.removeInterstitialListeners()
+
+		this.interstitialListeners.push(
+			await AdMob.addListener(
+				InterstitialAdPluginEvents.Loaded,
+				(_info: AdLoadInfo) => {},
+			),
 		)
-		AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
-			if (!isClosed) closeAds()
-		})
-		AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, () => {
-			if (!isClosed) closeAds()
-		})
-		AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, () => {
-			if (!isClosed) closeAds()
-		})
+		this.interstitialListeners.push(
+			await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
+				if (!isClosed) closeAds()
+			}),
+		)
+		this.interstitialListeners.push(
+			await AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, () => {
+				if (!isClosed) closeAds()
+			}),
+		)
+		this.interstitialListeners.push(
+			await AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, () => {
+				if (!isClosed) closeAds()
+			}),
+		)
 
 		const options: AdOptions = {
 			adId: 'ca-app-pub-9702825788968948/2487732691',

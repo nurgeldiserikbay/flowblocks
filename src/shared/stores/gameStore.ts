@@ -139,8 +139,8 @@ export const useGameStore = defineStore('game', () => {
 	}
 
 	function shouldShowInterstitial(): boolean {
-		// Показываем рекламу только при третьем запуске новой игры
-		return gamesPlayed.value === 3
+		// Периодический показ: каждую 3-ю запущенную игру (3, 6, 9, ...)
+		return gamesPlayed.value % 3 === 0 && gamesPlayed.value > 0
 	}
 
 	function setCurrentLevel(level: number) {
