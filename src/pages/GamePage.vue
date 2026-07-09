@@ -1714,18 +1714,24 @@ async function restart(): Promise<void> {
 		grid-row: 1;
 		flex: 1;
 		min-height: 0;
+		/* Desaturated board well: tiles stay the hero; soft vignette + inner depth */
 		background:
+			radial-gradient(
+				ellipse 115% 90% at 50% 42%,
+				rgba(0, 0, 0, 0.14) 0%,
+				transparent 58%
+			),
 			linear-gradient(
 				180deg,
-				rgba(255, 255, 255, 0.06) 0%,
-				transparent 30%,
-				transparent 100%
+				rgba(255, 255, 255, 0.05) 0%,
+				transparent 28%
 			),
-			linear-gradient(180deg, #3b5fb8 0%, #2a3e87 100%);
+			linear-gradient(180deg, #4a5568 0%, #334155 42%, #1e293b 100%);
 		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.08),
-			0 8px 32px rgba(0, 0, 0, 0.35);
-		border: 1px solid rgba(0, 0, 0, 0.15);
+			inset 0 2px 4px rgba(0, 0, 0, 0.2),
+			inset 0 1px 0 rgba(255, 255, 255, 0.06),
+			0 8px 28px rgba(0, 0, 0, 0.32);
+		border: 1px solid rgba(0, 0, 0, 0.22);
 		border-radius: 20px;
 		position: relative;
 		z-index: 1;
@@ -2043,8 +2049,8 @@ async function restart(): Promise<void> {
 	visibility: visible !important;
 	opacity: 1 !important;
 	background: transparent;
-	image-rendering: -webkit-optimize-contrast;
-	image-rendering: crisp-edges;
+	/* Linear-filtered tile atlas + DPR resolution: default rendering avoids pixel-crunch artifacts */
+	image-rendering: auto;
 	touch-action: manipulation;
 	-webkit-tap-highlight-color: transparent;
 	/* Предотвращаем изменение размера при изменении ориентации */

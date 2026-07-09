@@ -4,6 +4,7 @@
 
 import type { Cube, Position } from './types'
 import { getCube, WIDTH } from './grid'
+import { MIN_BLOCKS_FOR_LINE_MATCH } from './matchConstants'
 
 export function findMatches(grid: (Cube | null)[][]): Position[] {
 	const matched = new Set<string>()
@@ -19,7 +20,7 @@ export function findMatches(grid: (Cube | null)[][]): Position[] {
 
 			if (currentColor !== lastColor) {
 				// Check if previous segment was a match
-				if (lastColor !== null && c - start >= 3) {
+				if (lastColor !== null && c - start >= MIN_BLOCKS_FOR_LINE_MATCH) {
 					// Add all positions in the matching segment
 					for (let i = start; i < c; i++) {
 						matched.add(`${r},${i}`)
@@ -40,7 +41,7 @@ export function findMatches(grid: (Cube | null)[][]): Position[] {
 
 			if (currentColor !== lastColor) {
 				// Check if previous segment was a match
-				if (lastColor !== null && r - start >= 3) {
+				if (lastColor !== null && r - start >= MIN_BLOCKS_FOR_LINE_MATCH) {
 					// Add all positions in the matching segment
 					for (let i = start; i < r; i++) {
 						matched.add(`${i},${c}`)
@@ -111,7 +112,7 @@ export function findMatchesAround(
 			if (currentColor !== lastColor) {
 				if (
 					lastColor !== null &&
-					c - start >= 3 &&
+					c - start >= MIN_BLOCKS_FOR_LINE_MATCH &&
 					segmentTouchesMovedHorz(r, start, c)
 				) {
 					for (let i = start; i < c; i++) {
@@ -135,7 +136,7 @@ export function findMatchesAround(
 			if (currentColor !== lastColor) {
 				if (
 					lastColor !== null &&
-					r - start >= 3 &&
+					r - start >= MIN_BLOCKS_FOR_LINE_MATCH &&
 					segmentTouchesMovedVert(c, start, r)
 				) {
 					for (let i = start; i < r; i++) {
@@ -269,7 +270,7 @@ export function findMatchesIncludingNewCubes(
 				// Это гарантирует, что исчезают только пары из новых и существующих плиток
 				if (
 					lastColor !== null &&
-					c - start >= 3 &&
+					c - start >= MIN_BLOCKS_FOR_LINE_MATCH &&
 					segmentTouchesMovedHorz(r, start, c) &&
 					segmentContainsNewCubeHorz(r, start, c) &&
 					segmentContainsExistingCubeHorz(r, start, c)
@@ -297,7 +298,7 @@ export function findMatchesIncludingNewCubes(
 				// Это гарантирует, что исчезают только пары из новых и существующих плиток
 				if (
 					lastColor !== null &&
-					r - start >= 3 &&
+					r - start >= MIN_BLOCKS_FOR_LINE_MATCH &&
 					segmentTouchesMovedVert(c, start, r) &&
 					segmentContainsNewCubeVert(c, start, r) &&
 					segmentContainsExistingCubeVert(c, start, r)

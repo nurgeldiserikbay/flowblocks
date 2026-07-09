@@ -8,6 +8,7 @@ import {
 	Text,
 	TextStyle,
 	Graphics,
+	Point,
 } from 'pixi.js'
 import { gsap } from 'gsap'
 import type { GameEvent, Cube } from '../logic/types'
@@ -17,7 +18,7 @@ import { AudioManager } from '../audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
 import type { Application } from 'pixi.js'
 
-const TILE_PADDING = 2
+const TILE_PADDING = 3
 
 export interface GameRendererOptions {
 	canvas: HTMLCanvasElement
@@ -46,6 +47,8 @@ export class GameRenderer {
 	private selectedPosition: { r: number; c: number } | null = null
 	private gridHeight: number = 0 // Высота grid для расчета позиций снизу
 	private syncCounter: number = 0
+	/** Снятие ticker callbacks для pinPopup* — иначе после destroy(popup) ловим read of null (_position) */
+	private popupTickerUnpins: Array<() => void> = []
 
 	constructor(options: GameRendererOptions) {
 		this.canvas = options.canvas
@@ -170,8 +173,8 @@ export class GameRenderer {
 							if (!pos || pos.r !== r || pos.c !== c) {
 								// Позиция изменилась - обновляем её
 								this.setCubePosition(cube.id, r, c)
-								cubeContainer.container.x = c * this.tileSize
-								cubeContainer.container.y = this.calculateYFromBottom(r)
+								cubeContainer.container.x = this.gridPixelX(c)
+								cubeContainer.container.y = this.gridPixelY(r)
 							}
 
 							// КРИТИЧНО: Проверяем и обновляем цвет/текстуру, если цвет изменился
@@ -256,10 +259,18 @@ export class GameRenderer {
 		})
 	}
 
+	/** Integer pixel positions reduce shimmer on DPR-scaled canvases. */
+	private gridPixelX(col: number): number {
+		return Math.round(col * this.tileSize)
+	}
+
+	private gridPixelY(row: number): number {
+		return Math.round(this.calculateYFromBottom(row))
+	}
+
 	/**
 	 * Рассчитать позицию Y для строки r, выровненную снизу сосуда
 	 * @param r - индекс строки в grid (0 = верх, gridHeight-1 = низ)
-	 * @param gridHeight - высота grid
 	 * @returns позиция Y в пикселях, выровненная снизу
 	 */
 	private calculateYFromBottom(r: number): number {
@@ -326,6 +337,23 @@ export class GameRenderer {
 	}
 
 	/**
+	 * После Container.destroy() в Pixi v8 обращение к x/y бросает (внутренний _position = null).
+	 */
+	private safeSetPopupXY(
+		popup: Container,
+		x: number,
+		y: number,
+	): boolean {
+		try {
+			popup.x = x
+			popup.y = y
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	/**
 	 * Position popup in the visual center of the phone viewport.
 	 */
 	private positionPopupAtViewportCenter(
@@ -334,8 +362,11 @@ export class GameRenderer {
 		height: number
 	): void {
 		const screenCenter = this.getScreenCenterInCanvasCoordinates()
-		popup.x = screenCenter.x - width / 2
-		popup.y = screenCenter.y - height / 2
+		this.safeSetPopupXY(
+			popup,
+			screenCenter.x - width / 2,
+			screenCenter.y - height / 2,
+		)
 	}
 
 	/**
@@ -347,8 +378,16 @@ export class GameRenderer {
 		height: number
 	): void {
 		const center = this.getCanvasCenterInCanvasCoordinates()
-		popup.x = center.x - width / 2
-		popup.y = center.y - height / 2
+		this.safeSetPopupXY(popup, center.x - width / 2, center.y - height / 2)
+	}
+
+	private registerPopupTickerUnpin(unpin: () => void): () => void {
+		this.popupTickerUnpins.push(unpin)
+		return () => {
+			unpin()
+			const i = this.popupTickerUnpins.indexOf(unpin)
+			if (i !== -1) this.popupTickerUnpins.splice(i, 1)
+		}
 	}
 
 	/**
@@ -364,18 +403,27 @@ export class GameRenderer {
 			return () => {}
 		}
 
+		const app = this.app
 		const updatePosition = () => {
-			this.positionPopupAtViewportCenter(popup, width, height)
+			if (!this.app) return
+			const screenCenter = this.getScreenCenterInCanvasCoordinates()
+			const ok = this.safeSetPopupXY(
+				popup,
+				screenCenter.x - width / 2,
+				screenCenter.y - height / 2,
+			)
+			if (!ok) {
+				app.ticker.remove(updatePosition)
+			}
 		}
 
 		updatePosition()
-		this.app.ticker.add(updatePosition)
+		app.ticker.add(updatePosition)
 
-		return () => {
-			if (this.app) {
-				this.app.ticker.remove(updatePosition)
-			}
+		const unpin = () => {
+			app.ticker.remove(updatePosition)
 		}
+		return this.registerPopupTickerUnpin(unpin)
 	}
 
 	/**
@@ -391,18 +439,27 @@ export class GameRenderer {
 			return () => {}
 		}
 
+		const app = this.app
 		const updatePosition = () => {
-			this.positionPopupAtCanvasCenter(popup, width, height)
+			if (!this.app) return
+			const center = this.getCanvasCenterInCanvasCoordinates()
+			const ok = this.safeSetPopupXY(
+				popup,
+				center.x - width / 2,
+				center.y - height / 2,
+			)
+			if (!ok) {
+				app.ticker.remove(updatePosition)
+			}
 		}
 
 		updatePosition()
-		this.app.ticker.add(updatePosition)
+		app.ticker.add(updatePosition)
 
-		return () => {
-			if (this.app) {
-				this.app.ticker.remove(updatePosition)
-			}
+		const unpin = () => {
+			app.ticker.remove(updatePosition)
 		}
+		return this.registerPopupTickerUnpin(unpin)
 	}
 
 	private createCubeSprite(
@@ -452,8 +509,8 @@ export class GameRenderer {
 		// Create container for cube
 		const container = new Container()
 		;(container as CubeSpriteContainer).__cubeId = cube.id
-		container.x = c * this.tileSize
-		container.y = this.calculateYFromBottom(r)
+		container.x = this.gridPixelX(c)
+		container.y = this.gridPixelY(r)
 
 		// КРИТИЧНО: Устанавливаем начальные состояния (могут быть изменены для анимации)
 		container.visible = true
@@ -513,13 +570,13 @@ export class GameRenderer {
 			container.addChild(text)
 		}
 
-		// Create highlight (initially hidden) – subtle selection ring
+		// Create highlight (initially hidden) — crisp ring aligned with tile corner radius
 		const highlight = new Graphics()
-		const hlR = Math.round(spriteSize * 0.2)
+		const hlR = Math.max(3, Math.round(spriteSize * 0.11))
 		highlight.roundRect(TILE_PADDING - 1, TILE_PADDING - 1, spriteSize + 2, spriteSize + 2, hlR + 1)
-		highlight.stroke({ color: 0xffffff, width: 2, alpha: 0.6 })
+		highlight.stroke({ color: 0xffffff, width: 2.5, alpha: 0.85 })
 		highlight.roundRect(TILE_PADDING, TILE_PADDING, spriteSize, spriteSize, hlR)
-		highlight.fill({ color: 0xffffff, alpha: 0.12 })
+		highlight.fill({ color: 0xffffff, alpha: 0.16 })
 		highlight.visible = false
 		container.addChild(highlight)
 		this.gameContainer.addChild(container)
@@ -682,18 +739,17 @@ export class GameRenderer {
 				case 'fall':
 					await this.animateFall(event.items)
 					break
-				case 'remove':
-					// Воспроизводим звук во время анимации удаления
-					if (event.chainIndex !== undefined) {
-						const isCascade = event.chainIndex > 1
-						AudioManager.playMatch(event.chainIndex, isCascade)
-					}
+				case 'remove': {
+					const idx = event.chainIndex ?? 1
+					const isCascade = idx > 1
+					AudioManager.playMatch(idx, isCascade, event.scoreComboLevel)
 					await this.animateRemove(
 						event.cells,
 						event.baseScore,
 						event.comboBonus
 					)
 					break
+				}
 				case 'spawn':
 					await this.animateSpawn(event.cells)
 					break
@@ -719,10 +775,10 @@ export class GameRenderer {
 
 		if (!containerA || !containerB) return
 
-		const posAX = a.c * this.tileSize
-		const posAY = this.calculateYFromBottom(a.r)
-		const posBX = b.c * this.tileSize
-		const posBY = this.calculateYFromBottom(b.r)
+		const posAX = this.gridPixelX(a.c)
+		const posAY = this.gridPixelY(a.r)
+		const posBX = this.gridPixelX(b.c)
+		const posBY = this.gridPixelY(b.r)
 
 		// Update positions
 		this.setCubePosition(cubeIdA, b.r, b.c)
@@ -760,6 +816,26 @@ export class GameRenderer {
 			})
 		}),
 	])
+
+		const pulseSwap = (cont: Container) => {
+			gsap.killTweensOf(cont.scale)
+			gsap
+				.timeline()
+				.to(cont.scale, {
+					x: 1.045,
+					y: 1.045,
+					duration: 0.06,
+					ease: 'power2.out',
+				})
+				.to(cont.scale, {
+					x: 1,
+					y: 1,
+					duration: 0.085,
+					ease: 'power2.inOut',
+				})
+		}
+		pulseSwap(containerA.container)
+		pulseSwap(containerB.container)
 	}
 
 	private async animateMove(
@@ -775,8 +851,8 @@ export class GameRenderer {
 		// Update position
 		this.setCubePosition(cubeId, to.r, to.c)
 
-		const targetX = to.c * this.tileSize
-		const targetY = this.calculateYFromBottom(to.r)
+		const targetX = this.gridPixelX(to.c)
+		const targetY = this.gridPixelY(to.r)
 
 	await new Promise<void>((resolve) => {
 		gsap.killTweensOf(cubeContainer.container)
@@ -832,8 +908,8 @@ private async animateFall(
 
 			this.setCubePosition(cubeId, item.to.r, item.to.c)
 
-			const targetX = item.to.c * this.tileSize
-			const targetY = this.calculateYFromBottom(item.to.r)
+			const targetX = this.gridPixelX(item.to.c)
+			const targetY = this.gridPixelY(item.to.r)
 			const fallDistance = Math.max(1, Math.abs(item.to.r - item.from.r))
 		// Block Blast fall: snappy with tiny landing bounce.
 		// Formula: min(0.30, 0.08 + distance * 0.055) → fast drops
@@ -863,6 +939,72 @@ private async animateFall(
 		await this.waitForNextFrame()
 	}
 
+	/** Short, tight board shake (no large motion blur). */
+	private playBoardShake(): void {
+		const board = this.gameContainer
+		if (!board) return
+		const bx = board.x
+		const by = board.y
+		gsap.killTweensOf(board)
+		gsap
+			.timeline()
+			.to(board, { x: bx + 2, y: by + 1, duration: 0.028 })
+			.to(board, { x: bx - 2, y: by - 1, duration: 0.028 })
+			.to(board, { x: bx + 1, y: by, duration: 0.024 })
+			.to(board, { x: bx, y: by, duration: 0.024 })
+	}
+
+	/**
+	 * Spark burst at line-clear centroid; extra count when combo is active.
+	 */
+	private playClearParticleBurst(
+		globalX: number,
+		globalY: number,
+		clearCount: number,
+		comboBonus: number
+	): void {
+		if (!this.app?.stage) return
+
+		const layer = new Container()
+		layer.zIndex = 999998
+		this.app.stage.sortableChildren = true
+		this.app.stage.addChild(layer)
+		this.app.stage.children.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
+
+		const hasCombo = comboBonus > 0
+		const n = Math.min(22, Math.round(5 + clearCount * 1.2 + (hasCombo ? 8 : 0)))
+		const colors = [0xfacc15, 0xf97316, 0xffffff, 0xfde047, 0xa855f7]
+
+		for (let i = 0; i < n; i++) {
+			const p = new Graphics()
+			const rad = 2 + Math.random() * 2.5
+			p.circle(0, 0, rad)
+			p.fill({ color: colors[i % colors.length], alpha: 1 })
+			p.x = globalX
+			p.y = globalY
+			layer.addChild(p)
+			const ang = Math.random() * Math.PI * 2
+			const dist = 32 + Math.random() * (hasCombo ? 58 : 40)
+			gsap.to(p, {
+				x: globalX + Math.cos(ang) * dist,
+				y: globalY + Math.sin(ang) * dist,
+				alpha: 0,
+				duration: 0.26 + Math.random() * 0.14,
+				ease: 'power2.out',
+				onComplete: () => {
+					p.destroy()
+				},
+			})
+		}
+
+		gsap.delayedCall(0.42, () => {
+			if (layer.parent) {
+				layer.parent.removeChild(layer)
+			}
+			layer.destroy({ children: true })
+		})
+	}
+
 	private async animateRemove(
 		cells: Array<{
 			r: number
@@ -882,6 +1024,25 @@ private async animateFall(
 			.filter((c): c is CubeContainer => c !== undefined)
 
 		if (containers.length === 0) return
+
+		const comboValProbe = comboBonus ?? 0
+		let accX = 0
+		let accY = 0
+		for (const cc of containers) {
+			accX += cc.container.x + this.tileSize / 2
+			accY += cc.container.y + this.tileSize / 2
+		}
+		if (this.gameContainer && this.app) {
+			const local = new Point(accX / containers.length, accY / containers.length)
+			const glob = this.gameContainer.toGlobal(local)
+			this.playClearParticleBurst(
+				glob.x,
+				glob.y,
+				containers.length,
+				comboValProbe
+			)
+		}
+		this.playBoardShake()
 
 		// Score popup at center of screen
 		if (
@@ -1051,30 +1212,44 @@ private async animateFall(
 							resolve()
 						}
 
-					// Match animation: scale 1→1.1, fade out
+					// Flash + pop scale + fade (snappy, high contrast)
+					const sprite = cubeContainer.sprite
+					const sw = sprite.width
+					const sh = sprite.height
+					const cr = Math.max(2, Math.min(sw, sh) * 0.11)
+					const flash = new Graphics()
+					flash.roundRect(sprite.x, sprite.y, sw, sh, cr)
+					flash.fill({ color: 0xffffff, alpha: 0.9 })
+					container.addChild(flash)
+
+					gsap.killTweensOf(container)
+					if (container.scale) gsap.killTweensOf(container.scale)
+
+					const tl = gsap.timeline({
+						onComplete: () => {
+							if (flash.parent) flash.parent.removeChild(flash)
+							flash.destroy()
+							finish()
+						},
+						onInterrupt: () => {
+							if (flash.parent) flash.parent.removeChild(flash)
+							flash.destroy()
+							finish()
+						},
+					})
+					tl.to(flash, { alpha: 0, duration: 0.055, ease: 'power2.out' }, 0)
 					if (container.scale) {
-						gsap.to(container.scale, {
-							x: 1.1,
-							y: 1.1,
-							duration: 0.15,
-							ease: 'power2.out',
-						})
-						gsap.to(container, {
-							alpha: 0,
-							duration: 0.15,
-							ease: 'power1.in',
-							onComplete: finish,
-							onInterrupt: finish,
-						})
-					} else {
-						gsap.to(container, {
-							alpha: 0,
-							duration: 0.18,
-							ease: 'power1.in',
-							onComplete: finish,
-							onInterrupt: finish,
-						})
+						tl.to(
+							container.scale,
+							{ x: 1.14, y: 1.14, duration: 0.1, ease: 'power2.out' },
+							0.02
+						)
 					}
+					tl.to(
+						container,
+						{ alpha: 0, duration: 0.11, ease: 'power1.in' },
+						0.05
+					)
 					})
 			)
 		)
@@ -1136,13 +1311,13 @@ private async animateFall(
 						1
 					)
 				} else {
-					// Для появления на месте: scale 0.9 → 1, 0.12s
+					// Для появления на месте: bounce 0.95 → 1.06 → 1 (см. animateSpawn)
 					cubeContainer = this.createCubeSprite(
 						tempCube,
 						targetRow,
 						cell.c,
 						1,
-						0.9
+						0.95
 					)
 				}
 
@@ -1182,7 +1357,7 @@ private async animateFall(
 			const targetRow = cell.toRow !== undefined ? cell.toRow : cell.r
 			// Гарантируем синхронизацию позиции в карте даже если она была потеряна.
 			this.setCubePosition(cell.id, targetRow, cell.c)
-			const targetY = this.calculateYFromBottom(targetRow)
+			const targetY = this.gridPixelY(targetRow)
 
 			if (cell.fromRow !== undefined && cell.fromRow < 0) {
 				// Для спавна сверху: fromRow отрицательный (например, -1, -2)
@@ -1226,12 +1401,12 @@ private async animateFall(
 				})
 			})
 			} else {
-			// Spawn: scale 0.9 → 1, 0.12s
+			// Spawn: scale bounce 0.95 → 1.06 → 1
 			cubeContainer.container.visible = true
 			cubeContainer.sprite.visible = true
 			cubeContainer.container.alpha = 1
 			if (cubeContainer.container.scale) {
-				cubeContainer.container.scale.set(0.9)
+				cubeContainer.container.scale.set(0.95)
 			}
 
 			return new Promise<void>((resolve) => {
@@ -1240,13 +1415,9 @@ private async animateFall(
 				gsap.killTweensOf(container)
 				if (container.scale) {
 					gsap.killTweensOf(container.scale)
-					gsap.set(container.scale, { x: 0.9, y: 0.9 })
+					gsap.set(container.scale, { x: 0.95, y: 0.95 })
 				}
-				gsap.to(container.scale, {
-					x: 1,
-					y: 1,
-					duration: 0.12,
-					ease: 'power2.out',
+				const tl = gsap.timeline({
 					onComplete: () => {
 						container.scale?.set(1)
 						resolve()
@@ -1255,6 +1426,18 @@ private async animateFall(
 						container.scale?.set(1)
 						resolve()
 					},
+				})
+				tl.to(container.scale, {
+					x: 1.06,
+					y: 1.06,
+					duration: 0.065,
+					ease: 'power2.out',
+				})
+				tl.to(container.scale, {
+					x: 1,
+					y: 1,
+					duration: 0.075,
+					ease: 'power2.inOut',
 				})
 			})
 			}
@@ -1270,7 +1453,7 @@ private async animateFall(
 		for (const cell of cells) {
 			let cubeContainer = this.cubeContainers.get(cell.id)
 			const targetRow = cell.toRow !== undefined ? cell.toRow : cell.r
-			const targetY = this.calculateYFromBottom(targetRow)
+			const targetY = this.gridPixelY(targetRow)
 
 			if (!cubeContainer) {
 				const tempCube: Cube = {
@@ -1283,7 +1466,7 @@ private async animateFall(
 
 			this.setCubePosition(cell.id, targetRow, cell.c)
 			const container = cubeContainer.container
-			container.x = cell.c * this.tileSize
+			container.x = this.gridPixelX(cell.c)
 			container.y = targetY
 			container.visible = true
 			container.alpha = 1
@@ -1350,8 +1533,8 @@ private async animateFall(
 				const pos = this.cubePositions.get(cubeId)
 				if (pos) {
 					// Обновить позицию контейнера
-					cubeContainer.container.x = pos.c * this.tileSize
-					cubeContainer.container.y = this.calculateYFromBottom(pos.r)
+					cubeContainer.container.x = this.gridPixelX(pos.c)
+					cubeContainer.container.y = this.gridPixelY(pos.r)
 
 					// Обновить размер спрайта
 					const spriteSize = Math.max(1, this.tileSize - TILE_PADDING * 2)
@@ -1369,11 +1552,11 @@ private async animateFall(
 				// Обновить highlight (если есть)
 				if (cubeContainer.highlight) {
 					cubeContainer.highlight.clear()
-					const hlR = Math.round(spriteSize * 0.2)
+					const hlR = Math.max(3, Math.round(spriteSize * 0.11))
 					cubeContainer.highlight.roundRect(TILE_PADDING - 1, TILE_PADDING - 1, spriteSize + 2, spriteSize + 2, hlR + 1)
-					cubeContainer.highlight.stroke({ color: 0xffffff, width: 2, alpha: 0.6 })
+					cubeContainer.highlight.stroke({ color: 0xffffff, width: 2.5, alpha: 0.85 })
 					cubeContainer.highlight.roundRect(TILE_PADDING, TILE_PADDING, spriteSize, spriteSize, hlR)
-					cubeContainer.highlight.fill({ color: 0xffffff, alpha: 0.12 })
+					cubeContainer.highlight.fill({ color: 0xffffff, alpha: 0.16 })
 				}
 				}
 			})
@@ -1413,8 +1596,8 @@ private async animateFall(
 			const pos = this.cubePositions.get(cubeId)
 			if (pos) {
 				// Пересчитать позицию контейнера с учетом текущего tileSize и выравнивания снизу
-				cubeContainer.container.x = pos.c * this.tileSize
-				cubeContainer.container.y = this.calculateYFromBottom(pos.r)
+				cubeContainer.container.x = this.gridPixelX(pos.c)
+				cubeContainer.container.y = this.gridPixelY(pos.r)
 			}
 		})
 	}
@@ -1592,9 +1775,6 @@ private async animateFall(
 		// High zIndex = drawn last = on top (Pixi draws children in array order)
 		this.app.stage.children.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
 
-		// Воспроизводим звук combo5 в момент появления надписи
-		AudioManager.playCombo5()
-
 		await new Promise<void>((resolve) => {
 			gsap.to(popup, {
 				alpha: 1,
@@ -1730,9 +1910,6 @@ private async animateFall(
 		this.app.stage.children.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
 		this.forceRender()
 
-		// Воспроизводим звук combo4 в момент появления надписи
-		AudioManager.playCombo4()
-
 		await new Promise<void>((resolve) => {
 			gsap.to(popup, {
 				alpha: 1,
@@ -1801,8 +1978,8 @@ private async animateFall(
 						this.setCubePosition(cube.id, r, c)
 					}
 
-					cubeContainer.container.x = c * this.tileSize
-					cubeContainer.container.y = this.calculateYFromBottom(r)
+					cubeContainer.container.x = this.gridPixelX(c)
+					cubeContainer.container.y = this.gridPixelY(r)
 					cubeContainer.container.visible = true
 					cubeContainer.container.alpha = 1
 					if (cubeContainer.container.scale) {
@@ -2279,6 +2456,11 @@ private async animateFall(
 	}
 
 	destroy(): void {
+		for (const unpin of [...this.popupTickerUnpins]) {
+			unpin()
+		}
+		this.popupTickerUnpins.length = 0
+
 		this.cubeContainers.forEach((cubeContainer) => {
 			if (cubeContainer && cubeContainer.container) {
 				// КРИТИЧНО: Убиваем все GSAP анимации перед уничтожением,

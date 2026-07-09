@@ -3,6 +3,7 @@
  */
 
 import { sound } from '@pixi/sound'
+import type { IMediaInstance } from '@pixi/sound'
 import { audioList } from '@/composables/useAudio'
 
 export type SoundId =
@@ -101,14 +102,28 @@ class AudioManagerClass {
 		if (this.initialized) return
 
 		try {
-			// Добавляем все звуки в кэш (sound.add синхронно регистрирует звук)
-			Object.entries(SOUND_CONFIGS).forEach(([id, config]) => {
-				try {
-					sound.add(id as SoundId, config.path)
-				} catch (err) {
-					console.warn(`Failed to add sound ${id}:`, err)
-				}
-			})
+			const loadPromises = Object.entries(SOUND_CONFIGS).map(
+				([id, config]) =>
+					new Promise<void>((resolve) => {
+						try {
+							sound.add(id as SoundId, {
+								url: config.path,
+								preload: true,
+								singleInstance: false,
+								loaded: (err) => {
+									if (err) {
+										console.warn(`Failed to load sound ${id}:`, err)
+									}
+									resolve()
+								},
+							})
+						} catch (err) {
+							console.warn(`Failed to add sound ${id}:`, err)
+							resolve()
+						}
+					}),
+			)
+			await Promise.all(loadPromises)
 
 			// Загружаем состояние из localStorage
 			const savedEnabled = localStorage.getItem('soundEnabled')
@@ -130,14 +145,24 @@ class AudioManagerClass {
 		if (this.unlocked) return
 
 		try {
+			const ctx = sound.context?.audioContext
+			if (ctx?.state === 'suspended') {
+				void ctx.resume()
+			}
+
 			// Используем уже загруженный звук для разблокировки контекста
 			if (sound.exists('move')) {
-				sound.play('move', {
+				const r = sound.play('move', {
 					volume: 0,
 					complete: () => {
 						// Контекст разблокирован
 					},
 				})
+				if (r && typeof (r as Promise<unknown>).then === 'function') {
+					void (r as Promise<unknown>).catch(() => {
+						/* ignore */
+					})
+				}
 			}
 			this.unlocked = true
 		} catch (error) {
@@ -217,38 +242,45 @@ class AudioManagerClass {
 			speed = 1.0 + (Math.random() > 0.5 ? pitchVariation : -pitchVariation)
 		}
 
-		try {
-			// Воспроизводим звук с опцией singleInstance: false
-			// чтобы каждый звук воспроизводился отдельно, даже параллельно
-			const soundInstance = sound.play(id, {
-				volume: finalVolume,
-				speed,
-				loop: false,
-				singleInstance: false, // Позволяем воспроизводить несколько экземпляров одновременно
-			})
+		const playOpts = {
+			volume: finalVolume,
+			speed,
+			loop: false,
+			singleInstance: false,
+		}
 
-			// Проверяем результат воспроизведения
-			if (!soundInstance) {
-				return
-			}
-
-			// Устанавливаем throttle timer ПОСЛЕ успешного воспроизведения
-			// НЕ устанавливаем timer если skipThrottle = true, чтобы не блокировать каскадные звуки
+		const onPlayed = (instance: IMediaInstance | null) => {
+			if (!instance) return
 			if (throttleMs > 0 && !options?.skipThrottle) {
 				this.throttleTimers.set(id, Date.now())
 			}
-
-			// Устанавливаем флаги для once звуков
 			if (options?.once) {
 				if (id === 'clear') this.clearPlayed = true
 				if (id === 'gameover') this.gameoverPlayed = true
 			}
-		} catch (error) {
+		}
+
+		const onError = (error: unknown) => {
 			console.warn(`Failed to play sound ${id}:`, error)
-			// Если звук комбо не воспроизвелся, пытаемся использовать match как fallback
 			if (id.startsWith('combo') && sound.exists('match')) {
 				this.play('match', { ...options, speed: options?.speed ?? 1.1 })
 			}
+		}
+
+		try {
+			const playResult = sound.play(id, playOpts)
+			if (
+				playResult &&
+				typeof (playResult as Promise<IMediaInstance>).then === 'function'
+			) {
+				void (playResult as Promise<IMediaInstance>)
+					.then(onPlayed)
+					.catch(onError)
+				return
+			}
+			onPlayed(playResult as IMediaInstance | null)
+		} catch (error) {
+			onError(error)
 		}
 	}
 
@@ -268,43 +300,34 @@ class AudioManagerClass {
 	}
 
 	/**
-	 * Воспроизведение звука матча/комбо
-	 * skipThrottle: true для каскадных исчезновений, чтобы звуки не блокировались throttle
-	 *
-	 * Логика звуков:
-	 * - chainIndex 1: MATCH (первое исчезновение от действия игрока)
-	 * - chainIndex 2-4: MATCH с уменьшенной громкостью (первые три каскадных)
-	 * - chainIndex 5-8: COMBO_2, COMBO_3, COMBO_4, COMBO_5 (последующие каскадные)
-	 * - chainIndex 9+: COMBO_5 (максимальный комбо)
+	 * Звук матча / комбо по каскаду.
+	 * @param scoreComboLevel 1 = MATCH; 2–5 = COMBO_2 … COMBO_5 (из GameController по размерам clear)
 	 */
-	playMatch(chainIndex: number, skipThrottle: boolean = false): void {
-		if (chainIndex === 1) {
-			// Первое исчезновение от действия игрока
-			this.play('match', { skipThrottle })
-		} else if (chainIndex >= 2 && chainIndex <= 4) {
-			// Первые три каскадных исчезновения - слабый MATCH
-			// Используем уменьшенную громкость (0.6 от обычной)
-			this.play('match', { skipThrottle, volume: 0.6 })
-		} else {
-			// Последующие каскадные исчезновения - COMBO звуки
-			let comboId: SoundId = 'combo5'
+	playMatch(
+		_chainIndex: number,
+		skipThrottle: boolean = false,
+		scoreComboLevel?: number,
+	): void {
+		const level = scoreComboLevel ?? 1
 
-			if (chainIndex === 5) {
-				comboId = sound.exists('combo2') ? 'combo2' : 'match'
-			} else if (chainIndex === 6) {
-				comboId = sound.exists('combo3') ? 'combo3' : 'match'
-			} else if (chainIndex === 7) {
-				comboId = sound.exists('combo4') ? 'combo4' : 'match'
-			} else if (chainIndex === 8) {
-				comboId = sound.exists('combo5') ? 'combo5' : 'match'
+		if (level >= 2) {
+			const comboId: SoundId =
+				level === 2
+					? 'combo2'
+					: level === 3
+						? 'combo3'
+						: level === 4
+							? 'combo4'
+							: 'combo5'
+			if (sound.exists(comboId)) {
+				this.play(comboId, { skipThrottle })
 			} else {
-				// chainIndex >= 9 - максимальный комбо
-				comboId = sound.exists('combo5') ? 'combo5' : 'match'
+				this.play('match', { skipThrottle, volume: 0.9 })
 			}
-
-			// Воспроизводим звук сразу, без задержек - пусть звучат параллельно если нужно
-			this.play(comboId, { skipThrottle })
+			return
 		}
+
+		this.play('match', { skipThrottle })
 	}
 
 	/**
@@ -326,20 +349,6 @@ class AudioManagerClass {
 	 */
 	playGameOver(): void {
 		this.play('gameover', { once: true })
-	}
-
-	/**
-	 * Воспроизведение звука combo 4
-	 */
-	playCombo4(): void {
-		this.play('combo4')
-	}
-
-	/**
-	 * Воспроизведение звука combo 5
-	 */
-	playCombo5(): void {
-		this.play('combo5')
 	}
 
 	/**

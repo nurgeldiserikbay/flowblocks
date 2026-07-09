@@ -14,15 +14,14 @@ import {
 	checkMatchesAfterSpawn,
 	calculateBaseRemovalScore,
 	calculateComboBonus,
+	soundComboLevelForCascadeStep,
 	getVesselClearBonus,
 	getGreatBonus,
 	getNoMovesBonus,
 	cloneGrid,
 	expandGrid,
-	hasPossibleMoves,
+	analyzeIncomingBlocks,
 	isGridEmpty,
-	countCubes,
-	getCube,
 	type Position,
 	type Cube,
 	WIDTH,
@@ -31,8 +30,6 @@ import type { GameEvent } from './logic/types'
 import { AudioManager } from './audio/AudioManager'
 import { loadBlockTextures, waitForTexturesReady } from './blockTextures'
 import { PixiService } from '@/pixi/PixiService'
-
-const COMBO_WINDOW_MS = 2500
 
 export interface GameControllerOptions {
 	/** Вызывается после расширения сосуда: переразмер канваса, скролл к низу. */
@@ -51,13 +48,38 @@ export class GameController {
 	private timerStartTime: number = 0 // Время начала текущего таймера
 	private expectedNextTick: number = 0 // Ожидаемое время следующего тика
 	private lastTickTime: number = 0 // Защита от двойного тика
-	private comboLevel: number = 0
-	private comboTimer: ReturnType<typeof setTimeout> | null = null
 	private opts: GameControllerOptions
 	private lastStateCheckTime: number = 0 // Время последней проверки состояния игры
 	private readonly STATE_CHECK_INTERVAL = 2000 // Проверяем состояние не чаще чем раз в 2 секунды
-	private lastHasMovesCheck: { gridHash: string; result: boolean } | null = null // Кэш последней проверки hasPossibleMoves
 	private readonly isAndroidDevice = /Android/i.test(navigator.userAgent)
+
+	/**
+	 * Счёт, комбо и метаданные для событий remove (звук, анимация).
+	 */
+	private enrichRemoveEvents(events: GameEvent[]): void {
+		const sizes: number[] = []
+		for (const ev of events) {
+			if (ev.type === 'remove') sizes.push(ev.cells.length)
+		}
+
+		let removeEventIndex = 0
+		for (const ev of events) {
+			if (ev.type !== 'remove') continue
+			removeEventIndex++
+			const chainIndex = removeEventIndex
+			const baseScore = calculateBaseRemovalScore(ev.cells)
+			const comboBonus =
+				chainIndex >= 2
+					? calculateComboBonus(chainIndex, ev.cells.length)
+					: 0
+			ev.baseScore = baseScore
+			ev.comboBonus = comboBonus
+			ev.chainIndex = chainIndex
+			ev.scoreComboLevel = soundComboLevelForCascadeStep(sizes, chainIndex)
+			this.store.addScore(baseScore + comboBonus)
+		}
+	}
+
 	/**
 	 * Promise for the post-swap cascade chain (fall + remove + resolve).
 	 * Runs after the swap animation completes while input is already unlocked.
@@ -93,9 +115,6 @@ export class GameController {
 
 	async startGame(): Promise<void> {
 		const startGameTime = performance.now()
-
-		// Очищаем кэш при старте игры
-		this.lastHasMovesCheck = null
 
 		// Reset store
 		this.store.reset()
@@ -414,8 +433,7 @@ export class GameController {
 			this.scheduleNextTick()
 
 			// Check game state between ticks (only if not locked to avoid concurrent checks)
-			// КРИТИЧНО: Проверяем состояние только если кубиков <= 32 для оптимизации
-			// Также ограничиваем частоту проверок - не чаще чем раз в STATE_CHECK_INTERVAL
+			// Ограничиваем частоту проверок - не чаще чем раз в STATE_CHECK_INTERVAL
 			// Используем setTimeout чтобы не блокировать tick
 			if (!this.store.isLocked) {
 				const now = Date.now()
@@ -441,15 +459,6 @@ export class GameController {
 	private async onWaveEnd(): Promise<void> {
 		// КРИТИЧНО: Проверка перед началом операции
 		if (this.store.isLocked || this.store.isGameOver) return
-
-		// Очищаем кэш при окончании волны
-		this.lastHasMovesCheck = null
-
-		if (this.comboTimer !== null) {
-			clearTimeout(this.comboTimer)
-			this.comboTimer = null
-		}
-		this.comboLevel = 0
 
 		// КРИТИЧНО: Блокируем игру и используем try-finally для гарантированной разблокировки
 		this.store.setLocked(true)
@@ -596,6 +605,8 @@ export class GameController {
 				// Обновляем grid после проверки матчей
 				this.store.setGrid(grid)
 
+				this.enrichRemoveEvents(matchEvents)
+
 				// Запускаем анимацию исчезновения плиток
 				if (matchEvents.length > 0) {
 					await this.renderer.applyEvents(matchEvents)
@@ -657,9 +668,6 @@ export class GameController {
 		}
 
 		if (this.store.isLocked || this.store.isGameOver) return
-
-		// Clear hasPossibleMoves cache on user action
-		this.lastHasMovesCheck = null
 
 		this.store.setLocked(true)
 
@@ -781,30 +789,7 @@ export class GameController {
 		const resolveResult = resolveAfterMove(grid, checkPositions)
 		this.store.setGrid(grid)
 
-		// Enrich remove events with score
-		let removeEventIndex = 0
-		for (const ev of resolveResult.events) {
-			if (ev.type !== 'remove') continue
-			removeEventIndex++
-			const chainIndex = removeEventIndex
-			const baseScore = calculateBaseRemovalScore(ev.cells)
-			let comboBonus = 0
-			if (this.comboTimer !== null) {
-				this.comboLevel++
-				comboBonus = calculateComboBonus(this.comboLevel, ev.cells.length)
-				clearTimeout(this.comboTimer)
-			} else {
-				this.comboLevel = 1
-			}
-			this.comboTimer = setTimeout(() => {
-				this.comboTimer = null
-				this.comboLevel = 0
-			}, COMBO_WINDOW_MS)
-			ev.baseScore = baseScore
-			ev.comboBonus = comboBonus
-			ev.chainIndex = chainIndex
-			this.store.addScore(baseScore + comboBonus)
-		}
+		this.enrichRemoveEvents(resolveResult.events)
 
 		if (this.renderer && resolveResult.events.length > 0) {
 			await this.renderer.applyEvents(resolveResult.events)
@@ -867,56 +852,30 @@ export class GameController {
 			return
 		}
 
-		// Case 3: Cubes exist but no moves left
-		// КРИТИЧНО: Проверяем наличие ходов только если кубиков <= 32 для оптимизации
-		// Это предотвращает ненужные проверки когда кубиков много
+		// Case 3: новые блоки — только счётчики: всего < MIN или ни у одного цвета нет ≥ MIN плиток
 		if (!isEmpty && remainingTime > 0) {
-			// Подсчитываем количество кубиков
-			const cubeCount = countCubes(currentGrid)
+			const incoming = analyzeIncomingBlocks(currentGrid)
 
-			// Проверяем наличие ходов только если кубиков <= 32
-			// Если кубиков больше, значит игра еще активна и ходы точно есть
-			if (cubeCount <= 32) {
-				// Используем кэш для оптимизации
-				const gridHash = this.getGridHash(currentGrid)
-				let hasMoves: boolean
-
-				if (
-					this.lastHasMovesCheck &&
-					this.lastHasMovesCheck.gridHash === gridHash
-				) {
-					hasMoves = this.lastHasMovesCheck.result
-				} else {
-					hasMoves = hasPossibleMoves(currentGrid)
-					this.lastHasMovesCheck = { gridHash, result: hasMoves }
-				}
-
-				if (!hasMoves) {
-					// Очищаем кэш перед спавном
-					this.lastHasMovesCheck = null
-					const noMovesBonus = getNoMovesBonus(remainingTime)
-					this.store.addScore(noMovesBonus)
-					this.pauseTimer()
-					this.store.setGameMessageToast({
-						text: '📦 New blocks incoming!',
-						bonus: noMovesBonus,
-					})
-					await new Promise((r) => setTimeout(r, 2000))
-					this.store.setGameMessageToast(null)
-					// Spawn new wave with half vessel height rows
-					const halfHeight = Math.floor(this.store.getHeight() / 2)
-					await this.spawnMidWave(currentGrid, halfHeight)
-					return
-				}
+			if (incoming.shouldShowIncomingModal) {
+				const noMovesBonus = getNoMovesBonus(remainingTime)
+				this.store.addScore(noMovesBonus)
+				this.pauseTimer()
+				this.store.setGameMessageToast({
+					text: '📦 New blocks incoming!',
+					bonus: noMovesBonus,
+				})
+				await new Promise((r) => setTimeout(r, 2000))
+				this.store.setGameMessageToast(null)
+				const halfHeight = Math.floor(this.store.getHeight() / 2)
+				await this.spawnMidWave(currentGrid, halfHeight)
+				return
 			}
-			// Если кубиков > 32, не проверяем наличие ходов - игра продолжается
 		}
 	}
 
 	/**
 	 * Async version for checking game state (called from tick)
 	 * Doesn't lock the game, just checks and handles if needed
-	 * КРИТИЧНО: Проверяет наличие ходов только если кубиков <= 32 для оптимизации
 	 * КРИТИЧНО ИСПРАВЛЕНО: Добавлена защита от race conditions с applyUserAction
 	 */
 	private async checkGameStateAsync(grid: (Cube | null)[][]): Promise<void> {
@@ -974,78 +933,37 @@ export class GameController {
 			return
 		}
 
-		// Case 2: Cubes exist but no moves left
-		// КРИТИЧНО: Проверяем наличие ходов только если кубиков <= 32 для оптимизации
-		// Это предотвращает ненужные проверки когда кубиков много
+		// Case 2: новые блоки — те же правила счётчиков, что и в checkGameState
 		if (!isEmpty && remainingTime > 0) {
-			// Подсчитываем количество кубиков
-			const cubeCount = countCubes(currentGrid)
+			const incoming = analyzeIncomingBlocks(currentGrid)
 
-			// Оптимизация: если кубиков очень мало (меньше 8), скорее всего нет ходов
-			// Но все равно проверяем, чтобы быть уверенными
-			if (cubeCount <= 32) {
-				// Оптимизация: используем простой хэш grid для кэширования проверки
-				// Это позволяет избежать повторных проверок одного и того же состояния
-				const gridHash = this.getGridHash(currentGrid)
-				let hasMoves: boolean
+			if (!incoming.shouldShowIncomingModal) return
 
-				// Проверяем кэш
-				if (
-					this.lastHasMovesCheck &&
-					this.lastHasMovesCheck.gridHash === gridHash
-				) {
-					hasMoves = this.lastHasMovesCheck.result
-				} else {
-					// Выполняем проверку только один раз
-					hasMoves = hasPossibleMoves(currentGrid)
-					this.lastHasMovesCheck = { gridHash, result: hasMoves }
-				}
+			if (this.store.isLocked || this.store.isGameOver) return
 
-				if (!hasMoves) {
-					// КРИТИЧНО: Повторная проверка перед блокировкой
-					// Предотвращает race conditions с applyUserAction
-					if (this.store.isLocked || this.store.isGameOver) return
+			this.store.setLocked(true)
+			try {
+				if (this.store.isGameOver) return
 
-					// КРИТИЧНО: Используем атомарную проверку и блокировку
-					// Если игра уже заблокирована, не продолжаем
-					if (this.store.isLocked) return
-
-					// Очищаем кэш перед спавном (grid изменится)
-					this.lastHasMovesCheck = null
-
-					this.store.setLocked(true)
-					try {
-						// КРИТИЧНО: Повторная проверка после блокировки (может измениться состояние)
-						if (this.store.isGameOver) return
-
-						const noMovesBonus = getNoMovesBonus(remainingTime)
-						this.store.addScore(noMovesBonus)
-						this.pauseTimer()
-						this.store.setGameMessageToast({
-							text: '📦 New blocks incoming!',
-							bonus: noMovesBonus,
-						})
-						await new Promise((r) => setTimeout(r, 2000))
-						this.store.setGameMessageToast(null)
-						// Spawn new wave with half vessel height rows
-						// КРИТИЧНО: spawnMidWave уже заблокирует игру, но мы используем try-finally для гарантии
-						const halfHeight = Math.floor(this.store.getHeight() / 2)
-						await this.spawnMidWave(currentGrid, halfHeight)
-					} catch (error) {
-						console.error(
-							'[GameController] checkGameStateAsync: error in Case 2',
-							error
-						)
-						// В случае ошибки разблокируем через finally
-					} finally {
-						// КРИТИЧНО: Гарантированная разблокировка
-						// spawnMidWave также разблокирует игру, но это безопасно (idempотентно)
-						this.store.setLocked(false)
-					}
-					return
-				}
+				const noMovesBonus = getNoMovesBonus(remainingTime)
+				this.store.addScore(noMovesBonus)
+				this.pauseTimer()
+				this.store.setGameMessageToast({
+					text: '📦 New blocks incoming!',
+					bonus: noMovesBonus,
+				})
+				await new Promise((r) => setTimeout(r, 2000))
+				this.store.setGameMessageToast(null)
+				const halfHeight = Math.floor(this.store.getHeight() / 2)
+				await this.spawnMidWave(currentGrid, halfHeight)
+			} catch (error) {
+				console.error(
+					'[GameController] checkGameStateAsync: error in Case 2',
+					error,
+				)
+			} finally {
+				this.store.setLocked(false)
 			}
-			// Если кубиков > 32, не проверяем наличие ходов - игра продолжается
 		}
 	}
 
@@ -1065,9 +983,6 @@ export class GameController {
 			this.store.setLocked(false)
 			return
 		}
-
-		// Очищаем кэш перед спавном (grid изменится)
-		this.lastHasMovesCheck = null
 
 		try {
 			// Spawn wave with specified number of rows
@@ -1182,8 +1097,29 @@ export class GameController {
 				// Это гарантирует, что все спрайты находятся в правильных позициях
 				await this.renderer?.syncGridPositions(grid)
 
-				// Check game over (проверяется в spawnWave)
-				if (result.gameOver) {
+				const SPAWN_MATCH_CHECK_DELAY_MID = this.isAndroidDevice ? 220 : 320
+				await new Promise((resolve) =>
+					setTimeout(resolve, SPAWN_MATCH_CHECK_DELAY_MID)
+				)
+
+				const midMatchEvents = checkMatchesAfterSpawn(
+					grid,
+					result.newCubeIds,
+					result.existingCubeIds
+				)
+				this.store.setGrid(grid)
+
+				this.enrichRemoveEvents(midMatchEvents)
+
+				if (midMatchEvents.length > 0) {
+					await this.renderer.applyEvents(midMatchEvents)
+					await this.renderer?.syncGridPositions(grid)
+				}
+
+				const spawnMidGameOver =
+					result.gameOver ||
+					midMatchEvents.some((e) => e.type === 'gameover')
+				if (spawnMidGameOver) {
 					this.store.setGameOver(true)
 					AudioManager.playGameOver()
 				}
@@ -1243,36 +1179,13 @@ export class GameController {
 		this.scheduleNextTick(true) // Принудительный запуск
 	}
 
-	/**
-	 * Простой хэш grid для кэширования проверки hasPossibleMoves
-	 * Использует только позиции и цвета кубиков с moves > 0
-	 */
-	private getGridHash(grid: (Cube | null)[][]): string {
-		const h = grid.length
-		const parts: string[] = []
-		for (let r = 0; r < h; r++) {
-			for (let c = 0; c < WIDTH; c++) {
-				const cube = getCube(grid, r, c)
-				if (cube && cube.moves > 0) {
-					parts.push(`${r},${c}:${cube.color}:${cube.moves}`)
-				}
-			}
-		}
-		return parts.join('|')
-	}
-
 	stop(): void {
 		if (this.timerTimeout !== null) {
 			clearTimeout(this.timerTimeout)
 			this.timerTimeout = null
 		}
-		if (this.comboTimer !== null) {
-			clearTimeout(this.comboTimer)
-			this.comboTimer = null
-		}
 		// Drop any pending chain reference (animations may still finish, but we ignore the result)
 		this.pendingChainPromise = null
-		this.lastHasMovesCheck = null
 	}
 
 	destroy(): void {

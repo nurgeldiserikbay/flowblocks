@@ -2,7 +2,7 @@
  * Scoring logic
  *
  * - Base: (moves + 5) per tile when it disappears
- * - Combo: extra points when tiles disappear in quick succession (invisible timer)
+ * - Combo: extra points за 2+ исчезновения подряд в одном каскаде (без таймера)
  * - Vessel clear: bonus = WIDTH * height when grid is fully empty before next spawn
  */
 
@@ -17,6 +17,36 @@ export function calculateBaseRemovalScore(cells: { moves: number }[]): number {
 export function calculateComboBonus(comboLevel: number, tileCount: number): number {
 	if (comboLevel <= 0) return 0
 	return comboLevel * 6 * tileCount
+}
+
+/**
+ * Уровень звука для шага каскада (1 = MATCH; 2–5 = COMBO_2 … COMBO_5).
+ * Подряд = в одной цепочке событий remove после одного хода.
+ */
+export function soundComboLevelForCascadeStep(
+	sizes: readonly number[],
+	stepIndex1: number,
+): number {
+	const k = stepIndex1
+	if (k <= 1) return 1
+
+	const a = sizes[0] ?? 0
+	const b = sizes[1] ?? 0
+	const c = sizes[2] ?? 0
+
+	if (k === 2) {
+		if (a === 3 && b === 3) return 2
+		if (a >= 3 && b >= 3) return 3
+		return 2
+	}
+
+	if (k === 3) {
+		if (a === 3 && b === 3 && c === 3) return 4
+		if (a === 3 && b > 3 && c > 3) return 5
+		return 4
+	}
+
+	return 5
 }
 
 /** Vessel clear bonus when grid is fully empty before spawn: size of vessel */

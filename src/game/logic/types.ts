@@ -47,6 +47,8 @@ export type GameEvent =
 			baseScore?: number
 			comboBonus?: number
 			chainIndex?: number // Индекс каскадного исчезновения (1 = первое, 2+ = каскадные)
+			/** Уровень звука каскада (1 = MATCH, 2–5 = COMBO_2 … COMBO_5) */
+			scoreComboLevel?: number
 	  }
 	| {
 			type: 'spawn'
