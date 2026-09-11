@@ -14,6 +14,16 @@
 			"
 		></div>
 
+		<!-- Вход в «Другие игры». Рядом с кнопкой звука и в её же форме: раздел
+		     не должен спорить за внимание с кнопкой Play. -->
+		<button
+			class="promo-games"
+			aria-label="Other games"
+			@click="isOtherGames = true"
+		>
+			<OtherGamesIcon class="promo-games__icon" />
+		</button>
+
 		<!-- Sound button (top right) -->
 		<button
 			class="sound-button"
@@ -154,10 +164,6 @@
 			</div>
 		</div>
 
-		<button class="promo-more" @click="isOtherGames = true">
-			Other games
-		</button>
-
 		<!-- Privacy policy link - вынесен за пределы content для гарантированной видимости -->
 		<a
 			href="https://docs.google.com/document/d/1A2E7klBs2qZlUOKxkYb4AbPQCaXbMhP0jQfw9B9DpMc/edit?usp=sharing"
@@ -186,6 +192,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import OtherGames from '@/components/OtherGames.vue'
+import OtherGamesIcon from '@/components/OtherGamesIcon.vue'
 import { useAudioStore } from '@/shared/stores/audioStore'
 import { AudioManager } from '@/game/audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
@@ -658,39 +665,37 @@ const isOtherGames = ref(false)
 }
 
 /*
-   Кнопка в раздел «Другие игры».
+   Вход в «Другие игры»: та же форма, что у кнопки звука, слева от неё.
 
-   Прижата к низу так же, как ссылка на политику (.privacy-link): та сделана
-   position: fixed, и кнопка в обычном потоке оказывалась под ней и под
-   декоративным слоем — нажать её было нельзя. Стоит на 3.5rem выше ссылки,
-   тем же столбцом.
+   Смещение считается так же, как у .sound-button — от правого края контейнера
+   475px, плюс ширина самой кнопки звука и зазор.
 */
-.promo-more {
+.promo-games {
 	position: fixed;
-	left: 0;
-	right: 0;
-	bottom: calc(
-		clamp(0.75rem, 2vw, 1rem) + env(safe-area-inset-bottom, 0px) + 3.5rem
-	);
-	z-index: 11;
-	width: fit-content;
-	margin: 0 auto;
-	padding: 10px 20px;
-	border: none;
-	border-radius: 13px;
-	background: linear-gradient(180deg, #9280f7, #6246d6);
-	box-shadow: 0 3px 0 #3f2ba0;
+	top: calc(1rem + env(safe-area-inset-top, 0px));
+	left: calc(50% + 237.5px - 1rem - 48px - 58px);
+	z-index: 10;
+	width: 48px;
+	height: 48px;
+	border-radius: 14px;
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	background: rgba(255, 255, 255, 0.15);
+	backdrop-filter: blur(16px);
+	-webkit-backdrop-filter: blur(16px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	cursor: pointer;
-	font-family: inherit;
-	font-size: 13px;
-	font-weight: 900;
-	letter-spacing: 0.8px;
-	text-transform: uppercase;
+	opacity: 0.7;
 	color: #fff;
 }
 
-.promo-more:active {
-	transform: translateY(2px);
-	box-shadow: 0 1px 0 #3f2ba0;
+.promo-games__icon {
+	width: 22px;
+	height: 22px;
+}
+
+.promo-games:active {
+	opacity: 0.95;
 }
 </style>
