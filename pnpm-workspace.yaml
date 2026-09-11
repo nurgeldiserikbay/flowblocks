@@ -1,0 +1,7 @@
+allowBuilds:
+  '@parcel/watcher': true
+  cpu-features: true
+  esbuild: true
+  sharp: true
+  vue-demi: true
+  yarn: true

@@ -154,6 +154,10 @@
 			</div>
 		</div>
 
+		<button class="promo-more" @click="isOtherGames = true">
+			Other games
+		</button>
+
 		<!-- Privacy policy link - вынесен за пределы content для гарантированной видимости -->
 		<a
 			href="https://docs.google.com/document/d/1A2E7klBs2qZlUOKxkYb4AbPQCaXbMhP0jQfw9B9DpMc/edit?usp=sharing"
@@ -173,11 +177,15 @@
 				:style="style"
 			></div>
 		</div>
+
+		<OtherGames v-if="isOtherGames" @close="isOtherGames = false" />
 	</div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+
+import OtherGames from '@/components/OtherGames.vue'
 import { useAudioStore } from '@/shared/stores/audioStore'
 import { AudioManager } from '@/game/audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
@@ -260,6 +268,8 @@ const patternStyles = computed(() =>
 		transform: `rotate(${pos.rotation}deg)`,
 	})),
 )
+
+const isOtherGames = ref(false)
 </script>
 
 <style lang="scss" scoped>
@@ -645,5 +655,42 @@ const patternStyles = computed(() =>
 	75% {
 		transform: translate(20px, 30px) rotate(270deg);
 	}
+}
+
+/*
+   Кнопка в раздел «Другие игры».
+
+   Прижата к низу так же, как ссылка на политику (.privacy-link): та сделана
+   position: fixed, и кнопка в обычном потоке оказывалась под ней и под
+   декоративным слоем — нажать её было нельзя. Стоит на 3.5rem выше ссылки,
+   тем же столбцом.
+*/
+.promo-more {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: calc(
+		clamp(0.75rem, 2vw, 1rem) + env(safe-area-inset-bottom, 0px) + 3.5rem
+	);
+	z-index: 11;
+	width: fit-content;
+	margin: 0 auto;
+	padding: 10px 20px;
+	border: none;
+	border-radius: 13px;
+	background: linear-gradient(180deg, #9280f7, #6246d6);
+	box-shadow: 0 3px 0 #3f2ba0;
+	cursor: pointer;
+	font-family: inherit;
+	font-size: 13px;
+	font-weight: 900;
+	letter-spacing: 0.8px;
+	text-transform: uppercase;
+	color: #fff;
+}
+
+.promo-more:active {
+	transform: translateY(2px);
+	box-shadow: 0 1px 0 #3f2ba0;
 }
 </style>

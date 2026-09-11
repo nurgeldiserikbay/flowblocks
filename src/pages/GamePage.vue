@@ -95,7 +95,17 @@
 				</div>
 			</div>
 
-			<div class="game-page__bottom-section"></div>
+			<!--
+				Резервная полоса под рекламу. Пустой она больше не бывает: пришедший
+				баннер рисуется поверх вебвью и закрывает её собой, а пока его нет —
+				в ней стоит кросс-промо наших игр.
+			-->
+			<div class="game-page__bottom-section">
+				<AdSlot
+					:interactive="gameStore.isGameOver"
+					@open="isOtherGames = true"
+				/>
+			</div>
 
 			<ConfirmDialog
 				v-model="isExitDialogOpen"
@@ -139,6 +149,7 @@
 			<div v-if="isGenerating" class="generation-loading">
 				<div class="generation-loading__spinner"></div>
 			</div>
+			<OtherGames v-if="isOtherGames" @close="isOtherGames = false" />
 		</div>
 	</AppLayout>
 </template>
@@ -153,6 +164,9 @@ import {
 	useTemplateRef,
 	nextTick,
 } from 'vue'
+
+import AdSlot from '@/components/AdSlot.vue'
+import OtherGames from '@/components/OtherGames.vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ScreenOrientation } from '@capacitor/screen-orientation'
 import { Capacitor } from '@capacitor/core'
@@ -169,6 +183,8 @@ import admob from '@/utils/admob'
 const router = useRouter()
 const route = useRoute()
 const gameStore = useGameStore()
+
+const isOtherGames = ref(false)
 const isAndroidPlatform = Capacitor.getPlatform() === 'android'
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
@@ -177,7 +193,6 @@ const playAreaRef = useTemplateRef<HTMLElement>('playArea')
 const isExitDialogOpen = ref(false)
 const isGenerating = ref(true)
 let shouldUseHardResetOnUnmount = false
-const INTERSTITIAL_CLOSE_TIMEOUT_MS = 8000
 const CONTAINER_VISIBILITY_TIMEOUT_MS = 2000
 const BANNER_HIDE_TIMEOUT_MS = 1500
 
@@ -898,48 +913,11 @@ async function startGameWithAds(): Promise<void> {
 	// Увеличиваем счетчик игр
 	gameStore.incrementGamesPlayed()
 
-	// Проверяем, нужно ли показать interstitial рекламу
-	const shouldShowAd = gameStore.shouldShowInterstitial()
-
-	if (shouldShowAd) {
-		isGenerating.value = true
-
-		// Показываем interstitial рекламу и ждем её закрытия
-		await new Promise<void>((resolve) => {
-			let isResolved = false
-			const finish = () => {
-				if (isResolved) return
-				isResolved = true
-				resolve()
-			}
-
-			const timeoutId = setTimeout(() => {
-				console.warn(
-					`[GamePage] Interstitial close timeout after ${INTERSTITIAL_CLOSE_TIMEOUT_MS}ms, continuing game startup`,
-				)
-				finish()
-			}, INTERSTITIAL_CLOSE_TIMEOUT_MS)
-
-			void admob
-				.interstitial({
-					isFirst: false,
-					onInterstitialAdClosed: () => {
-						clearTimeout(timeoutId)
-						finish()
-					},
-				})
-				.catch((error) => {
-					console.warn(
-						'[GamePage] Interstitial failed, continuing game startup:',
-						error,
-					)
-					clearTimeout(timeoutId)
-					finish()
-				})
-		})
-	}
-
-	// Запускаем игру после закрытия рекламы (или если реклама не нужна)
+	// Рекламы на этом пути больше нет. Раньше запуск игры ждал закрытия
+	// объявления, то есть игрок видел полноэкранную рекламу ровно в момент начала
+	// партии — Google прямо называет это недопустимым («unexpected full screen
+	// interstitial»), и запуск блокировался до восьми секунд. Показ перенесён на
+	// конец партии, см. watch на gameStore.isGameOver.
 	// Повторная проверка: компонент мог размонтироваться пока шли await выше
 	if (!gameController || !renderer) return
 	await gameController.startGame()
@@ -951,6 +929,20 @@ async function startGameWithAds(): Promise<void> {
 	if (!gameController) return
 	await gameController.bootGame()
 }
+
+// Партия закончена, оверлей с результатом уже на экране — естественная пауза и
+// единственное место, где полноэкранная реклама уместна. Показ ничего не ждёт и
+// ничего не блокирует: игровой поток к колбэку закрытия не привязан.
+watch(
+	() => gameStore.isGameOver,
+	(isOver) => {
+		if (!isOver) return
+		if (Capacitor.getPlatform() !== 'android') return
+		if (!gameStore.shouldShowInterstitial()) return
+
+		void admob.interstitial({ onInterstitialAdClosed: () => {} })
+	},
+)
 
 onMounted(async () => {
 	const gamePageStartTime = performance.now()
@@ -1575,9 +1567,13 @@ async function restart(): Promise<void> {
 }
 
 .game-page {
-	--ad-reserve-height: calc(
-		44px + 0.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px))
-	);
+	/*
+	   Высоту рекламной зоны диктует само объявление (--ad-band ставится из JS
+	   по событиям баннера), а не фиксированное число: adaptive-баннер на
+	   планшете почти вдвое выше телефонного, и константа промахивалась.
+	   Инсет входит в --ad-band, поэтому здесь его добавлять уже не нужно.
+	*/
+	--ad-reserve-height: var(--ad-band);
 	--level-indicator-width: 0.4rem;
 	--play-area-gap: 0.375rem;
 	flex: 1;
@@ -1651,18 +1647,20 @@ async function restart(): Promise<void> {
 	}
 
 	&--android {
-		--ad-reserve-height: calc(
-			8px + max(0.05rem, env(safe-area-inset-bottom, 0px))
-		);
 		gap: 0.125rem;
 
 		.game-page__bottom-section {
-			// На Android уменьшаем резерв под баннер до компактного фиксированного значения.
+			/*
+			   Раньше резерв на Android урезался до 8px: баннер рисуется поверх
+			   вебвью, и казалось, что место под него держать не нужно. Из-за
+			   этого объявление накрывало низ игрового поля, а без объявления
+			   там оставалась пустая полоса.
+
+			   Теперь высота одна и та же и на Android, и в вебе — её задаёт
+			   --ad-band, то есть настоящее объявление.
+			*/
 			gap: 0;
-			// Небольшой зазор между игровой областью и рекламным блоком.
 			padding-top: 0.1rem;
-			padding-bottom: max(0.05rem, env(safe-area-inset-bottom, 0px));
-			min-height: calc(8px + max(0.05rem, env(safe-area-inset-bottom, 0px)));
 		}
 	}
 
@@ -1685,28 +1683,21 @@ async function restart(): Promise<void> {
 		flex-direction: column;
 		gap: 0.5rem;
 		flex-shrink: 0;
-		padding: 0.5rem 0 1rem;
-		padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
-		// Резервируем место под нижний баннер, но на мобильных уменьшаем запас,
-		// чтобы не съедать игровую область.
-		min-height: calc(
-			44px + 0.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px))
-		);
+		padding: 0;
+		/*
+		   Место под рекламу ровно по высоте объявления.
+
+		   Раньше здесь стояли 44px плюс зазоры плюс инсет — и каждое из трёх
+		   слагаемых было догадкой. Теперь высоту диктует само объявление
+		   (--ad-band, ставится из JS по событиям баннера), а инсет уже входит
+		   в неё, так что складывать больше нечего.
+		*/
+		min-height: var(--ad-band);
 
 		@media (max-width: 640px) {
 			gap: 0.4rem;
-			padding: 0.4rem 0 1rem;
-			padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
-			min-height: calc(
-				40px + 0.4rem + max(0.4rem, env(safe-area-inset-bottom, 0px))
-			);
 		}
 
-		@media (max-width: 480px) {
-			min-height: calc(
-				36px + 0.35rem + max(0.35rem, env(safe-area-inset-bottom, 0px))
-			);
-		}
 	}
 
 	&__scroll-container {

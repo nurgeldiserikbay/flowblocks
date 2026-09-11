@@ -7,13 +7,21 @@ import { SplashScreen } from '@capacitor/splash-screen'
 import { Fullscreen } from '@boengli/capacitor-fullscreen'
 
 import Admob from '@/utils/admob'
+
+import { useAdsStore } from '@/store/adsStore'
 import { loadBlockTextures } from '@/game/blockTextures'
+
+const adsStore = useAdsStore()
 
 onMounted(async () => {
 	// КРИТИЧНО: Инициализируем AdMob до использования (showBanner, interstitial)
 	// Без await showBanner может зависнуть при повторном заходе в игру
 	if (Capacitor.getPlatform() === 'android') {
 		try {
+			// Подписку ставим до initialize(): первое событие баннера может прийти
+			// раньше, чем страница успеет смонтироваться, и потеряться.
+			Admob.onBannerChange((live, height) => adsStore.setBanner(live, height))
+
 			await Admob.initialize()
 		} catch (error) {
 			console.warn('[App] AdMob initialization failed:', error)
