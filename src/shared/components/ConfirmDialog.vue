@@ -97,16 +97,17 @@ function handleCancel() {
 }
 
 .confirm-dialog {
+	// Та же навигацкая панель, что у карточки итога: диалоги в игре должны
+	// выглядеть одной семьёй, а не двумя разными окнами.
 	background: linear-gradient(
-		145deg,
-		rgba(30, 31, 58, 0.95) 0%,
-		rgba(43, 47, 108, 0.9) 50%,
-		rgba(30, 31, 58, 0.95) 100%
+		160deg,
+		rgba(20, 39, 79, 0.96) 0%,
+		rgba(12, 24, 52, 0.97) 100%
 	);
 	backdrop-filter: blur(28px);
 	-webkit-backdrop-filter: blur(28px);
-	border-radius: 24px;
-	border: 2px solid rgba(255, 255, 255, 0.2);
+	border-radius: var(--r-panel);
+	border: 1px solid var(--c-surface-border);
 	padding: 2rem 1.5rem;
 	max-width: 400px;
 	width: 100%;
@@ -191,28 +192,18 @@ function handleCancel() {
 			transform: translateY(0) scale(0.98);
 		}
 
-		&--confirm {
-			background: linear-gradient(
-				135deg,
-				#ec4899 0%,
-				#d946ef 50%,
-				#a855f7 100%
-			);
-			border-color: rgba(249, 168, 212, 0.5);
+		/*
+		   Выход из партии.
 
-			&:hover {
-				background: linear-gradient(
-					135deg,
-					#f472b6 0%,
-					#e879f9 50%,
-					#c084fc 100%
-				);
-				border-color: rgba(249, 168, 212, 0.7);
-				box-shadow:
-					0 8px 32px rgba(236, 72, 153, 0.5),
-					0 0 0 1px rgba(255, 255, 255, 0.15),
-					inset 0 1px 3px rgba(255, 255, 255, 0.3);
-			}
+		   Кнопка была розово-фиолетовым градиентом — тем же, каким на старте
+		   звали играть. Получалось, что главное действие и потеря прогресса
+		   выкрашены одинаково. Теперь это красный цвет темы: действие
+		   разрушительное, и выглядеть оно должно именно так.
+		*/
+		&--confirm {
+			background: rgba(255, 112, 129, 0.2);
+			border-color: rgba(255, 112, 129, 0.5);
+			color: var(--c-danger);
 		}
 
 		@media (max-width: 640px) {

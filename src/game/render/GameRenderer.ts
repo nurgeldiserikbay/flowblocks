@@ -18,7 +18,61 @@ import { AudioManager } from '../audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
 import type { Application } from 'pixi.js'
 
-const TILE_PADDING = 3
+/**
+ * Геометрия плитки в клетке.
+ *
+ * Мастера из дизайн-пака нарисованы с собственным прозрачным полем: тело плитки
+ * занимает 222 пикселя из 256, то есть по 17 с каждой стороны уходит на тень и
+ * скругление. Раньше к этому полю прибавлялся ещё и отступ рендерера в 3
+ * пикселя, и зазор между плитками выходил вдвое шире задуманного — доска
+ * рассыпалась на отдельные кубики вместо плотной кладки.
+ *
+ * Поэтому зазор задаётся один раз и в долях клетки, а размер спрайта считается
+ * от него обратным ходом: спрайт получается чуть шире клетки, но видимое тело
+ * встаёт ровно в нужную ширину. Перекрываются при этом только прозрачные поля
+ * соседей.
+ */
+const TILE_ART_BODY = 222 / 256
+const TILE_GAP_RATIO = 0.085
+
+function tileArtGeometry(tileSize: number): { size: number; offset: number } {
+	const body = tileSize * (1 - TILE_GAP_RATIO)
+	const size = Math.max(1, body / TILE_ART_BODY)
+	return { size, offset: (tileSize - size) / 2 }
+}
+
+/**
+ * Игрок просил систему убрать анимацию.
+ *
+ * Считается на каждый вызов, а не один раз при загрузке: настройку меняют на
+ * ходу — в Android она лежит рядом с масштабом шрифта, и приложение при этом не
+ * перезапускается.
+ */
+function prefersReducedMotion(): boolean {
+	return (
+		typeof matchMedia === 'function' &&
+		matchMedia('(prefers-reduced-motion: reduce)').matches
+	)
+}
+
+/** Подпись с ходами. Один стиль на создание и на обновление плитки. */
+function movesTextStyle(tileSize: number): TextStyle {
+	return new TextStyle({
+		fontFamily: 'Inter, Arial',
+		fontSize: Math.max(11, tileSize / 2.8),
+		// Тёмные чернила по светлому сатину читаются сами, без подложки. Прежняя
+		// белая тень их только мылила: на 44px она размазывалась в ореол шире
+		// самой цифры.
+		fill: 0x131d33,
+		align: 'center',
+		fontWeight: 'bold',
+		// Моноширинных цифр тут не просим: `fontVariant` в Pixi — это CSS
+		// `font-variant` канваса, он знает только normal и small-caps, а
+		// `tabular-nums` молча отвалился бы. Да они и не нужны: ходов бывает от
+		// одного до девяти, число всегда однозначное и стоит по центру плитки.
+		// Моноширинные цифры нужны в шапке, и там они заданы обычным CSS.
+	})
+}
 
 export interface GameRendererOptions {
 	canvas: HTMLCanvasElement
@@ -29,7 +83,8 @@ type CubeContainer = {
 	container: Container
 	sprite: Sprite
 	text: Text | null
-	highlight: Graphics | null
+	/** Кольцо выбора: отдельный спрайт поверх плитки, а не часть её текстуры. */
+	highlight: Sprite | null
 	color: number // Текущий цвет куба для отслеживания изменений
 }
 
@@ -519,7 +574,7 @@ export class GameRenderer {
 
 		// Create sprite
 		const sprite = new Sprite(texture)
-		const spriteSize = Math.max(1, this.tileSize - TILE_PADDING * 2)
+		const art = tileArtGeometry(this.tileSize)
 
 		// КРИТИЧНО: Убеждаемся, что спрайт видим
 		sprite.visible = true
@@ -528,10 +583,10 @@ export class GameRenderer {
 		// КРИТИЧНО: В PixiJS v8 установка width/height автоматически изменяет scale
 		// НЕ устанавливаем scale.set(1) ПОСЛЕ width/height, так как это сбросит размеры!
 		// Устанавливаем размеры напрямую через width/height
-		sprite.width = spriteSize
-		sprite.height = spriteSize
-		sprite.x = TILE_PADDING
-		sprite.y = TILE_PADDING
+		sprite.width = art.size
+		sprite.height = art.size
+		sprite.x = art.offset
+		sprite.y = art.offset
 
 		container.addChild(sprite)
 
@@ -544,24 +599,12 @@ export class GameRenderer {
 			})
 		}
 
-		// Create text for moves (color #1F2937, small white shadow for visibility)
+		// Подпись с ходами
 		let text: Text | null = null
 		if (cube.moves > 0) {
 			text = new Text({
 				text: String(cube.moves),
-				style: new TextStyle({
-					fontFamily: 'Inter, Arial',
-					fontSize: Math.max(11, this.tileSize / 2.8),
-					fill: 0x1f2937,
-					align: 'center',
-					fontWeight: 'bold',
-					dropShadow: {
-						color: 0xffffff,
-						blur: 2,
-						distance: 1,
-						alpha: 0.3,
-					},
-				}),
+				style: movesTextStyle(this.tileSize),
 			})
 			text.resolution = window.devicePixelRatio || 1
 			text.anchor.set(0.5)
@@ -570,14 +613,26 @@ export class GameRenderer {
 			container.addChild(text)
 		}
 
-		// Create highlight (initially hidden) — crisp ring aligned with tile corner radius
-		const highlight = new Graphics()
-		const hlR = Math.max(3, Math.round(spriteSize * 0.11))
-		highlight.roundRect(TILE_PADDING - 1, TILE_PADDING - 1, spriteSize + 2, spriteSize + 2, hlR + 1)
-		highlight.stroke({ color: 0xffffff, width: 2.5, alpha: 0.85 })
-		highlight.roundRect(TILE_PADDING, TILE_PADDING, spriteSize, spriteSize, hlR)
-		highlight.fill({ color: 0xffffff, alpha: 0.16 })
-		highlight.visible = false
+		/*
+		   Кольцо выбора.
+
+		   Раньше оно рисовалось `Graphics` — белая обводка плюс заливка в 16%
+		   поверх плитки. Заливка гасила весь сатиновый блик, и выбранная плитка
+		   выглядела выцветшей, а не поднятой. Теперь это готовая накладка из
+		   дизайн-пака: только кольцо, тело плитки под ним не трогается.
+
+		   Кольцо садится в тот же квадрат, что и сам спрайт плитки: оно тоже
+		   нарисовано с полем внутри своего мастера, поэтому совпадает с телом
+		   плитки без отдельной подгонки.
+		*/
+		const ring = new Sprite(PixiService.getUiTextures().selectionRing)
+		ring.width = art.size
+		ring.height = art.size
+		ring.x = art.offset
+		ring.y = art.offset
+		ring.visible = false
+		ring.alpha = 0
+		const highlight = ring
 		container.addChild(highlight)
 		this.gameContainer.addChild(container)
 
@@ -606,7 +661,7 @@ export class GameRenderer {
 			this.selectedPosition.r === r &&
 			this.selectedPosition.c === c
 		) {
-			highlight.visible = true
+			this.showSelectionRing(highlight)
 		}
 
 		return { container, sprite, text, highlight, color: cube.color }
@@ -670,19 +725,7 @@ export class GameRenderer {
 				// Create text if it doesn't exist (matches createCubeSprite style)
 				cubeContainer.text = new Text({
 					text: String(moves),
-					style: new TextStyle({
-						fontFamily: 'Inter, Arial',
-						fontSize: Math.max(11, this.tileSize / 2.8),
-						fill: 0x1f2937,
-						align: 'center',
-						fontWeight: 'bold',
-						dropShadow: {
-							color: 0xffffff,
-							blur: 2,
-							distance: 1,
-							alpha: 0.3,
-						},
-					}),
+					style: movesTextStyle(this.tileSize),
 				})
 				cubeContainer.text.resolution = window.devicePixelRatio || 1
 				cubeContainer.text.anchor.set(0.5)
@@ -706,10 +749,63 @@ export class GameRenderer {
 		}
 	}
 
+	/**
+	 * Показать кольцо: проявление за 90 мс, дальше мягкое дыхание 0.72…1 с
+	 * периодом 900 мс. Дыхание нужно, чтобы кольцо читалось как «ждёт второго
+	 * тапа», а не как рамка вокруг плитки.
+	 */
+	private showSelectionRing(ring: Sprite): void {
+		gsap.killTweensOf(ring)
+		ring.visible = true
+		if (prefersReducedMotion()) {
+			ring.alpha = 1
+			return
+		}
+
+		/*
+		   Отклик на нажатие: плитка проседает до 0.94 и возвращается, 110 мс на
+		   всё. До этого тап не давал вообще никакой отдачи — кольцо просто
+		   возникало, и на медленном телефоне было не понять, попал ты по плитке
+		   или промахнулся.
+
+		   Жмётся родительский контейнер, то есть плитка вместе с числом и
+		   кольцом. Он же участвует в анимациях хода и снятия, но те идут только
+		   когда доска заблокирована, а тап — только когда свободна.
+		*/
+		const tile = ring.parent
+		if (tile) {
+			gsap.killTweensOf(tile.scale)
+			gsap
+				.timeline()
+				.to(tile.scale, { x: 0.94, y: 0.94, duration: 0.05, ease: 'power2.out' })
+				.to(tile.scale, { x: 1, y: 1, duration: 0.06, ease: 'power2.inOut' })
+		}
+		gsap.to(ring, {
+			alpha: 1,
+			duration: 0.09,
+			ease: 'power1.out',
+			onComplete: () => {
+				gsap.to(ring, {
+					alpha: 0.72,
+					duration: 0.45,
+					repeat: -1,
+					yoyo: true,
+					ease: 'sine.inOut',
+				})
+			},
+		})
+	}
+
+	private hideSelectionRing(ring: Sprite): void {
+		gsap.killTweensOf(ring)
+		ring.visible = false
+		ring.alpha = 0
+	}
+
 	setSelectedPosition(r: number | null, c: number | null): void {
 		// Remove previous selection
 		this.cubeContainers.forEach((cc) => {
-			if (cc.highlight) cc.highlight.visible = false
+			if (cc.highlight) this.hideSelectionRing(cc.highlight)
 		})
 
 		// Set new selection
@@ -719,7 +815,7 @@ export class GameRenderer {
 			if (cubeId !== null) {
 				const cubeContainer = this.cubeContainers.get(cubeId)
 				if (cubeContainer?.highlight) {
-					cubeContainer.highlight.visible = true
+					this.showSelectionRing(cubeContainer.highlight)
 				}
 			}
 		} else {
@@ -788,9 +884,13 @@ export class GameRenderer {
 		new Promise<void>((resolve) => {
 			gsap.killTweensOf(containerA.container)
 			gsap.to(containerA.container, {
+				// 190 мс по брифу вместо прежних 100. На сотне обмен читался не
+				// как перестановка, а как телепорт: глаз не успевал проследить,
+				// какая плитка куда уехала, и после хода приходилось заново
+				// разбирать доску.
+				duration: 0.19,
 				x: posBX,
 				y: posBY,
-				duration: 0.1,
 				ease: 'power2.out',
 				onComplete: resolve,
 				onInterrupt: () => {
@@ -803,9 +903,9 @@ export class GameRenderer {
 		new Promise<void>((resolve) => {
 			gsap.killTweensOf(containerB.container)
 			gsap.to(containerB.container, {
+				duration: 0.19,
 				x: posAX,
 				y: posAY,
-				duration: 0.1,
 				ease: 'power2.out',
 				onComplete: resolve,
 				onInterrupt: () => {
@@ -817,25 +917,15 @@ export class GameRenderer {
 		}),
 	])
 
-		const pulseSwap = (cont: Container) => {
-			gsap.killTweensOf(cont.scale)
-			gsap
-				.timeline()
-				.to(cont.scale, {
-					x: 1.045,
-					y: 1.045,
-					duration: 0.06,
-					ease: 'power2.out',
-				})
-				.to(cont.scale, {
-					x: 1,
-					y: 1,
-					duration: 0.085,
-					ease: 'power2.inOut',
-				})
-		}
-		pulseSwap(containerA.container)
-		pulseSwap(containerB.container)
+		/*
+		   Раздувание плиток после обмена убрано.
+
+		   Обе плитки раздувались до 1.045 и возвращались обратно — итого ещё
+		   145 мс поверх самого хода. На обычном ходе это лишний акцент: бриф
+		   прямо просит не давать отскока на рядовом обмене, приберегая упругость
+		   для снятия. Подтверждение хода и так есть — плитка доехала до соседней
+		   клетки.
+		*/
 	}
 
 	private async animateMove(
@@ -955,7 +1045,13 @@ private async animateFall(
 	}
 
 	/**
-	 * Spark burst at line-clear centroid; extra count when combo is active.
+	 * Эффект снятия плиток в центре матча.
+	 *
+	 * Было: до двадцати двух разноцветных кружков, разлёт до 90 пикселей, и на
+	 * каждом матче. Пять цветов кружков спорили с восемью цветами плиток, а
+	 * разлёт уносил их на соседние ряды — доска на полсекунды переставала
+	 * читаться. Теперь по брифу: три-пять искр на обычный матч и одна мягкая
+	 * вспышка сверх них, только когда сложился комбо.
 	 */
 	private playClearParticleBurst(
 		globalX: number,
@@ -964,7 +1060,9 @@ private async animateFall(
 		comboBonus: number
 	): void {
 		if (!this.app?.stage) return
+		if (prefersReducedMotion()) return
 
+		const ui = PixiService.getUiTextures()
 		const layer = new Container()
 		layer.zIndex = 999998
 		this.app.stage.sortableChildren = true
@@ -972,24 +1070,52 @@ private async animateFall(
 		this.app.stage.children.sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
 
 		const hasCombo = comboBonus > 0
-		const n = Math.min(22, Math.round(5 + clearCount * 1.2 + (hasCombo ? 8 : 0)))
-		const colors = [0xfacc15, 0xf97316, 0xffffff, 0xfde047, 0xa855f7]
+
+		// Вспышка идёт первой и уходит под искры: она фон, а не событие.
+		if (hasCombo) {
+			const burst = new Sprite(ui.softBurst)
+			const size = this.tileSize * 2.6
+			burst.width = size
+			burst.height = size
+			burst.anchor.set(0.5)
+			burst.x = globalX
+			burst.y = globalY
+			burst.alpha = 0
+			burst.scale.set(burst.scale.x * 0.72, burst.scale.y * 0.72)
+			layer.addChild(burst)
+			gsap
+				.timeline()
+				.to(burst, { alpha: 0.9, duration: 0.11, ease: 'power1.out' })
+				.to(burst, { alpha: 0, duration: 0.29, ease: 'power1.in' })
+			gsap.to(burst.scale, { x: 1, y: 1, duration: 0.4, ease: 'power2.out' })
+		}
+
+		// Искр ровно столько, сколько видно глазом: больше пяти уже читается как
+		// брызги и прячет саму доску.
+		const n = Math.min(5, Math.max(3, Math.round(clearCount / 2) + 1))
+		const spread = this.tileSize * 0.9
 
 		for (let i = 0; i < n; i++) {
-			const p = new Graphics()
-			const rad = 2 + Math.random() * 2.5
-			p.circle(0, 0, rad)
-			p.fill({ color: colors[i % colors.length], alpha: 1 })
+			const p = new Sprite(ui.sparkle)
+			const size = this.tileSize * (0.34 + Math.random() * 0.16)
+			p.width = size
+			p.height = size
+			p.anchor.set(0.5)
 			p.x = globalX
 			p.y = globalY
+			p.alpha = 1
 			layer.addChild(p)
-			const ang = Math.random() * Math.PI * 2
-			const dist = 32 + Math.random() * (hasCombo ? 58 : 40)
+
+			// Разлёт веером вверх: снятые плитки схлопываются, и искры, летящие
+			// вниз, читаются как падение обломков, а не как награда.
+			const ang = -Math.PI / 2 + (i / (n - 1 || 1) - 0.5) * Math.PI * 0.9
+			const dist = spread * (0.6 + Math.random() * 0.6)
 			gsap.to(p, {
 				x: globalX + Math.cos(ang) * dist,
 				y: globalY + Math.sin(ang) * dist,
 				alpha: 0,
-				duration: 0.26 + Math.random() * 0.14,
+				rotation: (Math.random() - 0.5) * 1.2,
+				duration: 0.24 + Math.random() * 0.14,
 				ease: 'power2.out',
 				onComplete: () => {
 					p.destroy()
@@ -997,7 +1123,7 @@ private async animateFall(
 			})
 		}
 
-		gsap.delayedCall(0.42, () => {
+		gsap.delayedCall(0.45, () => {
 			if (layer.parent) {
 				layer.parent.removeChild(layer)
 			}
@@ -1079,16 +1205,18 @@ private async animateFall(
 					align: 'center',
 					fontWeight: 'bold',
 					dropShadow: {
-						color: 0x000000,
-						blur: 6,
+						color: 0x071226,
+						blur: 5,
 						distance: 2,
-						alpha: 0.7,
+						alpha: 0.55,
 					},
 				}),
 			})
 			baseText.resolution = window.devicePixelRatio || 1
 			baseText.anchor.set(0.5)
-			baseText.style.stroke = { color: 0x22c55e, width: 3 }
+			// Тёмная обводка вместо зелёной: зелёный тут ничего не кодировал, а
+			// на зелёных плитках надпись в него же и пропадала.
+			baseText.style.stroke = { color: 0x071226, width: 2, alpha: 0.5 }
 			popup.addChild(baseText)
 		}
 
@@ -1096,24 +1224,29 @@ private async animateFall(
 		let comboText: Text | null = null
 		if (comboVal > 0) {
 			comboText = new Text({
-				text: `🔥 x${comboVal} COMBO`,
+				// Без эмодзи: «огонёк» рисуется системным шрифтом и на каждом
+				// устройстве выглядит по-своему, а рядом с Inter — как чужая
+				// наклейка. Само слово COMBO несёт ту же мысль.
+				text: `x${comboVal} COMBO`,
 				style: new TextStyle({
 					fontFamily: 'Inter, Arial',
 					fontSize: comboFontSize,
-					fill: 0xfde047,
+					fill: 0xffd66c,
 					align: 'center',
 					fontWeight: 'bold',
 					dropShadow: {
-						color: 0x000000,
-						blur: 6,
+						color: 0x071226,
+						blur: 5,
 						distance: 2,
-						alpha: 0.7,
+						alpha: 0.55,
 					},
 				}),
 			})
 			comboText.resolution = window.devicePixelRatio || 1
 			comboText.anchor.set(0.5)
-			comboText.style.stroke = { color: 0xf97316, width: 3 }
+			// Обводка тоньше и темнее прежней оранжевой: та превращала надпись в
+			// наклейку и спорила по цвету с оранжевыми плитками.
+			comboText.style.stroke = { color: 0x071226, width: 2, alpha: 0.5 }
 			popup.addChild(comboText)
 		}
 
@@ -1237,18 +1370,31 @@ private async animateFall(
 							finish()
 						},
 					})
+					/*
+					   Снятие плитки: 190 мс по брифу.
+
+					   Плитка коротко раздувается до 1.08 — это «поймал», — и
+					   схлопывается почти в точку, растворяясь. Раньше она
+					   раздувалась до 1.14 и гасла, не уменьшаясь: три плитки
+					   рядом на миг налезали друг на друга, и ряд перед
+					   исчезновением выглядел сбитым.
+					*/
 					tl.to(flash, { alpha: 0, duration: 0.055, ease: 'power2.out' }, 0)
 					if (container.scale) {
 						tl.to(
 							container.scale,
-							{ x: 1.14, y: 1.14, duration: 0.1, ease: 'power2.out' },
-							0.02
+							{ x: 1.08, y: 1.08, duration: 0.06, ease: 'power2.out' },
+							0
+						).to(
+							container.scale,
+							{ x: 0.15, y: 0.15, duration: 0.13, ease: 'power2.in' },
+							0.06
 						)
 					}
 					tl.to(
 						container,
-						{ alpha: 0, duration: 0.11, ease: 'power1.in' },
-						0.05
+						{ alpha: 0, duration: 0.13, ease: 'power1.in' },
+						0.06
 					)
 					})
 			)
@@ -1537,9 +1683,11 @@ private async animateFall(
 					cubeContainer.container.y = this.gridPixelY(pos.r)
 
 					// Обновить размер спрайта
-					const spriteSize = Math.max(1, this.tileSize - TILE_PADDING * 2)
-					cubeContainer.sprite.width = spriteSize
-					cubeContainer.sprite.height = spriteSize
+					const art = tileArtGeometry(this.tileSize)
+					cubeContainer.sprite.width = art.size
+					cubeContainer.sprite.height = art.size
+					cubeContainer.sprite.x = art.offset
+					cubeContainer.sprite.y = art.offset
 
 					// Обновить размер текста (если есть)
 					if (cubeContainer.text) {
@@ -1549,14 +1697,13 @@ private async animateFall(
 						cubeContainer.text.y = this.tileSize / 2
 					}
 
-				// Обновить highlight (если есть)
+				// Кольцо выбора — теперь спрайт, а не Graphics: перерисовывать
+				// нечего, достаточно пересадить его в новый размер клетки.
 				if (cubeContainer.highlight) {
-					cubeContainer.highlight.clear()
-					const hlR = Math.max(3, Math.round(spriteSize * 0.11))
-					cubeContainer.highlight.roundRect(TILE_PADDING - 1, TILE_PADDING - 1, spriteSize + 2, spriteSize + 2, hlR + 1)
-					cubeContainer.highlight.stroke({ color: 0xffffff, width: 2.5, alpha: 0.85 })
-					cubeContainer.highlight.roundRect(TILE_PADDING, TILE_PADDING, spriteSize, spriteSize, hlR)
-					cubeContainer.highlight.fill({ color: 0xffffff, alpha: 0.16 })
+					cubeContainer.highlight.width = art.size
+					cubeContainer.highlight.height = art.size
+					cubeContainer.highlight.x = art.offset
+					cubeContainer.highlight.y = art.offset
 				}
 				}
 			})

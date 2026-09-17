@@ -14,8 +14,9 @@
 			"
 		></div>
 
-		<!-- Вход в «Другие игры». Рядом с кнопкой звука и в её же форме: раздел
-		     не должен спорить за внимание с кнопкой Play. -->
+		<!-- Вход в «Другие игры»: левый верхний угол, в одной форме с кнопкой
+		     звука в правом. Раздел не должен спорить за внимание с кнопкой Play,
+		     поэтому он значок, а не кнопка с подписью. -->
 		<button
 			class="promo-games"
 			aria-label="Other games"
@@ -65,93 +66,13 @@
 			<!-- Logo section -->
 			<div class="logo-section">
 				<div class="logo">
-					<!-- SVG logo with colorful cubes -->
-					<svg
-						class="logo__svg"
-						viewBox="0 0 120 120"
-						fill="none"
-						xmlns="http://www.w3.org/2000/svg"
-					>
-						<!-- Background circle -->
-						<circle cx="60" cy="60" r="55" fill="url(#logoGradient)" />
-						<!-- Cube 1 (top left) -->
-						<rect x="25" y="30" width="22" height="22" rx="4" fill="#FFD93D" />
-						<rect
-							x="27"
-							y="32"
-							width="18"
-							height="18"
-							rx="3"
-							fill="#FFED4E"
-							opacity="0.8"
-						/>
-						<!-- Cube 2 (top right) -->
-						<rect x="73" y="30" width="22" height="22" rx="4" fill="#6BCF7F" />
-						<rect
-							x="75"
-							y="32"
-							width="18"
-							height="18"
-							rx="3"
-							fill="#7DD87F"
-							opacity="0.8"
-						/>
-						<!-- Cube 3 (middle left) -->
-						<rect x="25" y="58" width="22" height="22" rx="4" fill="#4D96FF" />
-						<rect
-							x="27"
-							y="60"
-							width="18"
-							height="18"
-							rx="3"
-							fill="#6BAEFF"
-							opacity="0.8"
-						/>
-						<!-- Cube 4 (middle right) -->
-						<rect x="73" y="58" width="22" height="22" rx="4" fill="#FF6B9D" />
-						<rect
-							x="75"
-							y="60"
-							width="18"
-							height="18"
-							rx="3"
-							fill="#FF8FB5"
-							opacity="0.8"
-						/>
-						<!-- Cube 5 (bottom center) -->
-						<rect x="49" y="86" width="22" height="22" rx="4" fill="#C445FF" />
-						<rect
-							x="51"
-							y="88"
-							width="18"
-							height="18"
-							rx="3"
-							fill="#D66AFF"
-							opacity="0.8"
-						/>
-						<defs>
-							<linearGradient
-								id="logoGradient"
-								x1="0%"
-								y1="0%"
-								x2="100%"
-								y2="100%"
-							>
-								<stop
-									offset="0%"
-									style="stop-color: #2b2f6c; stop-opacity: 1"
-								/>
-								<stop
-									offset="50%"
-									style="stop-color: #3d4180; stop-opacity: 1"
-								/>
-								<stop
-									offset="100%"
-									style="stop-color: #1e1f3a; stop-opacity: 1"
-								/>
-							</linearGradient>
-						</defs>
-					</svg>
+					<!--
+					   Знак из дизайн-пака. Раньше здесь лежал инлайновый SVG на
+					   восемьдесят строк: круг с градиентом и пять кубиков. Он жил
+					   отдельно от иконки приложения и от логотипа в сторе, и при любой
+					   правке расходился с ними. Теперь знак один и лежит файлом.
+					-->
+					<LogoMark class="logo__mark" />
 					<h1 class="logo__title">FlowBlocks</h1>
 				</div>
 			</div>
@@ -174,25 +95,16 @@
 			Privacy Policy
 		</a>
 
-		<!-- Decorative pattern overlay -->
-		<div class="pattern-overlay">
-			<div
-				class="pattern-overlay__shape"
-				v-for="(style, i) in patternStyles"
-				:key="i"
-				:style="style"
-			></div>
-		</div>
-
 		<OtherGames v-if="isOtherGames" @close="isOtherGames = false" />
 	</div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 import OtherGames from '@/components/OtherGames.vue'
 import OtherGamesIcon from '@/components/OtherGamesIcon.vue'
+import LogoMark from '@/assets/ui/logo-mark.svg'
 import { useAudioStore } from '@/shared/stores/audioStore'
 import { AudioManager } from '@/game/audio/AudioManager'
 import { PixiService } from '@/pixi/PixiService'
@@ -248,34 +160,6 @@ onMounted(async () => {
 	AudioManager.setEnabled(audioStore.isEnabled)
 })
 
-// Pattern positions (pre-computed for consistency and visual balance)
-const PATTERN_POSITIONS = [
-	{ x: 15, y: 20, size: 32, opacity: 0.08, rotation: 45 },
-	{ x: 85, y: 25, size: 28, opacity: 0.06, rotation: 135 },
-	{ x: 20, y: 60, size: 35, opacity: 0.09, rotation: 225 },
-	{ x: 80, y: 65, size: 30, opacity: 0.07, rotation: 315 },
-	{ x: 45, y: 15, size: 25, opacity: 0.05, rotation: 90 },
-	{ x: 75, y: 80, size: 38, opacity: 0.1, rotation: 180 },
-	{ x: 10, y: 85, size: 27, opacity: 0.06, rotation: 270 },
-	{ x: 90, y: 40, size: 33, opacity: 0.08, rotation: 30 },
-	{ x: 30, y: 45, size: 29, opacity: 0.07, rotation: 60 },
-	{ x: 65, y: 10, size: 26, opacity: 0.05, rotation: 150 },
-	{ x: 50, y: 90, size: 36, opacity: 0.09, rotation: 210 },
-	{ x: 40, y: 30, size: 24, opacity: 0.06, rotation: 300 },
-]
-
-// Pre-compute pattern styles
-const patternStyles = computed(() =>
-	PATTERN_POSITIONS.map((pos) => ({
-		width: `${pos.size}px`,
-		height: `${pos.size}px`,
-		left: `${pos.x}%`,
-		top: `${pos.y}%`,
-		opacity: pos.opacity.toString(),
-		transform: `rotate(${pos.rotation}deg)`,
-	})),
-)
-
 const isOtherGames = ref(false)
 </script>
 
@@ -289,14 +173,29 @@ const isOtherGames = ref(false)
 	position: relative;
 	overflow-x: hidden;
 	overflow-y: auto;
-	// Тёмный градиент главного экрана
-	background: linear-gradient(160deg, #1e3a8a 0%, #312e81 40%, #4c1d95 100%);
+	/*
+	   Небо со своим медленным дрейфом.
+
+	   Тот же кадр, что у #app, но здесь он чуть крупнее `cover` и еле заметно
+	   ползёт: кадр нарисован с пустым центром под кнопку, и неподвижным он
+	   выглядит как обои. Двенадцать секунд на проход — нижняя граница
+	   заметности; быстрее уже читается как качание экрана.
+	*/
+	background: url('@/assets/img/sky-portrait.webp') center center / cover
+		no-repeat var(--c-navy);
+	animation: skyDrift 12s ease-in-out infinite alternate;
 	padding-top: env(safe-area-inset-top, 0px);
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
 	margin-bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
 
-	// Мягкие декоративные блики (приглушённые на тёмном фоне)
+	/*
+	   Здесь лежали три цветных пятна — синее, фиолетовое и золотое. На прежнем
+	   плоском градиенте они изображали глубину; на фотографическом небе они
+	   только мутят его собственные облака. Осталась лёгкая тёмная виньетка: она
+	   прижимает углы, чтобы белая надпись и кнопка не спорили с яркими кубами по
+	   краям кадра.
+	*/
 	&::before {
 		content: '';
 		position: fixed;
@@ -304,22 +203,11 @@ const isOtherGames = ref(false)
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background:
-			radial-gradient(
-				circle at 15% 20%,
-				rgba(100, 150, 255, 0.12) 0%,
-				transparent 45%
-			),
-			radial-gradient(
-				circle at 85% 75%,
-				rgba(180, 100, 220, 0.1) 0%,
-				transparent 45%
-			),
-			radial-gradient(
-				circle at 50% 55%,
-				rgba(255, 200, 100, 0.06) 0%,
-				transparent 50%
-			);
+		background: radial-gradient(
+			ellipse at 50% 45%,
+			transparent 45%,
+			rgba(8, 18, 45, 0.38) 100%
+		);
 		pointer-events: none;
 		z-index: 0;
 	}
@@ -350,73 +238,41 @@ const isOtherGames = ref(false)
 	}
 }
 
-@keyframes float {
-	0%,
-	100% {
-		transform: translate(0, 0) rotate(0deg);
-	}
-	33% {
-		transform: translate(20px, -20px) rotate(5deg);
-	}
-	66% {
-		transform: translate(-20px, 20px) rotate(-5deg);
-	}
-}
-
 // Sound button (top right) - ограничен контейнером 475px
 .sound-button {
 	position: fixed;
 	top: calc(1rem + env(safe-area-inset-top, 0px));
 	// Позиционируем относительно правого края контейнера 475px
 	// Центр экрана (50%) + половина ширины контейнера (237.5px) - отступ (1rem) - ширина кнопки (48px)
-	left: calc(50% + 237.5px - 1rem - 48px);
-	width: 48px;
-	height: 48px;
-	border-radius: 14px;
-	border: 2px solid rgba(255, 255, 255, 0.3);
-	background: rgba(255, 255, 255, 0.15);
+	left: calc(50% + 237.5px - 1rem - 44px);
+	width: 44px;
+	height: 44px;
+	border-radius: var(--r-control);
+	border: 1px solid var(--c-surface-border);
+	background: var(--c-surface);
 	backdrop-filter: blur(16px);
 	-webkit-backdrop-filter: blur(16px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
-	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+	transition: transform 0.15s ease;
 	touch-action: manipulation;
 	z-index: 10;
-	box-shadow:
-		0 4px 16px rgba(0, 0, 0, 0.25),
-		0 0 0 1px rgba(255, 255, 255, 0.1),
-		inset 0 1px 2px rgba(255, 255, 255, 0.2);
+	box-shadow: 0 4px 16px rgba(7, 18, 38, 0.3);
 	// На маленьких экранах (меньше 475px) используем обычное позиционирование справа
 	@media (max-width: 475px) {
 		left: auto;
 		right: calc(1rem + env(safe-area-inset-right, 0px));
 	}
 
-	&:hover {
-		background: rgba(255, 255, 255, 0.25);
-		border-color: rgba(255, 255, 255, 0.5);
-		transform: scale(1.1) rotate(5deg);
-		box-shadow:
-			0 6px 24px rgba(0, 0, 0, 0.35),
-			0 0 0 1px rgba(255, 255, 255, 0.15),
-			inset 0 1px 3px rgba(255, 255, 255, 0.3);
-	}
-
 	&:active {
-		transform: scale(0.95) rotate(0deg);
-		box-shadow:
-			0 2px 8px rgba(0, 0, 0, 0.25),
-			inset 0 1px 2px rgba(255, 255, 255, 0.2);
+		transform: scale(0.94);
 	}
 
 	@media (max-width: 480px) {
-		width: 44px;
-		height: 44px;
 		top: calc(0.75rem + env(safe-area-inset-top, 0px));
 		left: calc(50% + 237.5px - 0.75rem - 44px);
-		border-radius: 12px;
 
 		@media (max-width: 475px) {
 			left: auto;
@@ -453,32 +309,30 @@ const isOtherGames = ref(false)
 	flex-direction: column;
 	align-items: center;
 	gap: clamp(1rem, 3vw, 1.5rem);
-	animation: logoFloat 3s ease-in-out infinite;
+	// Было три секунды на качок плюс отдельная пульсация знака в две. Вместе они
+	// читались как «загрузка», а не как заставка. Осталось одно медленное
+	// дыхание.
+	animation: logoFloat 9s ease-in-out infinite;
 	width: 100%;
 
-	&__svg {
-		width: clamp(90px, 22vw, 130px);
-		height: clamp(90px, 22vw, 130px);
-		filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.4));
-		animation: logoPulse 2s ease-in-out infinite;
+	&__mark {
+		width: clamp(96px, 24vw, 136px);
+		height: clamp(96px, 24vw, 136px);
+		filter: drop-shadow(0 10px 26px rgba(7, 18, 38, 0.45));
 	}
 
 	&__title {
-		font-size: clamp(1.75rem, 7vw, 2.75rem);
-		font-weight: 900;
-		color: white;
+		font-size: clamp(2rem, 8vw, 3rem);
+		font-weight: 400;
+		color: var(--c-text);
 		text-align: center;
-		letter-spacing: -0.02em;
-		text-shadow:
-			0 4px 20px rgba(0, 0, 0, 0.5),
-			0 2px 8px rgba(0, 0, 0, 0.3);
+		// Luckiest Guy рисует буквы плотно, отрицательный трекинг слепил бы их.
+		letter-spacing: 0.01em;
+		text-shadow: 0 4px 16px rgba(7, 18, 38, 0.55);
 		margin: 0;
-		font-family:
-			'Inter',
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			sans-serif;
+		// Живой текст, а не картинка: слово должно читаться скринридером и
+		// перерисовываться под любой размер экрана.
+		font-family: 'Luckiest Guy', 'Inter', sans-serif;
 		line-height: 1.1;
 	}
 }
@@ -493,13 +347,12 @@ const isOtherGames = ref(false)
 	}
 }
 
-@keyframes logoPulse {
-	0%,
-	100% {
-		transform: scale(1);
+@keyframes skyDrift {
+	from {
+		background-position: 48% 46%;
 	}
-	50% {
-		transform: scale(1.05);
+	to {
+		background-position: 52% 54%;
 	}
 }
 
@@ -513,27 +366,34 @@ const isOtherGames = ref(false)
 	flex-shrink: 0;
 }
 
-// Play button – Block Blast hot-pink gradient pill
+/*
+   Play.
+
+   Была ядовито-розовая пилюля со свечением на 36px. Розовый — один из восьми
+   цветов плиток, и на витрине выходило, что главная кнопка выкрашена в тот же
+   цвет, что и игровой элемент: глаз не понимал, это кнопка или блок. Теперь
+   синий с переходом в голубой — цвета темы, которых на доске нет.
+*/
 .play-button {
 	width: 70%;
 	padding: clamp(1.25rem, 5vw, 1.75rem) clamp(1.5rem, 5vw, 2.5rem);
-	border-radius: 24px;
-	border: 2px solid rgba(255, 255, 255, 0.35);
+	border-radius: var(--r-panel);
+	border: 1px solid rgba(255, 255, 255, 0.28);
 	text-decoration: none;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
-	transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+	transition: transform 0.15s ease;
 	touch-action: manipulation;
 	position: relative;
 	overflow: hidden;
 	box-shadow:
-		0 8px 36px rgba(255, 79, 176, 0.55),
-		inset 0 2px 0 rgba(255, 255, 255, 0.35);
+		0 10px 28px rgba(7, 18, 38, 0.45),
+		inset 0 2px 0 rgba(255, 255, 255, 0.28);
 	min-height: clamp(70px, 11vw, 90px);
 	box-sizing: border-box;
-	background: linear-gradient(135deg, #ff7ad9 0%, #ff4fb0 100%);
+	background: linear-gradient(135deg, var(--c-blue) 0%, var(--c-cyan) 100%);
 
 	// Gloss sheen on top half
 	&::before {
@@ -548,29 +408,20 @@ const isOtherGames = ref(false)
 			rgba(255, 255, 255, 0.22) 0%,
 			transparent 100%
 		);
-		border-radius: 22px 22px 0 0;
+		border-radius: calc(var(--r-panel) - 2px) calc(var(--r-panel) - 2px) 0 0;
 		pointer-events: none;
 	}
 
-	&:hover {
-		transform: translateY(-4px) scale(1.03);
-		background: linear-gradient(135deg, #ff92e3 0%, #ff6cc4 100%);
-		box-shadow:
-			0 14px 50px rgba(255, 79, 176, 0.7),
-			inset 0 2px 0 rgba(255, 255, 255, 0.4);
-	}
-
 	&:active {
-		transform: scale(0.95);
-		box-shadow: 0 4px 16px rgba(255, 79, 176, 0.4);
+		transform: scale(0.96);
 	}
 
 	&__text {
 		font-size: clamp(1.375rem, 5vw, 1.875rem);
 		font-weight: 900;
-		color: white;
+		color: var(--c-text);
 		letter-spacing: 0.04em;
-		text-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+		text-shadow: 0 2px 6px rgba(7, 18, 38, 0.4);
 		position: relative;
 		z-index: 1;
 	}
@@ -578,8 +429,10 @@ const isOtherGames = ref(false)
 
 // Privacy link - фиксированная позиция снизу экрана для гарантированной видимости
 .privacy-link {
-	font-size: clamp(1.125rem, 4vw, 1.5rem);
-	color: rgba(255, 255, 255, 0.6);
+	// Была почти с заголовок — clamp(1.125rem, 4vw, 1.5rem), — и на экране с
+	// одним фокусом внимания тянула его на себя. Это служебная ссылка.
+	font-size: clamp(0.875rem, 3vw, 1rem);
+	color: var(--c-text-muted);
 	text-decoration: none;
 	transition: all 0.2s ease;
 	padding: clamp(0.75rem, 2vw, 1rem) clamp(1rem, 3vw, 1.5rem);
@@ -612,82 +465,65 @@ const isOtherGames = ref(false)
 	}
 }
 
-// Decorative pattern overlay – soft blurred colour blobs
-.pattern-overlay {
-	position: fixed;
-	top: 0;
-	left: 0;
-	width: 100%;
-	height: 100%;
-	pointer-events: none;
-	z-index: 0;
-	overflow: hidden;
+/*
+   Двенадцать круглых пятен, круживших по экрану восемнадцать-двадцать четыре
+   секунды каждое, удалены вместе с разметкой. Небо теперь само по себе рисунок с
+   облаками и кубами; белые кружки поверх него читались как грязь на стекле, а не
+   как украшение. Всё декоративное движение на экране — дрейф самого неба.
+*/
 
-	&__shape {
-		position: absolute;
-		background: rgba(255, 255, 255, 0.08);
-		border-radius: 50%;
-		animation: patternFloat 18s ease-in-out infinite;
-
-		&:nth-child(odd) {
-			animation-duration: 24s;
-			animation-direction: reverse;
-		}
-
-		&:nth-child(3n) {
-			background: rgba(100, 220, 255, 0.07);
-		}
-
-		&:nth-child(3n + 1) {
-			background: rgba(255, 120, 220, 0.07);
-		}
-
-		&:nth-child(3n + 2) {
-			background: rgba(255, 210, 80, 0.06);
-		}
-	}
-}
-
-@keyframes patternFloat {
-	0%,
-	100% {
-		transform: translate(0, 0) rotate(0deg);
-	}
-	25% {
-		transform: translate(30px, -30px) rotate(90deg);
-	}
-	50% {
-		transform: translate(-20px, 20px) rotate(180deg);
-	}
-	75% {
-		transform: translate(20px, 30px) rotate(270deg);
+@media (prefers-reduced-motion: reduce) {
+	.start-page,
+	.logo {
+		animation: none;
 	}
 }
 
 /*
-   Вход в «Другие игры»: та же форма, что у кнопки звука, слева от неё.
+   Вход в «Другие игры» — левый верхний угол.
 
-   Смещение считается так же, как у .sound-button — от правого края контейнера
-   475px, плюс ширина самой кнопки звука и зазор.
+   Раньше кнопка стояла вплотную слева от кнопки звука и обе считали смещение от
+   правого края контейнера в 475px. Но у кнопки звука есть правило на узкие
+   экраны: ниже 475px она перепривязывается к правому краю самого экрана. У этой
+   такого правила не было, и на телефонах кнопка звука наезжала на неё сверху —
+   `elementFromPoint` в центре «Других игр» возвращал кнопку звука, то есть тап
+   до раздела не доходил вовсе.
+
+   Развести их отступами значило бы повторить ту же связку и ждать следующего
+   расхождения. Поэтому кнопки разнесены по разным углам: считать общий край
+   больше не нужно, и налезать нечему.
 */
 .promo-games {
 	position: fixed;
 	top: calc(1rem + env(safe-area-inset-top, 0px));
-	left: calc(50% + 237.5px - 1rem - 48px - 58px);
+	left: calc(50% - 237.5px + 1rem);
 	z-index: 10;
-	width: 48px;
-	height: 48px;
-	border-radius: 14px;
-	border: 2px solid rgba(255, 255, 255, 0.3);
-	background: rgba(255, 255, 255, 0.15);
+	width: 44px;
+	height: 44px;
+	border-radius: var(--r-control);
+	border: 1px solid var(--c-surface-border);
+	background: var(--c-surface);
 	backdrop-filter: blur(16px);
 	-webkit-backdrop-filter: blur(16px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
-	opacity: 0.7;
-	color: #fff;
+	color: var(--c-text);
+	box-shadow: 0 4px 16px rgba(7, 18, 38, 0.3);
+
+	// На узких экранах — к левому краю экрана, зеркально кнопке звука.
+	@media (max-width: 475px) {
+		left: calc(1rem + env(safe-area-inset-left, 0px));
+	}
+
+	@media (max-width: 480px) {
+		top: calc(0.75rem + env(safe-area-inset-top, 0px));
+
+		@media (max-width: 475px) {
+			left: calc(0.75rem + env(safe-area-inset-left, 0px));
+		}
+	}
 }
 
 .promo-games__icon {
@@ -696,6 +532,6 @@ const isOtherGames = ref(false)
 }
 
 .promo-games:active {
-	opacity: 0.95;
+	transform: scale(0.94);
 }
 </style>

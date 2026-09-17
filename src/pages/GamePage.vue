@@ -21,14 +21,64 @@
 						</g>
 					</svg>
 				</button>
-				<div class="game-header__time">{{ formattedTime }}</div>
+				<!--
+				   Значки вместо эмодзи ⭐ и 🌊.
+
+				   Эмодзи рисует система: на одном телефоне звезда плоская, на
+				   другом объёмная с бликом, на третьем волна синяя во всю
+				   площадку. Веса у них общего нет ни с иконкой выхода, ни с
+				   иконкой звука — те обводкой в два пикселя. Теперь все четыре
+				   значка в шапке нарисованы одинаково и красятся currentColor.
+				-->
+				<div class="game-header__time">
+					<svg
+						class="game-header__icon"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<circle cx="12" cy="13" r="8" />
+						<path d="M12 9.5V13l2.5 1.5" />
+						<path d="M9 2h6" />
+					</svg>
+					<span class="game-header__value">{{ formattedTime }}</span>
+				</div>
 				<div class="game-header__score">
-					<span class="game-header__icon">⭐</span>
-					{{ gameStore.score }}
+					<svg
+						class="game-header__icon"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path
+							d="M12 3.5l2.6 5.3 5.9.85-4.25 4.15 1 5.85L12 16.9l-5.25 2.75 1-5.85L3.5 9.65l5.9-.85z"
+						/>
+					</svg>
+					<span class="game-header__value">{{ gameStore.score }}</span>
 				</div>
 				<div class="game-header__wave">
-					<span class="game-header__icon">🌊</span>
-					{{ gameStore.waveIndex }}
+					<svg
+						class="game-header__icon"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M2 9c2.5-2.4 5-2.4 7.5 0s5 2.4 7.5 0 5-2.4 7-0.6" />
+						<path d="M2 15c2.5-2.4 5-2.4 7.5 0s5 2.4 7.5 0 5-2.4 7-0.6" />
+					</svg>
+					<span class="game-header__value">{{ gameStore.waveIndex }}</span>
 				</div>
 			</div>
 		</template>
@@ -1595,38 +1645,27 @@ async function restart(): Promise<void> {
 	box-sizing: border-box;
 	transition: all 0.3s ease;
 
-	// Danger state: tiles near top
-	&--danger {
-		// Red vignette from top
-		&::before {
-			content: '';
-			position: absolute;
-			top: 0;
-			left: 0;
-			right: 0;
-			bottom: 0;
-			background: radial-gradient(
-				ellipse at 50% 0%,
-				rgba(239, 68, 68, 0.22) 0%,
-				transparent 65%
-			);
-			pointer-events: none;
-			z-index: 0;
-			animation: danger-pulse 1.8s ease-in-out infinite;
-		}
+	/*
+	   Опасность: плитки подошли к верху.
 
+	   Отсюда убрана красная виньетка во весь экран, пульсировавшая каждые 1.8 с.
+	   Она перекрашивала и доску, и рекламную полосу, а главное — не говорила
+	   игроку ничего полезного: беда всегда в конкретной колонке, а мигал весь
+	   экран, и искать её приходилось глазами.
+
+	   Осталось два сигнала, оба точечные: подсвеченная колонка в индикаторе
+	   внизу — она и пульсирует, — и таймер в шапке, который меняет цвет. Больше
+	   ничего на экране не дёргается.
+	*/
+	&--danger {
 		.game-header {
 			&__time {
-				background: linear-gradient(
-					135deg,
-					rgba(239, 68, 68, 0.75) 0%,
-					rgba(220, 38, 38, 0.75) 100%
-				);
-				border-color: rgba(248, 113, 113, 0.6);
-				box-shadow:
-					0 4px 20px rgba(239, 68, 68, 0.5),
-					inset 0 1px 0 rgba(255, 255, 255, 0.25);
-				animation: danger-glow 1.2s ease-in-out infinite;
+				color: var(--c-danger);
+				border-color: rgba(255, 112, 129, 0.5);
+			}
+
+			&__time .game-header__icon {
+				color: var(--c-danger);
 			}
 		}
 	}
@@ -1693,6 +1732,12 @@ async function restart(): Promise<void> {
 		   в неё, так что складывать больше нечего.
 		*/
 		min-height: var(--ad-band);
+		/*
+		   Отбивка от игрового поля. По брифу зона должна стоять отдельно, а не
+		   примыкать к нише вплотную: иначе полоса читается как её продолжение, а
+		   объявление — как часть игры.
+		*/
+		margin-top: 8px;
 
 		@media (max-width: 640px) {
 			gap: 0.4rem;
@@ -1705,25 +1750,37 @@ async function restart(): Promise<void> {
 		grid-row: 1;
 		flex: 1;
 		min-height: 0;
-		/* Desaturated board well: tiles stay the hero; soft vignette + inner depth */
+		/*
+		   Ниша под доску.
+
+		   Была непрозрачной серо-синей плитой (#4a5568 → #1e293b): небо за ней
+		   пропадало совсем, и экран распадался на «картинку сверху» и «серый
+		   прямоугольник посередине». Теперь ниша полупрозрачная — небо в ней
+		   угадывается, но приглушено настолько, чтобы не спорить с плитками.
+
+		   Глубину держат две внутренние тени: светлая линия по верхней кромке и
+		   мягкая тёмная под ней. Вместе они читаются как углубление, а не как
+		   наклейка поверх фона.
+		*/
 		background:
 			radial-gradient(
 				ellipse 115% 90% at 50% 42%,
-				rgba(0, 0, 0, 0.14) 0%,
-				transparent 58%
+				rgba(7, 18, 38, 0.18) 0%,
+				transparent 60%
 			),
 			linear-gradient(
 				180deg,
-				rgba(255, 255, 255, 0.05) 0%,
-				transparent 28%
-			),
-			linear-gradient(180deg, #4a5568 0%, #334155 42%, #1e293b 100%);
+				rgba(20, 39, 79, 0.72) 0%,
+				rgba(12, 24, 52, 0.84) 100%
+			);
 		box-shadow:
-			inset 0 2px 4px rgba(0, 0, 0, 0.2),
-			inset 0 1px 0 rgba(255, 255, 255, 0.06),
-			0 8px 28px rgba(0, 0, 0, 0.32);
-		border: 1px solid rgba(0, 0, 0, 0.22);
-		border-radius: 20px;
+			inset 0 1px 0 rgba(255, 255, 255, 0.14),
+			inset 0 6px 16px rgba(7, 18, 38, 0.45),
+			0 8px 28px rgba(7, 18, 38, 0.35);
+		border: 1px solid var(--c-surface-border);
+		border-radius: var(--r-panel);
+		backdrop-filter: blur(2px);
+		-webkit-backdrop-filter: blur(2px);
 		position: relative;
 		z-index: 1;
 		width: 100%;
@@ -1890,47 +1947,23 @@ async function restart(): Promise<void> {
 	&__exit {
 		width: 44px;
 		height: 44px;
-		border-radius: 12px;
-		border: 2px solid rgba(255, 255, 255, 0.3);
-		background: linear-gradient(
-			135deg,
-			rgba(255, 255, 255, 0.2) 0%,
-			rgba(255, 255, 255, 0.1) 100%
-		);
+		border-radius: var(--r-control);
+		border: 1px solid var(--c-surface-border);
+		background: var(--c-surface);
 		backdrop-filter: blur(16px);
 		-webkit-backdrop-filter: blur(16px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		cursor: pointer;
-		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		transition: transform 0.15s ease;
 		touch-action: manipulation;
 		flex-shrink: 0;
-		box-shadow:
-			0 4px 12px rgba(0, 0, 0, 0.25),
-			0 0 0 1px rgba(255, 255, 255, 0.1),
-			inset 0 1px 2px rgba(255, 255, 255, 0.2);
+		box-shadow: 0 4px 12px rgba(7, 18, 38, 0.25);
 		padding: 0;
 
-		&:hover {
-			background: linear-gradient(
-				135deg,
-				rgba(255, 255, 255, 0.3) 0%,
-				rgba(255, 255, 255, 0.2) 100%
-			);
-			transform: scale(1.1);
-			box-shadow:
-				0 6px 20px rgba(0, 0, 0, 0.35),
-				0 0 0 1px rgba(255, 255, 255, 0.15),
-				inset 0 1px 3px rgba(255, 255, 255, 0.3);
-			border-color: rgba(255, 255, 255, 0.5);
-		}
-
 		&:active {
-			transform: scale(0.95);
-			box-shadow:
-				0 2px 8px rgba(0, 0, 0, 0.25),
-				inset 0 1px 2px rgba(255, 255, 255, 0.2);
+			transform: scale(0.94);
 		}
 
 		@media (max-width: 640px) {
@@ -1941,21 +1974,18 @@ async function restart(): Promise<void> {
 		@media (max-width: 360px) {
 			width: 36px;
 			height: 36px;
-			border-radius: 10px;
 		}
 
 		@media (max-width: 320px) {
 			width: 32px;
 			height: 32px;
-			border-radius: 8px;
 		}
 	}
 
 	&__exit-icon {
 		width: 24px;
 		height: 24px;
-		color: white;
-		filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+		color: var(--c-text);
 
 		@media (max-width: 640px) {
 			width: 20px;
@@ -1978,56 +2008,68 @@ async function restart(): Promise<void> {
 	&__wave {
 		font-size: clamp(0.875rem, 3vw, 1rem);
 		font-weight: 800;
-		color: #ffffff;
-		padding: 0.45rem 0.9rem;
-		background: rgba(255, 255, 255, 0.15);
+		color: var(--c-text);
+		padding: 0.4rem 0.75rem;
+		background: var(--c-surface);
 		backdrop-filter: blur(16px);
 		-webkit-backdrop-filter: blur(16px);
-		border-radius: 18px;
-		border: 1.5px solid rgba(255, 255, 255, 0.25);
-		box-shadow:
-			0 4px 16px rgba(0, 0, 0, 0.3),
-			inset 0 1px 0 rgba(255, 255, 255, 0.25);
-		text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+		border-radius: var(--r-control);
+		border: 1px solid var(--c-surface-border);
+		box-shadow: 0 4px 14px rgba(7, 18, 38, 0.3);
 		white-space: nowrap;
 		flex-shrink: 0;
 		flex-grow: 0;
-		min-width: fit-content;
 		will-change: transform;
 		contain: layout style paint;
 		display: flex;
 		align-items: center;
 		gap: 0.35rem;
-		transition: all 0.2s ease;
+		transition: color 0.2s ease;
 
 		@media (max-width: 360px) {
 			font-size: clamp(0.75rem, 2.5vw, 0.875rem);
-			padding: 0.35rem 0.65rem;
-			border-radius: 14px;
+			padding: 0.32rem 0.55rem;
 			gap: 0.25rem;
 		}
 
 		@media (max-width: 320px) {
 			font-size: clamp(0.7rem, 2vw, 0.8rem);
-			padding: 0.3rem 0.5rem;
-			border-radius: 12px;
+			padding: 0.3rem 0.45rem;
 			gap: 0.2rem;
 		}
 	}
 
+	// Очки — единственное золотое пятно в шапке: это награда, и по брифу золотой
+	// закреплён именно за ней.
+	&__score .game-header__icon {
+		color: var(--c-gold);
+	}
+
 	&__icon {
-		font-size: 1.1em;
-		line-height: 1;
-		display: inline-block;
-		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+		width: 16px;
+		height: 16px;
+		flex: 0 0 auto;
+		color: var(--c-text-muted);
 
 		@media (max-width: 360px) {
-			font-size: 1em;
+			width: 14px;
+			height: 14px;
 		}
+	}
 
-		@media (max-width: 320px) {
-			font-size: 0.95em;
-		}
+	/*
+	   Цифры не должны двигать соседей.
+
+	   Площадки жались по содержимому, поэтому с ростом счёта с 9 до 10 вся
+	   шапка разъезжалась, а на каждом тике таймера подрагивала. Моноширинные
+	   цифры убирают дрожь внутри числа, минимальная ширина — скачок самой
+	   площадки.
+	*/
+	&__value {
+		font-variant-numeric: tabular-nums;
+		font-feature-settings: 'tnum' 1;
+		min-width: 2.2ch;
+		text-align: right;
 	}
 }
 
@@ -2089,7 +2131,7 @@ async function restart(): Promise<void> {
 	&__bonus {
 		font-size: clamp(1.25rem, 4.5vw, 1.5rem);
 		font-weight: 800;
-		color: #fde047;
+		color: var(--c-gold);
 		text-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 	}
 }
@@ -2103,13 +2145,22 @@ async function restart(): Promise<void> {
 	opacity: 0;
 }
 
+/*
+   Экран поражения.
+
+   Он растянут по игровой области, но останавливается над рекламной зоной, а не
+   поверх неё. Раньше доходил до самого низа — и накрывал кросс-промо ровно в тот
+   момент, когда оно единственный раз и становится нажимаемым: `AdSlot` получает
+   `interactive` по `isGameOver`. Полоса лежала под затемнением с блюром, тап до
+   неё не доходил, и увидеть её было нельзя.
+*/
 .game-overlay {
 	position: absolute;
 	top: 0;
 	left: 0;
 	right: 0;
-	bottom: 0;
-	background: rgba(0, 0, 0, 0.75);
+	bottom: calc(var(--ad-band, 56px) + 8px);
+	background: rgba(8, 18, 45, 0.75);
 	backdrop-filter: blur(12px);
 	-webkit-backdrop-filter: blur(12px);
 	display: flex;
@@ -2119,25 +2170,25 @@ async function restart(): Promise<void> {
 	animation: game-overlay-fade 0.35s ease-out;
 
 	&__content {
+		// Навигацкая панель вместо сине-фиолетового градиента: карточка итога
+		// должна сидеть в теме, а не быть отдельным лиловым экраном поверх неба.
 		background: linear-gradient(
 			160deg,
-			rgba(30, 27, 75, 0.97) 0%,
-			rgba(49, 46, 129, 0.95) 50%,
-			rgba(30, 27, 75, 0.97) 100%
+			rgba(20, 39, 79, 0.96) 0%,
+			rgba(12, 24, 52, 0.97) 100%
 		);
 		backdrop-filter: blur(24px);
 		-webkit-backdrop-filter: blur(24px);
 		padding: clamp(2rem, 5vw, 2.75rem) clamp(2rem, 5vw, 3rem);
-		border-radius: 28px;
+		border-radius: var(--r-panel);
 		max-width: min(500px, 80vw);
 		width: 70%;
 		text-align: center;
-		color: white;
-		border: 2px solid rgba(255, 255, 255, 0.18);
+		color: var(--c-text);
+		border: 1px solid var(--c-surface-border);
 		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.2),
-			0 24px 60px rgba(0, 0, 0, 0.7),
-			0 0 0 1px rgba(255, 255, 255, 0.06);
+			inset 0 1px 0 rgba(255, 255, 255, 0.16),
+			0 24px 60px rgba(7, 18, 38, 0.6);
 		animation: game-overlay-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) 0.05s both;
 	}
 
@@ -2150,13 +2201,12 @@ async function restart(): Promise<void> {
 		justify-content: center;
 		font-size: 1.8rem;
 		font-weight: 700;
-		color: #ffffff;
-		background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+		// Кружок был залит красным и светился на 28px. Поражение и так понятно
+		// по заголовку; знак должен его помечать, а не кричать.
+		color: var(--c-danger);
+		background: rgba(255, 112, 129, 0.16);
 		border-radius: 50%;
-		border: 3px solid rgba(255, 255, 255, 0.3);
-		box-shadow:
-			0 0 28px rgba(239, 68, 68, 0.5),
-			inset 0 1px 0 rgba(255, 255, 255, 0.3);
+		border: 2px solid rgba(255, 112, 129, 0.45);
 	}
 
 	&__title {
@@ -2171,14 +2221,14 @@ async function restart(): Promise<void> {
 	&__score {
 		margin: 0 0 2rem;
 		font-size: 1.2rem;
-		color: rgba(255, 255, 255, 0.8);
+		color: var(--c-text-muted);
 		line-height: 1.5;
 
 		strong {
 			font-size: 1.8rem;
 			font-weight: 900;
-			color: #fde047;
-			text-shadow: 0 0 20px rgba(253, 224, 71, 0.5);
+			font-variant-numeric: tabular-nums;
+			color: var(--c-gold);
 		}
 	}
 }
@@ -2193,13 +2243,11 @@ async function restart(): Promise<void> {
 	flex-direction: column;
 	gap: 0.3rem;
 	padding: 0.35rem 1px 0.3rem;
-	border-radius: 12px;
-	background: linear-gradient(
-		135deg,
-		rgba(10, 12, 28, 0.78) 0%,
-		rgba(35, 21, 62, 0.74) 100%
-	);
-	border: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: var(--r-control);
+	// Фиолетовая половина градиента ушла: она подкрашивала зелёные столбики в
+	// сливовый, и «всё спокойно» переставало читаться как спокойно.
+	background: var(--c-surface);
+	border: 1px solid var(--c-surface-border);
 	backdrop-filter: blur(8px);
 	-webkit-backdrop-filter: blur(8px);
 }
@@ -2244,14 +2292,38 @@ async function restart(): Promise<void> {
 	);
 }
 
+/*
+   Колонка, до которой осталось меньше всего. Пульсирует здесь и только здесь:
+   раньше вместо этого мигал весь экран, и понять, какая колонка опасная, было
+   нельзя — а она отмечена ровно тут.
+*/
 .column-danger-indicator__col--active .column-danger-indicator__fill {
 	background: linear-gradient(
 		180deg,
-		rgba(248, 113, 113, 1) 0%,
-		rgba(239, 68, 68, 0.95) 100%
+		var(--c-danger) 0%,
+		rgba(255, 112, 129, 0.9) 100%
 	);
 	transform: translateY(-1px);
-	box-shadow: 0 0 10px rgba(239, 68, 68, 0.45);
+	animation: danger-column-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes danger-column-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 6px rgba(255, 112, 129, 0.35);
+		opacity: 0.85;
+	}
+	50% {
+		box-shadow: 0 0 14px rgba(255, 112, 129, 0.75);
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.column-danger-indicator__col--active .column-danger-indicator__fill {
+		animation: none;
+		opacity: 1;
+	}
 }
 
 @keyframes game-overlay-fade {
@@ -2320,32 +2392,25 @@ async function restart(): Promise<void> {
 	justify-content: center;
 	gap: 0.5rem;
 	cursor: pointer;
-	transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+	transition: transform 0.15s ease;
 	touch-action: manipulation;
 	-webkit-tap-highlight-color: transparent;
-	background: linear-gradient(135deg, #ff7ad9 0%, #ff4fb0 100%);
-	border: 2px solid rgba(255, 255, 255, 0.3);
+	// Та же сине-голубая пара, что у кнопки Play на старте: это главное действие
+	// экрана, и оно должно выглядеть одинаково в обоих местах.
+	background: linear-gradient(135deg, var(--c-blue) 0%, var(--c-cyan) 100%);
+	border: 1px solid rgba(255, 255, 255, 0.28);
 	padding: 1.1rem 2.5rem;
 	font-size: 1.2rem;
 	font-weight: 800;
-	border-radius: 20px;
+	border-radius: var(--r-panel);
 	box-shadow:
-		0 6px 24px rgba(236, 72, 153, 0.5),
-		inset 0 1px 0 rgba(255, 255, 255, 0.35);
-	color: #fff;
-	text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-
-	&:hover {
-		background: linear-gradient(135deg, #ff92e3 0%, #ff6cc4 100%);
-		box-shadow:
-			0 8px 32px rgba(236, 72, 153, 0.65),
-			inset 0 1px 0 rgba(255, 255, 255, 0.4);
-		transform: translateY(-3px) scale(1.02);
-	}
+		0 10px 24px rgba(7, 18, 38, 0.45),
+		inset 0 2px 0 rgba(255, 255, 255, 0.28);
+	color: var(--c-text);
+	text-shadow: 0 1px 4px rgba(7, 18, 38, 0.35);
 
 	&:active {
-		transform: scale(0.95);
-		box-shadow: 0 2px 12px rgba(236, 72, 153, 0.4);
+		transform: scale(0.96);
 	}
 
 	&__icon {
@@ -2375,7 +2440,7 @@ async function restart(): Promise<void> {
 		width: 56px;
 		height: 56px;
 		border: 5px solid rgba(255, 255, 255, 0.2);
-		border-top-color: #ff7ad9;
+		border-top-color: var(--c-cyan);
 		border-radius: 50%;
 		animation: generation-loading-spin 0.8s linear infinite;
 	}
@@ -2403,29 +2468,9 @@ async function restart(): Promise<void> {
 	}
 }
 
-@keyframes danger-pulse {
-	0%,
-	100% {
-		opacity: 0.15;
-	}
-	50% {
-		opacity: 0.25;
-	}
-}
-
-@keyframes danger-glow {
-	0%,
-	100% {
-		box-shadow:
-			0 4px 16px rgba(239, 68, 68, 0.4),
-			0 0 0 1px rgba(255, 255, 255, 0.1),
-			inset 0 1px 2px rgba(255, 255, 255, 0.2);
-	}
-	50% {
-		box-shadow:
-			0 6px 24px rgba(239, 68, 68, 0.6),
-			0 0 0 1px rgba(255, 255, 255, 0.15),
-			inset 0 1px 3px rgba(255, 255, 255, 0.3);
-	}
-}
+/*
+   Кейфреймы danger-pulse и danger-glow удалены вместе со своими правилами:
+   первый мигал виньеткой во весь экран, второй раскачивал свечение таймера.
+   Оба заменены одной пульсацией на опасной колонке — см. danger-column-pulse.
+*/
 </style>

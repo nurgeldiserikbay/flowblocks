@@ -5,6 +5,7 @@
 
 import { Application, Container } from 'pixi.js'
 import { createTileTextures, type TileTextures } from './textures/TileAtlas'
+import { createUiTextures, type UiTextures } from './textures/UiTextures'
 import { warmTextures } from './utils/warmup'
 
 export interface PixiServiceOptions {
@@ -32,6 +33,7 @@ class PixiServiceClass {
 	private startSceneContainer: Container | null = null
 	private gameSceneContainer: Container | null = null
 	private tileTextures: TileTextures | null = null
+	private uiTextures: UiTextures | null = null
 	private hostElement: HTMLElement | null = null
 	private canvas: HTMLCanvasElement | null = null
 	private isInitialized = false
@@ -98,7 +100,12 @@ class PixiServiceClass {
 
 		// Загружаем и создаем текстуры
 		const assetsLoadedTime = performance.now()
-		this.tileTextures = await createTileTextures(this.app)
+		const [tileTextures, uiTextures] = await Promise.all([
+			createTileTextures(this.app),
+			createUiTextures(),
+		])
+		this.tileTextures = tileTextures
+		this.uiTextures = uiTextures
 
 		// Прогреваем текстуры GPU
 		const warmupStartTime = performance.now()
@@ -232,10 +239,25 @@ class PixiServiceClass {
 	}
 
 	/**
+	 * Получить накладки: кольцо выбора, искру, вспышку
+	 */
+	getUiTextures(): UiTextures {
+		if (!this.uiTextures) {
+			throw new Error('Ui textures not initialized')
+		}
+		return this.uiTextures
+	}
+
+	/**
 	 * Проверить, инициализирован ли сервис
 	 */
 	isReady(): boolean {
-		return this.isInitialized && this.app !== null && this.tileTextures !== null
+		return (
+			this.isInitialized &&
+			this.app !== null &&
+			this.tileTextures !== null &&
+			this.uiTextures !== null
+		)
 	}
 
 	/**
@@ -260,6 +282,7 @@ class PixiServiceClass {
 		this.startSceneContainer = null
 		this.gameSceneContainer = null
 		this.tileTextures = null
+		this.uiTextures = null
 		this.isInitialized = false
 	}
 }

@@ -16,6 +16,27 @@
 */
 :root {
 	--ad-band: calc(var(--ad-slot, 56px) + var(--ad-inset, 0px));
+
+	/*
+	   Палитра из дизайн-пака (_docs/_gpt-brief/native-redesign).
+
+	   Прежняя тема была «неоновый веб»: сине-фиолетовый градиент во весь экран
+	   плюс три цветных радиальных пятна поверх, и на этом фоне восемь цветов
+	   плиток спорили с подложкой. Новая тема — спокойное небо: тёмный навигацкий
+	   синий держит фон, акценты только голубой и золотой, а цвет остаётся за
+	   плитками.
+	*/
+	--c-navy: #111b3a;
+	--c-surface: rgba(20, 39, 79, 0.82);
+	--c-surface-border: rgba(255, 255, 255, 0.16);
+	--c-cyan: #58d6dd;
+	--c-blue: #4c8fe8;
+	--c-gold: #ffd66c;
+	--c-text: #f7faff;
+	--c-text-muted: #b8c8e8;
+	--c-danger: #ff7081;
+	--r-panel: 20px;
+	--r-control: 14px;
 }
 
 @font-face {
@@ -74,6 +95,22 @@
 	font-weight: 900;
 }
 
+/*
+   Шрифт вордмарка. Файл лежал в проекте с самого начала, но зарегистрирован не
+   был, и надпись FlowBlocks рисовалась тем же Inter, что и весь интерфейс.
+
+   Держим его только для самого слова FlowBlocks и коротких праздничных
+   подписей. В HUD он не идёт: у него нет моноширинных цифр, и счёт бы дёргался
+   на каждом очке.
+*/
+@font-face {
+	font-family: 'Luckiest Guy';
+	src: url('./assets/fonts/LuckiestGuy-Regular.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+}
+
 html {
 	margin: 0;
 	padding: 0;
@@ -81,9 +118,8 @@ html {
 	height: 100%;
 	min-height: 100%;
 	overflow: hidden;
-	// Тёмный градиент фона
-	background: linear-gradient(160deg, #1e3a8a 0%, #312e81 40%, #4c1d95 100%);
-	background-attachment: fixed;
+	// Навигацкий базовый цвет: он же виден в оверскролле и за вырезом камеры.
+	background: var(--c-navy);
 	-webkit-tap-highlight-color: transparent;
 }
 
@@ -97,9 +133,7 @@ body {
 	min-height: 100dvh;
 	max-height: 100dvh;
 	overflow: hidden;
-	// Тёмный градиент фона
-	background: linear-gradient(160deg, #1e3a8a 0%, #312e81 40%, #4c1d95 100%);
-	background-attachment: fixed;
+	background: var(--c-navy);
 	position: relative;
 }
 
@@ -116,9 +150,19 @@ button {
 	height: 100dvh;
 	min-height: 100dvh;
 	max-height: 100dvh;
-	// Тёмный градиент фона
-	background: linear-gradient(160deg, #1e3a8a 0%, #312e81 40%, #4c1d95 100%);
-	background-attachment: fixed;
+	/*
+	   Небо. Кадр портретный и ставится `cover`, то есть при любом экране
+	   обрезается по краям, а спокойный центр остаётся за доской — так он и
+	   нарисован.
+
+	   Картинка висит на #app, а не на body: body под ней не двигается, а #app
+	   уже несёт safe-area-инсеты, и фон сам уходит под вырез камеры.
+	*/
+	background-color: var(--c-navy);
+	background-image: url('./assets/img/sky-portrait.webp');
+	background-size: cover;
+	background-position: center center;
+	background-repeat: no-repeat;
 	overflow: hidden;
 	padding-top: env(safe-area-inset-top, 0px);
 	padding-bottom: 0;

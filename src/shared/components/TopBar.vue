@@ -56,10 +56,13 @@ function toggleSound() {
 	width: 100%;
 	position: relative;
 	z-index: 10;
-	background: rgba(0, 0, 0, 0.2);
+	// Одна матовая полоса на всю ширину: шапка должна читаться как подложка под
+	// показатели, а не как ещё один цветной элемент поверх неба.
+	background: rgba(8, 18, 45, 0.55);
 	backdrop-filter: blur(20px);
-	border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+	-webkit-backdrop-filter: blur(20px);
+	border-bottom: 1px solid var(--c-surface-border);
+	box-shadow: 0 4px 16px rgba(7, 18, 38, 0.25);
 	box-sizing: border-box;
 	gap: 1rem;
 
@@ -98,36 +101,22 @@ function toggleSound() {
 	&__sound {
 		width: 44px;
 		height: 44px;
-		border-radius: 12px;
-		border: 2px solid rgba(255, 255, 255, 0.3);
-		background: linear-gradient(
-			135deg,
-			rgba(255, 255, 255, 0.2) 0%,
-			rgba(255, 255, 255, 0.1) 100%
-		);
+		border-radius: var(--r-control);
+		border: 1px solid var(--c-surface-border);
+		background: var(--c-surface);
 		backdrop-filter: blur(10px);
+		-webkit-backdrop-filter: blur(10px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		cursor: pointer;
-		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		transition: transform 0.15s ease;
 		touch-action: manipulation;
 		flex-shrink: 0;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-
-		&:hover {
-			background: linear-gradient(
-				135deg,
-				rgba(255, 255, 255, 0.3) 0%,
-				rgba(255, 255, 255, 0.2) 100%
-			);
-			transform: scale(1.1) rotate(5deg);
-			box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
-			border-color: rgba(255, 255, 255, 0.5);
-		}
+		box-shadow: 0 4px 12px rgba(7, 18, 38, 0.25);
 
 		&:active {
-			transform: scale(0.95) rotate(0deg);
+			transform: scale(0.94);
 		}
 
 		@media (max-width: 640px) {
@@ -138,23 +127,20 @@ function toggleSound() {
 		@media (max-width: 360px) {
 			width: 36px;
 			height: 36px;
-			border-radius: 10px;
 		}
 
 		@media (max-width: 320px) {
 			width: 32px;
 			height: 32px;
-			border-radius: 8px;
 		}
 	}
 
 	&__sound-icon {
 		width: 24px;
 		height: 24px;
-		color: white;
+		color: var(--c-text);
 		stroke-linecap: round;
 		stroke-linejoin: round;
-		filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
 
 		@media (max-width: 640px) {
 			width: 20px;

@@ -36,7 +36,19 @@ import TopBar from './TopBar.vue'
 	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
 	margin-bottom: 0;
 
-	// Subtle decorative overlay for depth
+	/*
+	   Затемнение неба под игрой.
+
+	   Здесь было три цветных радиальных пятна — синее, фиолетовое и розовое, по
+	   30% каждое, — и они перекрашивали весь экран. На доске из восьми цветов
+	   это читалось как грязь: розовые плитки стояли в розовом пятне, синие в
+	   синем, и разница между ними падала.
+
+	   Теперь ровно один слой навигацкого синего в 18%. Задача у него не
+	   украшать, а увести небо на шаг назад, чтобы цифры на плитках держали
+	   контраст. Ставится только здесь, то есть только в партии: на стартовой
+	   странице небо показывается как есть.
+	*/
 	&::before {
 		content: '';
 		position: fixed;
@@ -44,22 +56,7 @@ import TopBar from './TopBar.vue'
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background:
-			radial-gradient(
-				circle at 20% 30%,
-				rgba(59, 130, 246, 0.3) 0%,
-				transparent 50%
-			),
-			radial-gradient(
-				circle at 80% 70%,
-				rgba(139, 92, 246, 0.3) 0%,
-				transparent 50%
-			),
-			radial-gradient(
-				circle at 50% 50%,
-				rgba(236, 72, 153, 0.25) 0%,
-				transparent 50%
-			);
+		background: rgba(8, 18, 45, 0.18);
 		pointer-events: none;
 		z-index: 0;
 	}
