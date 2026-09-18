@@ -1765,17 +1765,17 @@ async function restart(): Promise<void> {
 		background:
 			radial-gradient(
 				ellipse 115% 90% at 50% 42%,
-				rgba(7, 18, 38, 0.18) 0%,
+				rgba(7, 18, 38, 0.12) 0%,
 				transparent 60%
 			),
 			linear-gradient(
 				180deg,
-				rgba(20, 39, 79, 0.72) 0%,
-				rgba(12, 24, 52, 0.84) 100%
+				rgba(34, 62, 118, 0.5) 0%,
+				rgba(20, 39, 79, 0.62) 100%
 			);
 		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.14),
-			inset 0 6px 16px rgba(7, 18, 38, 0.45),
+			inset 0 1px 0 rgba(255, 255, 255, 0.18),
+			inset 0 6px 16px rgba(7, 18, 38, 0.32),
 			0 8px 28px rgba(7, 18, 38, 0.35);
 		border: 1px solid var(--c-surface-border);
 		border-radius: var(--r-panel);
