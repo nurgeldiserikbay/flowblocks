@@ -174,16 +174,20 @@ const isOtherGames = ref(false)
 	overflow-x: hidden;
 	overflow-y: auto;
 	/*
-	   Небо со своим медленным дрейфом.
+	   Небо — тот же достроенный кадр, что и у #app; почему он достроен, написано
+	   там.
 
-	   Тот же кадр, что у #app, но здесь он чуть крупнее `cover` и еле заметно
-	   ползёт: кадр нарисован с пустым центром под кнопку, и неподвижным он
-	   выглядит как обои. Двенадцать секунд на проход — нижняя граница
-	   заметности; быстрее уже читается как качание экрана.
+	   Медленного дрейфа здесь больше нет. Он двигал кадр по горизонтали, а
+	   запаса по ширине теперь нет: кадр и так вписан целиком, и сдвиг открыл бы
+	   поле сбоку. Между «кадр целиком» и «кадр шевелится» выбрано первое —
+	   обрезанные по краям острова было видно, а дрейф в двенадцать секунд не
+	   замечал никто.
 	*/
-	background: url('@/assets/img/sky-portrait.webp') center center / cover
-		no-repeat var(--c-navy);
-	animation: skyDrift 12s ease-in-out infinite alternate;
+	background-color: var(--c-navy);
+	background-image: url('@/assets/img/sky-portrait.webp');
+	background-size: cover;
+	background-position: bottom center;
+	background-repeat: no-repeat;
 	padding-top: env(safe-area-inset-top, 0px);
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 	margin-top: calc(-1 * env(safe-area-inset-top, 0px));
@@ -347,14 +351,8 @@ const isOtherGames = ref(false)
 	}
 }
 
-@keyframes skyDrift {
-	from {
-		background-position: 48% 46%;
-	}
-	to {
-		background-position: 52% 54%;
-	}
-}
+// Кейфрейм skyDrift удалён вместе с дрейфом: двигать кадр по горизонтали стало
+// нечем, он теперь ровно по ширине экрана.
 
 // Play button container
 .play-button-container {

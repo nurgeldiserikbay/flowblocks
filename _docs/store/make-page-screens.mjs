@@ -39,6 +39,42 @@ function findPatchright() {
 	return 'file:///' + hit.split(String.fromCharCode(92)).join('/')
 }
 
+/**
+ * Браузер берём свой, а не тот, что прописан внутри patchright.
+ *
+ * Расширение обновляется само и приносит patchright, который ждёт ровно свою
+ * сборку Chromium, — а скачать её некому, `npx playwright install` тут никто не
+ * запускает. Один раз прогон так и слёг: расширение уехало с 3.24.68 на 3.24.71,
+ * и запуск упал на «Executable doesn't exist ... chromium_headless_shell-1243».
+ *
+ * Установленные сборки лежат рядом и работают; берём самую свежую из них.
+ * Headless-shell предпочтительнее полного chrome: он для того и собран.
+ */
+function findChromium() {
+	const root = 'C:/Users/nurik/AppData/Local/ms-playwright'
+	if (!fs.existsSync(root)) return undefined
+
+	const builds = fs
+		.readdirSync(root)
+		.map((d) => /^(chromium(?:_headless_shell)?)-(\d+)$/.exec(d))
+		.filter(Boolean)
+		.map((m) => ({
+			dir: m[0],
+			headless: m[1].includes('headless'),
+			build: Number(m[2]),
+		}))
+		// Сначала по свежести сборки, при равной — headless-shell.
+		.sort((a, b) => b.build - a.build || Number(b.headless) - Number(a.headless))
+
+	for (const b of builds) {
+		const exe = b.headless
+			? path.join(root, b.dir, 'chrome-headless-shell-win64/chrome-headless-shell.exe')
+			: path.join(root, b.dir, 'chrome-win64/chrome.exe')
+		if (fs.existsSync(exe)) return exe
+	}
+	return undefined
+}
+
 // -------------------------------------------------------------- сервер ----
 
 const vite = spawn(
@@ -90,7 +126,7 @@ fs.mkdirSync(OUT, { recursive: true })
 for (const f of fs.readdirSync(OUT)) fs.unlinkSync(path.join(OUT, f))
 
 const { chromium } = await import(findPatchright())
-const browser = await chromium.launch()
+const browser = await chromium.launch({ executablePath: findChromium() })
 const page = await browser.newPage({
 	viewport: { width: 390, height: 844 },
 	deviceScaleFactor: 2,
