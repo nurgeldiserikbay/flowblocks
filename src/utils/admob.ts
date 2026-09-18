@@ -100,11 +100,27 @@ class Admob {
 	 * через `env(safe-area-inset-bottom)`. Переменной присваивается выражение,
 	 * а не результат: инсет меняется вместе с системными панелями, и вычислять
 	 * его должен CSS. Требует `viewport-fit=cover` в `index.html`.
+	 *
+	 * Берётся максимум из двух источников, и это не перестраховка. Capacitor 8
+	 * сам вычисляет безопасную зону и кладёт её в собственные переменные
+	 * `--safe-area-inset-*` (SystemBars.java, injectSafeAreaCSS), а нативный
+	 * `env()` при этом работает не всегда: в ветке без passthrough — старый
+	 * WebView или невидимый плагину `viewport-fit` — Capacitor отодвигает вебвью
+	 * от системных панелей сам и обнуляет `env()`. Если понадеяться только на
+	 * `env()`, в такой ветке резерв окажется меньше реального на высоту
+	 * навигационной панели, и баннер накроет низ поля ровно на эту величину.
+	 *
+	 * `max()` может только увеличить резерв, так что ошибиться в другую сторону
+	 * он не даёт.
 	 */
 	private setBannerInset(on: boolean) {
 		if (typeof document === 'undefined') return
 		const root = document.documentElement.style
-		if (on) root.setProperty('--ad-inset', 'env(safe-area-inset-bottom, 0px)')
+		if (on)
+			root.setProperty(
+				'--ad-inset',
+				'max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px))'
+			)
 		else root.removeProperty('--ad-inset')
 	}
 
